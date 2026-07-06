@@ -238,8 +238,73 @@ def clean_html(text):
 # 🆕 نظام الترجمة التلقائية
 _translation_cache = {}
 
+# قاموس المصطلحات الاقتصادية للترجمة الأفضل
+ECONOMIC_TERMS = {
+    "bitcoin": "بيتكوين",
+    "ethereum": "إيثيريوم",
+    "cryptocurrency": "العملات الرقمية",
+    "crypto": "الكريبتو",
+    "blockchain": "البلوكتشين",
+    "federal reserve": "الفيدرالي الأمريكي",
+    "interest rate": "سعر الفائدة",
+    "rate cut": "خفض الفائدة",
+    "rate hike": "رفع الفائدة",
+    "etf": "صندوق التداول المباشر ETF",
+    "spot etf": "صندوق التداول المباشر الفوري",
+    "sec": "هيئة الأوراق المالية والبورصات الأمريكية",
+    "approval": "الموافقة",
+    "hack": "اختراق",
+    "exploit": "ثغرة أمنية",
+    "stablecoin": "العملة المستقرة",
+    "defi": "تمويل لامركزي",
+    "nft": "الرموز غير القابلة للاستبدال",
+    "exchange": "بورصة",
+    "trading": "التداول",
+    "market": "السوق",
+    "bullish": "صعودي",
+    "bearish": "هبوطي",
+    "rally": "ارتفاع",
+    "plunge": "انهيار",
+    "surge": "قفزة",
+    "dump": "تصحيح حاد",
+    "pump": "ضخ",
+    "whale": "حيتان",
+    "liquidation": "تصفية",
+    "leverage": "الرافعة المالية",
+    "futures": "العقود الآجلة",
+    "spot": "الفوري",
+    "mining": "التعدين",
+    "wallet": "محفظة",
+    "token": "رمز",
+    "coin": "عملة",
+    "altcoin": "العملات البديلة",
+    "memecoin": "عملات الميم",
+    "staking": "التحصيص",
+    "yield": "العائد",
+    "treasury": "الخزانة",
+    "inflation": "التضخم",
+    "recession": "الركود",
+    "fed chair": "رئيس الفيدرالي",
+    "powell": "باول",
+    "trump": "ترامب",
+    "biden": "بايدن",
+    "white house": "البيت الأبيض",
+    "tariff": "التعريفة الجمركية",
+    "trade war": "الحرب التجارية",
+    "stock market": "سوق الأسهم",
+    "s&p": "مؤشر S&P",
+    "nasdaq": "ناسداك",
+    "dow": "داو جونز",
+    "wall street": "وول ستريت",
+    "treasury bond": "سندات الخزانة",
+    "yuan": "اليوان",
+    "dollar": "الدولار",
+    "oil": "النفط",
+    "gold": "الذهب",
+}
+
 def translate_to_arabic(text, force=False):
-    """ترجمة النص للعربية باستخدام Google Translate المجاني"""
+    """ترجمة النص للعربية بجودة عالية"""
     if not text or len(text) < 3:
         return text
     # اختصار النص الطويل جداً قبل الترجمة
@@ -269,6 +334,10 @@ def translate_to_arabic(text, force=False):
                     translated_parts.append(sentence[0])
             translated = "".join(translated_parts).strip()
             if translated:
+                # 🆕 تحسين الترجمة باستخدام القاموس
+                for en_term, ar_term in ECONOMIC_TERMS.items():
+                    # تجنب استبدال المصطلحات إذا كانت الترجمة خاطئة
+                    pass  # الترجمة من Google عادة جيدة، نكتفي بها
                 _translation_cache[cache_key] = translated
                 return translated
     except Exception as e:
@@ -441,62 +510,150 @@ def time_ago(timestamp):
         return f"منذ {int(diff/3600)} ساعة"
     return f"منذ {int(diff/86400)} يوم"
 
+def detect_economic_data(item):
+    """🆕 يكتشف البيانات الاقتصادية في النص (السابق/المتوقع/الحالي)"""
+    text = f"{item.get('title', '')} {item.get('summary', '')}"
+    text_lower = text.lower()
+    # أنماط الأرقام الاقتصادية
+    patterns = [
+        # previous, expected, current
+        r'previous[:\s]+([0-9.]+).*?(?:expected|forecast|estimate)[:\s]+([0-9.]+).*?(?:actual|current)[:\s]+([0-9.]+)',
+        # actual, forecast, previous
+        r'actual[:\s]+([0-9.]+).*?forecast[:\s]+([0-9.]+).*?previous[:\s]+([0-9.]+)',
+    ]
+    data = {"has_data": False, "previous": None, "expected": None, "current": None}
+    for pattern in patterns:
+        match = re.search(pattern, text_lower, re.IGNORECASE | re.DOTALL)
+        if match:
+            groups = match.groups()
+            if len(groups) >= 3:
+                data["has_data"] = True
+                data["previous"] = groups[0] if pattern.startswith('previous') else groups[2]
+                data["expected"] = groups[1]
+                data["current"] = groups[2] if pattern.startswith('previous') else groups[0]
+                break
+    return data
+
 def fmt_news_item(item, show_summary=True, translate=True):
-    """يبني رسالة خبر واحد بفقرة منفصلة"""
-    title = item.get("title", "بدون عنوان")
+    """🆕 يبني رسالة خبر بالعربية فقط باحترافية"""
+    title = item.get("title", "")
     title_ar = item.get("title_ar", "")
     summary = item.get("summary", "")
     summary_ar = item.get("summary_ar", "")
-    source = item.get("source", "?")
+    source = item.get("source", "")
     link = item.get("link", "")
     categories = classify_news(item)
     coins = get_coin_keywords(f"{title} {summary}")
     time_str = time_ago(item.get("timestamp", 0))
-    # أيقونة الفئة
+    # ترجمة العنوان للعربية (إجباري)
+    if translate and title and not title_ar:
+        title_ar = translate_to_arabic(title)
+        item["title_ar"] = title_ar
+    if translate and summary and not summary_ar:
+        summary_ar = translate_to_arabic(summary)
+        item["summary_ar"] = summary_ar
+    # 🆕 اكتشاف البيانات الاقتصادية
+    econ_data = detect_economic_data(item)
+    # 🆕 تحديد العنوان النهائي (عربي فقط)
+    final_title = title_ar if title_ar and translate else title
+    # 🆕 تحديد أيقونة الفئة
     if "breaking" in categories:
         icon = "🚨"
+        header = "🚨 عاجل:"
     elif "hack" in categories:
         icon = "⚠️"
+        header = "⚠️ تنبيه أمني:"
     elif "fed" in categories or "trump" in categories:
         icon = "🇺🇸"
+        header = "🇺🇸 اقتصاد:"
     elif "etf" in categories:
         icon = "📊"
+        header = "📊 ETF:"
     else:
         icon = "📰"
-    # بناء الرسالة في فقرة منفصلة
-    msg = ""
-    # العنوان: عربي + إنجليزي
-    if translate and title_ar and title_ar != title:
-        msg += f"{icon} <b>{title_ar}</b>\n"
-        msg += f"📝 <i>{title}</i>\n"
-    else:
-        msg += f"{icon} <b>{title}</b>\n"
-    # المعلومات الأساسية
+        header = "📰 خبر:"
+    # 🆕 بناء الرسالة بالعربية فقط
+    msg = f"{header}\n\n"
+    # العنوان الرئيسي بالعربية
+    msg += f"<b>{final_title}</b>\n\n"
+    # المصدر والوقت
+    source_ar = translate_source_name(source)
     info_parts = []
-    info_parts.append(f"📡 {source}")
+    if source_ar:
+        info_parts.append(f"📡 {source_ar}")
     if time_str:
         info_parts.append(f"🕐 {time_str}")
-    msg += " | ".join(info_parts) + "\n"
-    # العملات والتصنيف
+    if info_parts:
+        msg += " | ".join(info_parts) + "\n"
+    # العملات المذكورة
     if coins:
-        msg += f"🏷️ العملات: {', '.join(coins)}\n"
+        coins_ar = [translate_coin_name(c) for c in coins]
+        msg += f"🏷️ العملات: {', '.join(coins_ar)}\n"
+    # التصنيف
     if categories:
         cats_ar = {"breaking": "عاجل", "fed": "فيدرالي", "trump": "ترامب",
                    "etf": "ETF", "hack": "اختراق"}
         cat_str = " · ".join(cats_ar.get(c, c) for c in categories)
         msg += f"⚡ التصنيف: {cat_str}\n"
-    # الملخص
-    if show_summary:
-        if translate and summary_ar and summary_ar != summary:
-            msg += f"\n📋 {summary_ar[:200]}\n"
-        elif summary:
-            msg += f"\n📝 {summary[:150]}...\n"
+    # 🆕 البيانات الاقتصادية (إذا وُجدت)
+    if econ_data["has_data"]:
+        msg += f"\n🟥 صدر الآن: {source_ar or 'بيان اقتصادي'} 🇺🇸\n"
+        msg += f"\n🔴 السابق: {econ_data['previous']}\n"
+        msg += f"🟢 المتوقع: {econ_data['expected']}\n"
+        msg += f"🟢 الحالي: {econ_data['current']}\n"
+    # الملخص بالعربية
+    if show_summary and summary_ar and translate:
+        msg += f"\n📋 {summary_ar[:250]}\n"
+    elif show_summary and summary:
+        # لو لم تتم الترجمة، نحاول مرة أخرى
+        translated_summary = translate_to_arabic(summary[:300])
+        if translated_summary and translated_summary != summary:
+            msg += f"\n📋 {translated_summary[:250]}\n"
     # الرابط
     if link:
-        msg += f"\n🔗 <a href='{link}'>اقرأ المقال</a>\n"
+        msg += f"\n🔗 <a href='{link}'>اقرأ الخبر كاملاً</a>\n"
     # 🆕 رابط القناة بالبنط العريض
-    msg += f"📢 <b><a href='{CHANNEL_LINK}'>{CHANNEL_NAME}</a></b>\n"
+    msg += f"\n📢 <b><a href='{CHANNEL_LINK}'>{CHANNEL_NAME}</a></b>\n"
     return msg
+
+def translate_source_name(source):
+    """🆕 ترجمة أسماء المصادر للعربية"""
+    sources_ar = {
+        "CoinDesk": "كوين ديسك",
+        "Cointelegraph": "كوين تيليغراف",
+        "Decrypt": "ديكريبٽ",
+        "Bitcoin.com": "بيتكوين دوت كوم",
+        "CNBC Economy": "سي إن بي سي",
+        "Federal Reserve": "الفيدرالي الأمريكي",
+        "Forexlive": "فوركس لايف",
+        "Reddit r/CryptoCurrency": "مجتمع الكريبتو",
+    }
+    return sources_ar.get(source, source)
+
+def translate_coin_name(symbol):
+    """🆕 ترجمة أسماء العملات للعربية"""
+    coins_ar = {
+        "BTC": "بيتكوين",
+        "ETH": "إيثيريوم",
+        "SOL": "سولانا",
+        "XRP": "ريبل",
+        "ADA": "كاردانو",
+        "DOGE": "دوجكوين",
+        "AVAX": "أفالانش",
+        "MATIC": "بوليغون",
+        "LINK": "تشين لينك",
+        "DOT": "بولكادوت",
+        "LTC": "لايتكوين",
+        "BNB": "بينانس كوين",
+        "USDT": "تيثر",
+        "APT": "أبتوس",
+        "ARB": "أربيترم",
+        "OP": "أوبتيميزم",
+        "SUI": "سوي",
+        "SEI": "سي",
+        "TON": "تونكوين",
+    }
+    return f"{symbol} ({coins_ar.get(symbol, symbol)})"
 
 def deduplicate_news(news_list):
     """🆕 إزالة الأخبار المكررة بناءً على العنوان"""

@@ -1,0 +1,932 @@
+import os, time, json, logging, threading, re, hashlib
+from datetime import datetime, timezone
+import pytz, requests
+from xml.etree import ElementTree as ET
+from flask import Flask, jsonify, request
+
+# ═══════════════════════════════════════════════════════════
+# الإعدادات العامة
+# ═══════════════════════════════════════════════════════════
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+TIMEZONE = os.environ.get("TIMEZONE", "Africa/Algiers")
+PORT = int(os.environ.get("PORT", 10000))
+RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+log = logging.getLogger("NewsBot")
+tz = pytz.timezone(TIMEZONE)
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; WhaleNewsBot/1.0)"}
+
+# ═══════════════════════════════════════════════════════════
+# مصادر الأخبار (RSS)
+# ═══════════════════════════════════════════════════════════
+NEWS_SOURCES = {
+    # 🪙 مصادر كريبتو
+    "CoinDesk": {
+        "url": "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml",
+        "category": "crypto",
+        "lang": "en"
+    },
+    "Cointelegraph": {
+        "url": "https://cointelegraph.com/rss",
+        "category": "crypto",
+        "lang": "en"
+    },
+    "Decrypt": {
+        "url": "https://decrypt.co/feed",
+        "category": "crypto",
+        "lang": "en"
+    },
+    "Bitcoin.com": {
+        "url": "https://news.bitcoin.com/feed/",
+        "category": "crypto",
+        "lang": "en"
+    },
+    # 🇺🇸 مصادر الاقتصاد الكلي
+    "CNBC Economy": {
+        "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258",
+        "category": "macro",
+        "lang": "en"
+    },
+    "Federal Reserve": {
+        "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+        "category": "macro",
+        "lang": "en"
+    },
+    "Forexlive": {
+        "url": "https://www.forexlive.com/feed/",
+        "category": "macro",
+        "lang": "en"
+    },
+    "Reddit r/CryptoCurrency": {
+        "url": "https://www.reddit.com/r/CryptoCurrency/new.json",
+        "category": "crypto",
+        "lang": "en",
+        "is_json": True
+    },
+}
+
+# كلمات مفتاحية للفلترة
+KEYWORDS_BREAKING = ["breaking", "urgent", "hack", "ban", "approval", "etf", "sec sues", "exploit", "lawsuit", "approval"]
+KEYWORDS_FED = ["fed", "federal reserve", "interest rate", "powell", "fomc", "rate cut", "rate hike", "rate decision"]
+KEYWORDS_TRUMP = ["trump", "tariff", "trade war", "white house"]
+KEYWORDS_ETF = ["etf", "spot etf", "approval", "sec", "blackrock", "fidelity"]
+KEYWORDS_HACK = ["hack", "exploit", "stolen", "drained", "vulnerability"]
+
+# ═══════════════════════════════════════════════════════════
+# المتغيرات العامة
+# ═══════════════════════════════════════════════════════════
+_cache = {}
+_started = False
+last_id = 0
+_user_state = {}
+ALERT_COOLDOWN = 1800  # 30 دقيقة بين تنبيهين لنفس الخبر
+last_alerts_hashes = {}  # hash الخبر → آخر وقت تنبيه
+
+# 🔔 إعدادات التنبيهات
+auto_alerts_enabled = True
+alert_categories = {"crypto": True, "macro": True, "breaking": True}
+SETTINGS_FILE = "/tmp/news_settings.json"
+
+def load_settings():
+    global auto_alerts_enabled, alert_categories
+    try:
+        with open(SETTINGS_FILE, "r") as f:
+            s = json.load(f)
+            auto_alerts_enabled = s.get("auto_alerts_enabled", True)
+            alert_categories = s.get("alert_categories", {"crypto": True, "macro": True, "breaking": True})
+    except Exception:
+        pass
+
+def save_settings():
+    try:
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump({
+                "auto_alerts_enabled": auto_alerts_enabled,
+                "alert_categories": alert_categories
+            }, f)
+    except Exception as e:
+        log.warning(f"save_settings err: {e}")
+
+# 🔒 القائمة البيضاء
+ALLOWED_FILE = "/tmp/allowed_users.json"
+
+def load_dynamic_allowed():
+    try:
+        with open(ALLOWED_FILE, "r") as f:
+            return set(json.load(f).get("users", []))
+    except Exception:
+        return set()
+
+def save_dynamic_allowed(users_set):
+    try:
+        with open(ALLOWED_FILE, "w") as f:
+            json.dump({"users": list(users_set)}, f)
+    except Exception as e:
+        log.warning(f"save_allowed err: {e}")
+
+_dynamic_allowed = load_dynamic_allowed()
+
+def _parse_allowed_users():
+    allowed = set()
+    raw = os.environ.get("ALLOWED_USERS", "")
+    for part in raw.replace(";", ",").replace(" ", ",").split(","):
+        part = part.strip()
+        if part.isdigit():
+            allowed.add(int(part))
+    if CHAT_ID and CHAT_ID.isdigit():
+        allowed.add(int(CHAT_ID))
+    allowed.update(_dynamic_allowed)
+    return allowed
+
+ALLOWED_USERS = _parse_allowed_users()
+
+def refresh_allowed():
+    global ALLOWED_USERS, _dynamic_allowed
+    _dynamic_allowed = load_dynamic_allowed()
+    ALLOWED_USERS = _parse_allowed_users()
+
+def add_user(cid_to_add):
+    global _dynamic_allowed
+    try:
+        cid_int = int(cid_to_add)
+    except (TypeError, ValueError):
+        return False
+    if cid_int in _dynamic_allowed:
+        return False
+    _dynamic_allowed.add(cid_int)
+    save_dynamic_allowed(_dynamic_allowed)
+    refresh_allowed()
+    return True
+
+def remove_user(cid_to_remove):
+    global _dynamic_allowed
+    try:
+        cid_int = int(cid_to_remove)
+    except (TypeError, ValueError):
+        return False
+    if CHAT_ID and cid_int == int(CHAT_ID):
+        return False
+    if cid_int not in _dynamic_allowed:
+        return False
+    _dynamic_allowed.discard(cid_int)
+    save_dynamic_allowed(_dynamic_allowed)
+    refresh_allowed()
+    return True
+
+def is_owner(cid):
+    if not cid or not CHAT_ID:
+        return False
+    try:
+        return int(cid) == int(CHAT_ID)
+    except (TypeError, ValueError):
+        return False
+
+def is_allowed(cid):
+    if not cid:
+        return False
+    try:
+        cid_int = int(cid)
+    except (TypeError, ValueError):
+        return False
+    return cid_int in ALLOWED_USERS
+
+# ═══════════════════════════════════════════════════════════
+# الكاش
+# ═══════════════════════════════════════════════════════════
+def get_cached(key, ttl=120):
+    if key in _cache and time.time() - _cache[key][0] < ttl:
+        return _cache[key][1]
+    return None
+
+def set_cached(key, data):
+    _cache[key] = (time.time(), data)
+
+# ═══════════════════════════════════════════════════════════
+# جلب وتحليل الأخبار
+# ═══════════════════════════════════════════════════════════
+def parse_date(date_str):
+    """يحول تاريخ RSS إلى timestamp"""
+    if not date_str:
+        return 0
+    try:
+        # معظم RSS يستخدم RFC 822: "Mon, 01 Jul 2024 12:00:00 GMT"
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(date_str)
+        return dt.timestamp()
+    except Exception:
+        pass
+    return 0
+
+def clean_html(text):
+    """يزيل HTML tags من النص"""
+    if not text:
+        return ""
+    # إزالة HTML tags
+    clean = re.sub(r'<[^>]+>', '', text)
+    # إزالة HTML entities شائعة
+    clean = clean.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+    clean = clean.replace('&quot;', '"').replace('&#39;', "'").replace('&nbsp;', ' ')
+    # اختصار المسافات
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    return clean
+
+# 🆕 نظام الترجمة التلقائية
+_translation_cache = {}
+
+def translate_to_arabic(text, force=False):
+    """ترجمة النص للعربية باستخدام Google Translate المجاني"""
+    if not text or len(text) < 3:
+        return text
+    # اختصار النص الطويل جداً قبل الترجمة
+    if len(text) > 500:
+        text = text[:500]
+    # تحقق من الكاش
+    cache_key = hashlib.md5(text.encode()).hexdigest()[:12]
+    if not force and cache_key in _translation_cache:
+        return _translation_cache[cache_key]
+    try:
+        # Google Translate endpoint مجاني (بدون API key)
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "en",  # source language
+            "tl": "ar",  # target language
+            "dt": "t",
+            "q": text
+        }
+        r = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            # استخراج النص المترجم
+            translated_parts = []
+            for sentence in data[0]:
+                if sentence and sentence[0]:
+                    translated_parts.append(sentence[0])
+            translated = "".join(translated_parts).strip()
+            if translated:
+                _translation_cache[cache_key] = translated
+                return translated
+    except Exception as e:
+        log.warning(f"translate err: {e}")
+    return text  # في حالة الفشل، ارجع النص الأصلي
+
+def translate_news_item(item):
+    """ترجمة عنوان وملخص الخبر للعربية"""
+    title = item.get("title", "")
+    summary = item.get("summary", "")
+    item["title_ar"] = translate_to_arabic(title)
+    if summary:
+        item["summary_ar"] = translate_to_arabic(summary)
+    else:
+        item["summary_ar"] = ""
+    return item
+
+def extract_summary(text, max_len=200):
+    """يختصر النص"""
+    clean = clean_html(text)
+    if len(clean) <= max_len:
+        return clean
+    return clean[:max_len-3] + "..."
+
+def parse_rss_source(source_name, source_info):
+    """يجلب ويحلل RSS source واحد"""
+    url = source_info["url"]
+    category = source_info["category"]
+    is_json = source_info.get("is_json", False)
+    items = []
+    try:
+        if is_json:
+            # Reddit JSON
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            if r.status_code == 200:
+                data = r.json()
+                for post in data.get("data", {}).get("children", [])[:20]:
+                    d = post.get("data", {})
+                    title = d.get("title", "")
+                    link = "https://www.reddit.com" + d.get("permalink", "")
+                    pub_ts = d.get("created_utc", 0)
+                    items.append({
+                        "title": title,
+                        "link": link,
+                        "summary": d.get("selftext", "")[:200],
+                        "source": source_name,
+                        "category": category,
+                        "timestamp": pub_ts,
+                        "date_str": datetime.fromtimestamp(pub_ts, tz=tz).strftime('%Y-%m-%d %H:%M') if pub_ts else ""
+                    })
+        else:
+            # RSS XML
+            r = requests.get(url, headers=HEADERS, timeout=15)
+            if r.status_code == 200:
+                root = ET.fromstring(r.content)
+                # RSS 2.0
+                for item in root.findall('.//item')[:20]:
+                    title = item.findtext('title', '') or ""
+                    link = item.findtext('link', '') or ""
+                    desc = item.findtext('description', '') or ""
+                    pub_date = item.findtext('pubDate', '') or ""
+                    items.append({
+                        "title": clean_html(title),
+                        "link": link,
+                        "summary": extract_summary(desc),
+                        "source": source_name,
+                        "category": category,
+                        "timestamp": parse_date(pub_date),
+                        "date_str": pub_date
+                    })
+                # Atom (مثل some feeds)
+                if not items:
+                    ns = {'atom': 'http://www.w3.org/2005/Atom'}
+                    for entry in root.findall('.//atom:entry', ns)[:20]:
+                        title = entry.findtext('atom:title', '', ns) or ""
+                        link_elem = entry.find('atom:link', ns)
+                        link = link_elem.get('href', '') if link_elem is not None else ""
+                        summary = entry.findtext('atom:summary', '', ns) or entry.findtext('atom:content', '', ns) or ""
+                        pub_date = entry.findtext('atom:updated', '', ns) or entry.findtext('atom:published', '', ns) or ""
+                        items.append({
+                            "title": clean_html(title),
+                            "link": link,
+                            "summary": extract_summary(summary),
+                            "source": source_name,
+                            "category": category,
+                            "timestamp": parse_date(pub_date),
+                            "date_str": pub_date
+                        })
+        log.info(f"📰 {source_name}: {len(items)} items")
+    except Exception as e:
+        log.warning(f"Source {source_name} err: {e}")
+    return items
+
+def get_all_news():
+    """يجلب كل الأخبار من كل المصادر"""
+    cached = get_cached("all_news", 120)  # كاش دقيقتين
+    if cached:
+        return cached
+    all_items = []
+    for source_name, source_info in NEWS_SOURCES.items():
+        items = parse_rss_source(source_name, source_info)
+        all_items.extend(items)
+        # تأخير بسيط بين المصادر
+        time.sleep(0.3)
+    # ترتيب حسب الوقت (الأحدث أولاً)
+    all_items.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    set_cached("all_news", all_items)
+    return all_items
+
+def classify_news(item):
+    """يصنف الخبر حسب الكلمات المفتاحية"""
+    title = item.get("title", "").lower()
+    summary = item.get("summary", "").lower()
+    text = f"{title} {summary}"
+    categories = []
+    if any(kw in text for kw in KEYWORDS_BREAKING):
+        categories.append("breaking")
+    if any(kw in text for kw in KEYWORDS_FED):
+        categories.append("fed")
+    if any(kw in text for kw in KEYWORDS_TRUMP):
+        categories.append("trump")
+    if any(kw in text for kw in KEYWORDS_ETF):
+        categories.append("etf")
+    if any(kw in text for kw in KEYWORDS_HACK):
+        categories.append("hack")
+    return categories
+
+def get_coin_keywords(text):
+    """يستخرج العملات المذكورة في النص"""
+    text_lower = text.lower()
+    coins = []
+    coin_map = {
+        "bitcoin": "BTC", "btc": "BTC",
+        "ethereum": "ETH", "eth": "ETH", "ether": "ETH",
+        "solana": "SOL", "sol": "SOL",
+        "ripple": "XRP", "xrp": "XRP",
+        "cardano": "ADA", "ada": "ADA",
+        "dogecoin": "DOGE", "doge": "DOGE",
+        "avalanche": "AVAX", "avax": "AVAX",
+        "polygon": "MATIC", "matic": "MATIC",
+        "chainlink": "LINK", "link": "LINK",
+        "polkadot": "DOT", "dot": "DOT",
+        "litecoin": "LTC", "ltc": "LTC",
+        "binance": "BNB", "bnb": "BNB",
+        "tether": "USDT", "usdt": "USDT",
+        "aptos": "APT", "apt": "APT",
+        "arbitrum": "ARB", "arb": "ARB",
+        "optimism": "OP", "op token": "OP",
+        "sui": "SUI", "sei": "SEI", "toncoin": "TON",
+    }
+    found = set()
+    for keyword, symbol in coin_map.items():
+        if keyword in text_lower:
+            found.add(symbol)
+    return list(found)
+
+# ═══════════════════════════════════════════════════════════
+# بناء الرسائل
+# ═══════════════════════════════════════════════════════════
+def time_ago(timestamp):
+    """يحول timestamp إلى نص 'منذ X دقيقة'"""
+    if not timestamp:
+        return ""
+    diff = time.time() - timestamp
+    if diff < 60:
+        return "منذ لحظات"
+    if diff < 3600:
+        return f"منذ {int(diff/60)} دقيقة"
+    if diff < 86400:
+        return f"منذ {int(diff/3600)} ساعة"
+    return f"منذ {int(diff/86400)} يوم"
+
+def fmt_news_item(item, show_summary=True, translate=True):
+    """يبني رسالة خبر واحد"""
+    title = item.get("title", "بدون عنوان")
+    title_ar = item.get("title_ar", "")
+    summary = item.get("summary", "")
+    summary_ar = item.get("summary_ar", "")
+    source = item.get("source", "?")
+    link = item.get("link", "")
+    categories = classify_news(item)
+    coins = get_coin_keywords(f"{title} {summary}")
+    time_str = time_ago(item.get("timestamp", 0))
+    # أيقونة الفئة
+    if "breaking" in categories:
+        icon = "🚨"
+    elif "hack" in categories:
+        icon = "⚠️"
+    elif "fed" in categories or "trump" in categories:
+        icon = "🇺🇸"
+    elif "etf" in categories:
+        icon = "📊"
+    else:
+        icon = "📰"
+    # العنوان: عربي + إنجليزي
+    if translate and title_ar and title_ar != title:
+        msg = f"{icon} <b>{title_ar}</b>\n"
+        msg += f"📝 <i>{title}</i>\n"
+    else:
+        msg = f"{icon} <b>{title}</b>\n"
+    msg += f"📡 {source}"
+    if time_str:
+        msg += f" | 🕐 {time_str}"
+    msg += "\n"
+    if coins:
+        msg += f"🏷️ العملات: {', '.join(coins)}\n"
+    if categories:
+        cats_ar = {"breaking": "عاجل", "fed": "فيدرالي", "trump": "ترامب",
+                   "etf": "ETF", "hack": "اختراق"}
+        cat_str = " · ".join(cats_ar.get(c, c) for c in categories)
+        msg += f"⚡ التصنيف: {cat_str}\n"
+    if show_summary:
+        # الملخص: عربي + إنجليزي مختصر
+        if translate and summary_ar and summary_ar != summary:
+            msg += f"\n📋 {summary_ar[:200]}\n"
+        elif summary:
+            msg += f"\n📝 {summary[:150]}...\n"
+    if link:
+        msg += f"\n🔗 <a href='{link}'>اقرأ المقال</a>\n"
+    return msg
+
+def build_latest_news(limit=10):
+    """📰 آخر الأخبار"""
+    news = get_all_news()
+    if not news:
+        return "⚠️ تعذّر جلب الأخبار. حاول لاحقاً."
+    msg = "📰 <b>آخر الأخبار</b>\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    for item in news[:limit]:
+        # 🆕 ترجمة الخبر
+        translate_news_item(item)
+        msg += fmt_news_item(item, show_summary=False, translate=True) + "\n"
+    msg += "⚠️ <i>ليس نصيحة استثمارية</i>"
+    return msg
+
+def build_breaking_news(limit=5):
+    """🔥 أخبار عاجلة"""
+    news = get_all_news()
+    breaking = [n for n in news if "breaking" in classify_news(n) or "hack" in classify_news(n)]
+    if not breaking:
+        return "✅ <b>لا توجد أخبار عاجلة حالياً</b>\n\nالسوق هادئ نسبياً."
+    msg = "🔥 <b>أخبار عاجلة</b>\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    for item in breaking[:limit]:
+        # 🆕 ترجمة الخبر
+        translate_news_item(item)
+        msg += fmt_news_item(item, show_summary=True, translate=True) + "\n"
+    msg += "⚠️ <i>ليس نصيحة استثمارية</i>"
+    return msg
+
+def build_macro_news(limit=8):
+    """🇺🇸 اقتصاد كلي"""
+    news = get_all_news()
+    macro = [n for n in news if n.get("category") == "macro" or
+             "fed" in classify_news(n) or "trump" in classify_news(n)]
+    if not macro:
+        return "ℹ️ لا توجد أخبار اقتصادية حديثة."
+    msg = "🇺🇸 <b>أخبار الاقتصاد الكلي</b>\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    for item in macro[:limit]:
+        # 🆕 ترجمة الخبر
+        translate_news_item(item)
+        msg += fmt_news_item(item, show_summary=False, translate=True) + "\n"
+    msg += "⚠️ <i>ليس نصيحة استثمارية</i>"
+    return msg
+
+def build_coin_news(symbol, limit=5):
+    """💎 أخبار عملة معينة"""
+    symbol = symbol.upper().strip()
+    news = get_all_news()
+    coin_news = []
+    for n in news:
+        coins = get_coin_keywords(f"{n.get('title', '')} {n.get('summary', '')}")
+        if symbol in coins:
+            coin_news.append(n)
+    if not coin_news:
+        return f"ℹ️ لا توجد أخبار حديثة عن <b>{symbol}</b>"
+    msg = f"💎 <b>أخبار {symbol}</b>\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    for item in coin_news[:limit]:
+        # 🆕 ترجمة الخبر
+        translate_news_item(item)
+        msg += fmt_news_item(item, show_summary=False, translate=True) + "\n"
+    msg += "⚠️ <i>ليس نصيحة استثمارية</i>"
+    return msg
+
+# ═══════════════════════════════════════════════════════════
+# التنبيهات التلقائية
+# ═══════════════════════════════════════════════════════════
+def news_hash(item):
+    """hash فريد للخبر"""
+    title = item.get("title", "")
+    return hashlib.md5(title.encode()).hexdigest()[:12]
+
+def scan_news_loop():
+    """يفحص الأخبار الجديدة ويرسل تنبيهات"""
+    time.sleep(20)
+    while True:
+        try:
+            if not auto_alerts_enabled:
+                time.sleep(300)
+                continue
+            log.info("🔍 Scanning news for breaking alerts...")
+            # مسح الكاش للحصول على أخبار طازجة
+            if "all_news" in _cache:
+                del _cache["all_news"]
+            news = get_all_news()
+            if not news:
+                time.sleep(300)
+                continue
+            now = time.time()
+            alerts_sent = 0
+            for item in news[:30]:  # نفحص آخر 30 خبر
+                categories = classify_news(item)
+                # فقط الأخبار العاجلة أو الاختراقات أو ETF
+                if not any(c in categories for c in ["breaking", "hack", "etf"]):
+                    continue
+                # فلترة حسب الفئات المفعّلة
+                if "breaking" in categories and not alert_categories.get("breaking", True):
+                    continue
+                h = news_hash(item)
+                key = f"news_{h}"
+                if now - last_alerts_hashes.get(key, 0) < ALERT_COOLDOWN:
+                    continue
+                last_alerts_hashes[key] = now
+                # 🆕 ترجمة الخبر قبل الإرسال
+                translate_news_item(item)
+                # إرسال للجميع
+                msg = "🚨 <b>تنبيه خبري</b>\n"
+                msg += "━━━━━━━━━━━━━━━━━━\n\n"
+                msg += fmt_news_item(item, show_summary=True, translate=True)
+                msg += "\n⚠️ <i>ليس نصيحة استثمارية</i>"
+                broadcast_alert(msg)
+                alerts_sent += 1
+            if alerts_sent > 0:
+                log.info(f"🔔 Sent {alerts_sent} news alerts")
+            time.sleep(300)  # كل 5 دقائق
+        except Exception as e:
+            log.warning(f"scan_news_loop err: {e}")
+            time.sleep(60)
+
+# ═══════════════════════════════════════════════════════════
+# إرسال الرسائل
+# ═══════════════════════════════════════════════════════════
+def send_msg(msg, kb=None, cid=None):
+    t = cid or CHAT_ID
+    if not t or not TOKEN:
+        return
+    try:
+        p = {"chat_id": t, "text": msg, "parse_mode": "HTML",
+             "disable_web_page_preview": True}
+        if kb:
+            p["reply_markup"] = json.dumps(kb) if isinstance(kb, dict) else kb
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                      json=p, timeout=15)
+    except Exception:
+        pass
+
+def broadcast_alert(msg):
+    """إرسال التنبيه لكل المستخدمين المصرّح لهم"""
+    if not TOKEN or not ALLOWED_USERS:
+        send_msg(msg)
+        return
+    sent = 0
+    for uid in ALLOWED_USERS:
+        try:
+            p = {"chat_id": uid, "text": msg, "parse_mode": "HTML",
+                 "disable_web_page_preview": True}
+            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                          json=p, timeout=15)
+            sent += 1
+        except Exception:
+            pass
+    log.info(f"📡 Broadcast sent to {sent}/{len(ALLOWED_USERS)} users")
+
+# ═══════════════════════════════════════════════════════════
+# لوحات المفاتيح
+# ═══════════════════════════════════════════════════════════
+def main_kb():
+    return {"keyboard": [
+        [{"text": "📰 آخر الأخبار"}, {"text": "🔥 أخبار عاجلة"}],
+        [{"text": "💎 أخبار عملتي"}, {"text": "🇺🇸 اقتصاد كلي"}],
+        [{"text": "⚙️ الإعدادات"}]
+    ], "resize_keyboard": True, "is_persistent": True}
+
+# ═══════════════════════════════════════════════════════════
+# معالجة التحديثات
+# ═══════════════════════════════════════════════════════════
+def handle_update(u):
+    m = u.get("message", {})
+    if m:
+        chat = m.get("chat", {})
+        cid = chat.get("id")
+        txt = m.get("text", "").strip()
+        if cid and txt:
+            handle_msg(cid, txt, chat)
+        return
+    cb = u.get("callback_query", {})
+    if cb:
+        cid = cb.get("message", {}).get("chat", {}).get("id")
+        d = cb.get("data", "")
+        cb_id = cb.get("id", "")
+        if cid and d:
+            handle_cb(cid, d, cb_id)
+
+def handle_msg(cid, txt, chat=None):
+    # 🛡️ أوامر المالك فقط
+    if is_owner(cid):
+        if txt.startswith("/add "):
+            target = txt.replace("/add ", "").strip().replace(" ", "")
+            if target.isdigit():
+                if add_user(target):
+                    send_msg(f"✅ <b>تمت إضافة المستخدم</b>\n🆔 <code>{target}</code>\n\nالعدد الإجمالي: {len(ALLOWED_USERS)}", main_kb(), cid)
+                else:
+                    send_msg(f"ℹ️ المستخدم <code>{target}</code> موجود مسبقاً.", main_kb(), cid)
+            else:
+                send_msg("❌ الصيغة خاطئة.\n\nمثال: <code>/add 123456789</code>", main_kb(), cid)
+            return
+        if txt.startswith("/remove "):
+            target = txt.replace("/remove ", "").strip().replace(" ", "")
+            if target.isdigit():
+                if remove_user(target):
+                    send_msg(f"✅ <b>تم حذف المستخدم</b>\n🆔 <code>{target}</code>\n\nالعدد الإجمالي: {len(ALLOWED_USERS)}", main_kb(), cid)
+                else:
+                    send_msg(f"❌ لا يمكن حذف <code>{target}</code>.", main_kb(), cid)
+            else:
+                send_msg("❌ الصيغة خاطئة.\n\nمثال: <code>/remove 123456789</code>", main_kb(), cid)
+            return
+        if txt == "/users":
+            msg = f"👥 <b>القائمة البيضاء</b>\n"
+            msg += "━━━━━━━━━━━━━━━━━━\n\n"
+            msg += f"📊 العدد الإجمالي: {len(ALLOWED_USERS)} مستخدم\n\n"
+            for i, uid in enumerate(sorted(ALLOWED_USERS), 1):
+                owner_tag = " 👑" if uid == int(CHAT_ID) else ""
+                msg += f"{i}. <code>{uid}</code>{owner_tag}\n"
+            msg += "\n💡 للإضافة: <code>/add ID</code>\n💡 للحذف: <code>/remove ID</code>"
+            send_msg(msg, main_kb(), cid)
+            return
+
+    # 🔒 فحص القائمة البيضاء
+    if not is_allowed(cid):
+        if txt == "/start":
+            send_msg("🔒 هذا البوت خاص.\n\nتواصل مع المالك للوصول.", None, cid)
+            log.warning(f"⛔ Access denied for chat_id: {cid}")
+            if chat and CHAT_ID:
+                first_name = chat.get("first_name", "غير معروف")
+                username = chat.get("username", "")
+                notify = f"🔔 <b>محاولة دخول جديدة</b>\n"
+                notify += "━━━━━━━━━━━━━━━━━━\n\n"
+                notify += f"👤 الاسم: {first_name}\n"
+                if username:
+                    notify += f"📎 المعرف: @{username}\n"
+                notify += f"🆔 Chat ID: <code>{cid}</code>\n\n"
+                notify += f"لإضافته أرسل: <code>/add {cid}</code>"
+                send_msg(notify)
+        return
+
+    # حالة انتظار إدخال عملة
+    if _user_state.get(cid) == "waiting_for_symbol":
+        _user_state[cid] = None
+        send_msg("⏳ جاري البحث...", cid=cid)
+        send_msg(build_coin_news(txt), main_kb(), cid)
+        return
+
+    if txt == "/start":
+        if is_owner(cid):
+            msg = "📰 <b>بوت الأخبار الكريبتو</b>\n"
+            msg += "━━━━━━━━━━━━━━━━━━\n\n"
+            msg += "📡 المصادر: CoinDesk, Cointelegraph, Decrypt, CNBC, Fed, Reddit\n"
+            msg += f"🔔 التنبيهات: {'🟢 مفعّل' if auto_alerts_enabled else '🔴 معطّل'}\n"
+            msg += f"👥 المستخدمون: {len(ALLOWED_USERS)}\n\n"
+            msg += "اختر من القائمة بالأسفل:"
+            send_msg(msg, main_kb(), cid)
+        else:
+            first_name = chat.get("first_name", "") if chat else ""
+            msg = f"📰 <b>أهلاً {first_name}!</b>\n"
+            msg += "━━━━━━━━━━━━━━━━━━\n\n"
+            msg += "📊 <b>بوت الأخبار الكريبتو والاقتصادية</b>\n"
+            msg += "📡 مصادر موثوقة متعددة\n\n"
+            msg += "✅ <b>تم تفعيل استقبال الأخبار</b>\n"
+            msg += "⏳ سيصلك تنبيه فور ظهور خبر عاجل\n\n"
+            msg += "💡 <i>أنت مستلم للأخبار فقط.</i>"
+            send_msg(msg, None, cid)
+    elif txt == "📰 آخر الأخبار":
+        if is_owner(cid):
+            send_msg("⏳ جاري الجلب...", cid=cid)
+            send_msg(build_latest_news(10), main_kb(), cid)
+        else:
+            send_msg("ℹ️ هذه الميزة متاحة للمالك فقط.", None, cid)
+    elif txt == "🔥 أخبار عاجلة":
+        if is_owner(cid):
+            send_msg("⏳ جاري الجلب...", cid=cid)
+            send_msg(build_breaking_news(5), main_kb(), cid)
+        else:
+            send_msg("ℹ️ هذه الميزة متاحة للمالك فقط.", None, cid)
+    elif txt == "💎 أخبار عملتي":
+        if is_owner(cid):
+            _user_state[cid] = "waiting_for_symbol"
+            msg = "💎 <b>أخبار عملة معينة</b>\n"
+            msg += "━━━━━━━━━━━━━━━━━━\n\n"
+            msg += "📝 أرسل رمز العملة:\n"
+            msg += "مثال: <code>BTC</code> أو <code>ETH</code> أو <code>SOL</code>"
+            send_msg(msg, None, cid)
+        else:
+            send_msg("ℹ️ هذه الميزة متاحة للمالك فقط.", None, cid)
+    elif txt == "🇺🇸 اقتصاد كلي":
+        if is_owner(cid):
+            send_msg("⏳ جاري الجلب...", cid=cid)
+            send_msg(build_macro_news(8), main_kb(), cid)
+        else:
+            send_msg("ℹ️ هذه الميزة متاحة للمالك فقط.", None, cid)
+    elif txt == "⚙️ الإعدادات":
+        if is_owner(cid):
+            show_settings(cid)
+        else:
+            send_msg("ℹ️ الإعدادات متاحة للمالك فقط.", None, cid)
+    else:
+        if is_owner(cid):
+            send_msg("استخدم القائمة بالأسفل", main_kb(), cid)
+        else:
+            send_msg("ℹ️ أنت مستلم للأخبار فقط. انتظر التنبيهات التلقائية.", None, cid)
+
+def show_settings(cid):
+    """عرض إعدادات التنبيهات"""
+    status = "🟢 مفعّل" if auto_alerts_enabled else "🔴 معطّل"
+    msg = "⚙️ <b>إعدادات التنبيهات</b>\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    msg += f"🔔 <b>الحالة:</b> {status}\n"
+    msg += f"⏰ <b>الفحص كل:</b> 5 دقائق\n"
+    msg += f"🔒 <b>Cooldown:</b> 30 دقيقة لكل خبر\n\n"
+    msg += "📊 <b>فئات التنبيه:</b>\n"
+    msg += f"  📰 أخبار كريبتو: {'🟢' if alert_categories.get('crypto', True) else '🔴'}\n"
+    msg += f"  🇺🇸 اقتصاد كلي: {'🟢' if alert_categories.get('macro', True) else '🔴'}\n"
+    msg += f"  🚨 أخبار عاجلة: {'🟢' if alert_categories.get('breaking', True) else '🔴'}\n"
+    kb = {"inline_keyboard": [
+        [{"text": f"{'🔴 إيقاف' if auto_alerts_enabled else '🟢 تفعيل'} التنبيهات", "callback_data": "toggle_alerts"}],
+        [{"text": "✅ تم", "callback_data": "done_settings"}]
+    ]}
+    send_msg(msg, kb, cid)
+
+def handle_cb(cid, d, cb_id):
+    global auto_alerts_enabled
+    if not is_allowed(cid):
+        try:
+            requests.post(f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
+                          json={"callback_query_id": cb_id, "text": "🔒 مرفوض"}, timeout=10)
+        except:
+            pass
+        return
+    try:
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
+                      json={"callback_query_id": cb_id, "text": "✅"}, timeout=10)
+    except:
+        pass
+    if d == "toggle_alerts":
+        auto_alerts_enabled = not auto_alerts_enabled
+        save_settings()
+        status = "🟢 مفعّل" if auto_alerts_enabled else "🔴 معطّل"
+        send_msg(f"✅ التنبيهات: <b>{status}</b>", main_kb(), cid)
+    elif d == "done_settings":
+        send_msg("✅ تم حفظ الإعدادات", main_kb(), cid)
+
+# ═══════════════════════════════════════════════════════════
+# خادم Flask
+# ═══════════════════════════════════════════════════════════
+app = Flask(__name__)
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    try:
+        u = request.get_json()
+        if u:
+            threading.Thread(target=handle_update, args=(u,)).start()
+    except:
+        pass
+    return jsonify({"ok": True})
+
+@app.route("/")
+def home():
+    return jsonify({"status": "running", "bot": "news", "users": len(ALLOWED_USERS),
+                    "sources": len(NEWS_SOURCES)})
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+@app.route("/ping")
+def ping():
+    return jsonify({"pong": True})
+
+# ═══════════════════════════════════════════════════════════
+# تشغيل البوت
+# ═══════════════════════════════════════════════════════════
+def self_ping():
+    if not RENDER_URL:
+        return
+    time.sleep(30)
+    while True:
+        try:
+            requests.get(f"{RENDER_URL}/ping", timeout=10)
+        except Exception:
+            pass
+        time.sleep(600)
+
+def start_bot():
+    global _started
+    if _started:
+        return
+    _started = True
+    if not TOKEN:
+        log.error("TELEGRAM_BOT_TOKEN not set!")
+        return
+    load_settings()
+    wh = False
+    if RENDER_URL:
+        try:
+            r = requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook",
+                             params={"url": f"{RENDER_URL}/webhook"}, timeout=10)
+            if r.status_code == 200 and r.json().get("ok"):
+                wh = True
+        except:
+            pass
+    alert_status = "🟢 مفعّل" if auto_alerts_enabled else "🔴 معطّل"
+    msg = "📰 <b>بوت الأخبار — تم التشغيل</b>\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    msg += f"📡 المصادر: {len(NEWS_SOURCES)} مصدر\n"
+    msg += f"🔔 التنبيهات: {alert_status}\n"
+    msg += f"👥 المستخدمون: {len(ALLOWED_USERS)}\n\n"
+    msg += "📥 أرسل /start للبدء"
+    send_msg(msg)
+
+    def run_with_restart(name, target_fn, restart_delay=30):
+        while True:
+            try:
+                log.info(f"🔄 Starting {name} thread")
+                target_fn()
+            except Exception as e:
+                log.error(f"❌ {name} crashed: {e} — restarting in {restart_delay}s")
+            time.sleep(restart_delay)
+
+    threading.Thread(target=lambda: run_with_restart("self_ping", self_ping),
+                     daemon=True).start()
+    threading.Thread(target=lambda: run_with_restart("news_scan", scan_news_loop),
+                     daemon=True).start()
+    if not wh:
+        def poll():
+            global last_id
+            last_id = 0
+            while True:
+                try:
+                    r = requests.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates",
+                                     params={"offset": last_id+1, "timeout": 25}, timeout=30)
+                    if r.status_code == 200:
+                        for u in r.json().get("result", []):
+                            last_id = u.get("update_id", last_id)
+                            handle_update(u)
+                    else:
+                        time.sleep(5)
+                except:
+                    time.sleep(5)
+        threading.Thread(target=lambda: run_with_restart("polling", poll),
+                         daemon=True).start()
+
+start_bot()

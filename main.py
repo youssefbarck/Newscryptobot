@@ -611,17 +611,14 @@ def extract_keywords(text, max_keywords=6):
             break
     return important_keywords
 
-def fmt_news_item(item, show_summary=True, translate=True):
-    """🆕 يبني رسالة خبر مرتبة بشكل احترافي - بدون أبرز النقاط ولا كلمات مفتاحية"""
+def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
+    """🆕 تنسيق مبسط: ترويسة القناة + العنوان + الملخص + الرابط فقط"""
     title = item.get("title", "")
     title_ar = item.get("title_ar", "")
     summary = item.get("summary", "")
     summary_ar = item.get("summary_ar", "")
-    source = item.get("source", "")
     link = item.get("link", "")
     categories = classify_news(item)
-    coins = get_coin_keywords(f"{title} {summary}")
-    time_str = time_ago(item.get("timestamp", 0))
     # ترجمة العنوان للعربية
     if translate and title and not title_ar:
         title_ar = translate_to_arabic(title)
@@ -629,65 +626,44 @@ def fmt_news_item(item, show_summary=True, translate=True):
     if translate and summary and not summary_ar:
         summary_ar = translate_to_arabic(summary)
         item["summary_ar"] = summary_ar
-    # اكتشاف البيانات الاقتصادية
-    econ_data = detect_economic_data(item)
     # العنوان النهائي (عربي فقط)
     final_title = title_ar if title_ar and translate else title
-    # 🆕 تحديد رمز التصنيف بدلاً من رأس كامل
+    # 🆕 تحديد رمز الخبر
     if "breaking" in categories:
-        cat_symbol = "🚨"
+        icon = "🚨"
     elif "hack" in categories:
-        cat_symbol = "⚠️"
+        icon = "⚠️"
     elif "fed" in categories or "trump" in categories:
-        cat_symbol = "🇺🇸"
+        icon = "🇺🇸"
     elif "etf" in categories:
-        cat_symbol = "📊"
+        icon = "📊"
     else:
-        cat_symbol = "📰"
-    # 🆕 بناء الرسالة - العنوان مباشرة بدون رأس
-    msg = f"{cat_symbol} <b>{final_title}</b>\n\n"
-    # 🆕 المصدر + الوقت + التصنيف في سطر واحد بشعار مميز
-    source_ar = translate_source_name(source)
-    # أسماء التصنيف بالعربية
-    cats_ar = {"breaking": "عاجل", "fed": "فيدرالي", "trump": "ترامب",
-               "etf": "ETF", "hack": "اختراق"}
-    cat_str = " · ".join(cats_ar.get(c, c) for c in categories) if categories else "عام"
-    # 🆕 سطر المعلومات مرتب بشعار 🔖
-    info_parts = []
-    if source_ar:
-        info_parts.append(f"📡 {source_ar}")
-    if time_str:
-        info_parts.append(f"🕐 {time_str}")
-    info_parts.append(f"🏷️ {cat_str}")
-    msg += "🔹 " + " | ".join(info_parts) + "\n"
-    # 🆕 العملات بالإنجليزية (BTC, ETH) بدون ترجمة
-    if coins:
-        msg += f"💰 العملات: {', '.join(coins)}\n"
-    # 🆕 البيانات الاقتصادية (إذا وُجدت)
-    if econ_data["has_data"]:
-        msg += f"\n🟥 صدر الآن: {source_ar or 'بيان اقتصادي'} 🇺🇸\n"
-        msg += f"🔴 السابق: {econ_data['previous']}\n"
-        msg += f"🟢 المتوقع: {econ_data['expected']}\n"
-        msg += f"🟢 الحالي: {econ_data['current']}\n"
-    # 🆕 الملخص مباشرة (بدون "أبرز النقاط")
-    if show_summary and summary_ar and translate:
-        # تنظيف وتنسيق الملخص
-        clean_summary = summary_ar.strip()
-        if len(clean_summary) > 300:
-            clean_summary = clean_summary[:297] + "..."
-        msg += f"\n📋 {clean_summary}\n"
-    elif show_summary and summary:
-        translated_summary = translate_to_arabic(summary[:400])
-        if translated_summary and translated_summary != summary:
-            clean_summary = translated_summary.strip()
+        icon = "📰"
+    # 🆕 البناء المبسط
+    msg = ""
+    # 🆕 ترويسة القناة (فقط عند show_header=True)
+    if show_header:
+        msg += f"🚨 {CHANNEL_NAME}\n"
+        msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    # العنوان
+    msg += f"{icon} <b>{final_title}</b>\n\n"
+    # الملخص مباشرة
+    if show_summary:
+        if summary_ar and translate:
+            clean_summary = summary_ar.strip()
             if len(clean_summary) > 300:
                 clean_summary = clean_summary[:297] + "..."
-            msg += f"\n📋 {clean_summary}\n"
+            msg += f"📋 {clean_summary}\n"
+        elif summary:
+            translated_summary = translate_to_arabic(summary[:400])
+            if translated_summary and translated_summary != summary:
+                clean_summary = translated_summary.strip()
+                if len(clean_summary) > 300:
+                    clean_summary = clean_summary[:297] + "..."
+                msg += f"📋 {clean_summary}\n"
     # الرابط
     if link:
         msg += f"\n🔗 <a href='{link}'>رابط المصدر</a>\n"
-    # 🆕 رابط القناة بالبنط العريض
-    msg += f"\n📢 <b><a href='{CHANNEL_LINK}'>{CHANNEL_NAME}</a></b>\n"
     return msg
 
 def translate_source_name(source):
@@ -751,12 +727,13 @@ def build_latest_news(limit=10):
         return "⚠️ تعذّر جلب الأخبار. حاول لاحقاً."
     # 🆕 إزالة المكرر
     news = deduplicate_news(news)
-    msg = "📰 <b>آخر الأخبار</b>\n"
+    # 🆕 ترويسة واحدة في الأعلى
+    msg = f"🚨 {CHANNEL_NAME}\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
     for item in news[:limit]:
         translate_news_item(item)
-        msg += fmt_news_item(item, show_summary=False, translate=True)
-        msg += "\n━━━━━━━━━━━━━━━━━━\n"  # 🆕 فاصل بين كل خبر
+        msg += fmt_news_item(item, show_summary=False, translate=True, show_header=False)
+        msg += "\n"
     return msg
 
 def build_breaking_news(limit=5):
@@ -766,13 +743,14 @@ def build_breaking_news(limit=5):
     news = deduplicate_news(news)
     breaking = [n for n in news if "breaking" in classify_news(n) or "hack" in classify_news(n)]
     if not breaking:
-        return "✅ <b>لا توجد أخبار عاجلة حالياً</b>\n\nالسوق هادئ نسبياً.\n\n"
-    msg = "🔥 <b>أخبار عاجلة</b>\n"
+        return "✅ <b>لا توجد أخبار عاجلة حالياً</b>\n\nالسوق هادئ نسبياً."
+    # 🆕 ترويسة واحدة في الأعلى
+    msg = f"🚨 {CHANNEL_NAME}\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
     for item in breaking[:limit]:
         translate_news_item(item)
-        msg += fmt_news_item(item, show_summary=True, translate=True)
-        msg += "\n━━━━━━━━━━━━━━━━━━\n"  # 🆕 فاصل
+        msg += fmt_news_item(item, show_summary=True, translate=True, show_header=False)
+        msg += "\n"
     return msg
 
 def build_macro_news(limit=8):
@@ -783,13 +761,14 @@ def build_macro_news(limit=8):
     macro = [n for n in news if n.get("category") == "macro" or
              "fed" in classify_news(n) or "trump" in classify_news(n)]
     if not macro:
-        return "ℹ️ لا توجد أخبار اقتصادية حديثة.\n\n"
-    msg = "🇺🇸 <b>أخبار الاقتصاد الكلي</b>\n"
+        return "ℹ️ لا توجد أخبار اقتصادية حديثة."
+    # 🆕 ترويسة واحدة في الأعلى
+    msg = f"🚨 {CHANNEL_NAME}\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
     for item in macro[:limit]:
         translate_news_item(item)
-        msg += fmt_news_item(item, show_summary=False, translate=True)
-        msg += "\n━━━━━━━━━━━━━━━━━━\n"  # 🆕 فاصل
+        msg += fmt_news_item(item, show_summary=False, translate=True, show_header=False)
+        msg += "\n"
     return msg
 
 def build_coin_news(symbol, limit=5):
@@ -804,13 +783,14 @@ def build_coin_news(symbol, limit=5):
         if symbol in coins:
             coin_news.append(n)
     if not coin_news:
-        return f"ℹ️ لا توجد أخبار حديثة عن <b>{symbol}</b>\n\n"
-    msg = f"💎 <b>أخبار {symbol}</b>\n"
+        return f"ℹ️ لا توجد أخبار حديثة عن <b>{symbol}</b>"
+    # 🆕 ترويسة واحدة في الأعلى
+    msg = f"🚨 {CHANNEL_NAME}\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
     for item in coin_news[:limit]:
         translate_news_item(item)
-        msg += fmt_news_item(item, show_summary=False, translate=True)
-        msg += "\n━━━━━━━━━━━━━━━━━━\n"  # 🆕 فاصل
+        msg += fmt_news_item(item, show_summary=False, translate=True, show_header=False)
+        msg += "\n"
     return msg
 
 # ═══════════════════════════════════════════════════════════
@@ -854,11 +834,8 @@ def scan_news_loop():
                 last_alerts_hashes[key] = now
                 # 🆕 ترجمة الخبر قبل الإرسال
                 translate_news_item(item)
-                # إرسال للجميع
-                msg = "🚨 <b>تنبيه خبري</b>\n"
-                msg += "━━━━━━━━━━━━━━━━━━\n\n"
-                msg += fmt_news_item(item, show_summary=True, translate=True)
-                msg += "\n"
+                # إرسال للجميع - التنسيق المبسط
+                msg = fmt_news_item(item, show_summary=True, translate=True)
                 broadcast_alert(msg)
                 alerts_sent += 1
             if alerts_sent > 0:

@@ -448,25 +448,38 @@ def get_all_news():
     return all_items
 
 def classify_news(item):
-    """يصنف الخبر حسب الكلمات المفتاحية"""
+    """🆕 يصنف الخبر بدقة باستخدام حدود الكلمات"""
     title = item.get("title", "").lower()
     summary = item.get("summary", "").lower()
     text = f"{title} {summary}"
     categories = []
-    if any(kw in text for kw in KEYWORDS_BREAKING):
+    # 🆕 استخدام حدود الكلمات (word boundaries) لتجنب الأخطاء
+    # مثلاً "sec" يجب أن تكون كلمة مستقلة، وليست جزءاً من "summer"
+    def has_word(text, word):
+        """يتحقق من وجود الكلمة كوحدة مستقلة"""
+        pattern = r'\b' + re.escape(word) + r'\b'
+        return bool(re.search(pattern, text))
+    # 🆕 شروط أكثر صرامة لكل فئة
+    if any(has_word(text, kw) for kw in KEYWORDS_BREAKING):
         categories.append("breaking")
-    if any(kw in text for kw in KEYWORDS_FED):
+    # الفيدرالي: يجب ذكر كلمات محددة
+    if any(has_word(text, kw) for kw in KEYWORDS_FED):
         categories.append("fed")
-    if any(kw in text for kw in KEYWORDS_TRUMP):
+    # ترامب: يجب ذكر كلمة trump أو white house
+    if any(has_word(text, kw) for kw in KEYWORDS_TRUMP):
         categories.append("trump")
-    if any(kw in text for kw in KEYWORDS_ETF):
+    # ETF: يجب ذكر "etf" فعلياً (ليس مجرد "finance")
+    if has_word(text, "etf") or has_word(text, "spot etf") or "exchange-traded fund" in text:
         categories.append("etf")
-    if any(kw in text for kw in KEYWORDS_HACK):
+    # اختراق: شروط صارمة - يحتاج كلمات محددة للثغرات الأمنية
+    hack_words = ["hack", "exploit", "drained", "stolen", "vulnerability",
+                  "flash loan attack", "rug pull", "hacked", "breach"]
+    if any(has_word(text, kw) for kw in hack_words):
         categories.append("hack")
     return categories
 
 def get_coin_keywords(text):
-    """يستخرج العملات المذكورة في النص"""
+    """🆕 يستخرج العملات بدقة باستخدام حدود الكلمات"""
     text_lower = text.lower()
     coins = []
     coin_map = {
@@ -599,7 +612,7 @@ def extract_keywords(text, max_keywords=6):
     return important_keywords
 
 def fmt_news_item(item, show_summary=True, translate=True):
-    """🆕 يبني رسالة خبر بالعربية فقط مع ملخص برؤوس أقلام"""
+    """🆕 يبني رسالة خبر مرتبة بشكل احترافي - بدون أبرز النقاط ولا كلمات مفتاحية"""
     title = item.get("title", "")
     title_ar = item.get("title_ar", "")
     summary = item.get("summary", "")
@@ -609,74 +622,67 @@ def fmt_news_item(item, show_summary=True, translate=True):
     categories = classify_news(item)
     coins = get_coin_keywords(f"{title} {summary}")
     time_str = time_ago(item.get("timestamp", 0))
-    # ترجمة العنوان للعربية (إجباري)
+    # ترجمة العنوان للعربية
     if translate and title and not title_ar:
         title_ar = translate_to_arabic(title)
         item["title_ar"] = title_ar
     if translate and summary and not summary_ar:
         summary_ar = translate_to_arabic(summary)
         item["summary_ar"] = summary_ar
-    # 🆕 اكتشاف البيانات الاقتصادية
+    # اكتشاف البيانات الاقتصادية
     econ_data = detect_economic_data(item)
-    # 🆕 تحديد العنوان النهائي (عربي فقط)
+    # العنوان النهائي (عربي فقط)
     final_title = title_ar if title_ar and translate else title
-    # 🆕 تحديد رأس الفئة
+    # 🆕 تحديد رمز التصنيف بدلاً من رأس كامل
     if "breaking" in categories:
-        header = "🚨 عاجل:"
+        cat_symbol = "🚨"
     elif "hack" in categories:
-        header = "⚠️ تنبيه أمني:"
+        cat_symbol = "⚠️"
     elif "fed" in categories or "trump" in categories:
-        header = "🇺🇸 اقتصاد:"
+        cat_symbol = "🇺🇸"
     elif "etf" in categories:
-        header = "📊 ETF:"
+        cat_symbol = "📊"
     else:
-        header = "📰 خبر:"
-    # 🆕 بناء الرسالة بالعربية فقط
-    msg = f"{header}\n\n"
-    # العنوان الرئيسي بالعربية
-    msg += f"<b>{final_title}</b>\n\n"
-    # المصدر والوقت
+        cat_symbol = "📰"
+    # 🆕 بناء الرسالة - العنوان مباشرة بدون رأس
+    msg = f"{cat_symbol} <b>{final_title}</b>\n\n"
+    # 🆕 المصدر + الوقت + التصنيف في سطر واحد بشعار مميز
     source_ar = translate_source_name(source)
+    # أسماء التصنيف بالعربية
+    cats_ar = {"breaking": "عاجل", "fed": "فيدرالي", "trump": "ترامب",
+               "etf": "ETF", "hack": "اختراق"}
+    cat_str = " · ".join(cats_ar.get(c, c) for c in categories) if categories else "عام"
+    # 🆕 سطر المعلومات مرتب بشعار 🔖
     info_parts = []
     if source_ar:
         info_parts.append(f"📡 {source_ar}")
     if time_str:
         info_parts.append(f"🕐 {time_str}")
-    if info_parts:
-        msg += " | ".join(info_parts) + "\n"
-    # العملات المذكورة
+    info_parts.append(f"🏷️ {cat_str}")
+    msg += "🔹 " + " | ".join(info_parts) + "\n"
+    # 🆕 العملات بالإنجليزية (BTC, ETH) بدون ترجمة
     if coins:
-        coins_ar = [translate_coin_name(c) for c in coins]
-        msg += f"🏷️ العملات: {', '.join(coins_ar)}\n"
-    # التصنيف
-    if categories:
-        cats_ar = {"breaking": "عاجل", "fed": "فيدرالي", "trump": "ترامب",
-                   "etf": "ETF", "hack": "اختراق"}
-        cat_str = " · ".join(cats_ar.get(c, c) for c in categories)
-        msg += f"⚡ التصنيف: {cat_str}\n"
+        msg += f"💰 العملات: {', '.join(coins)}\n"
     # 🆕 البيانات الاقتصادية (إذا وُجدت)
     if econ_data["has_data"]:
         msg += f"\n🟥 صدر الآن: {source_ar or 'بيان اقتصادي'} 🇺🇸\n"
-        msg += f"\n🔴 السابق: {econ_data['previous']}\n"
+        msg += f"🔴 السابق: {econ_data['previous']}\n"
         msg += f"🟢 المتوقع: {econ_data['expected']}\n"
         msg += f"🟢 الحالي: {econ_data['current']}\n"
-    # 🆕 ملخص برؤوس أقلام
-    full_text_for_points = f"{summary_ar or summary}"
-    if show_summary and full_text_for_points:
-        # استخراج النقاط الرئيسية
-        points = extract_key_points(full_text_for_points, max_points=4)
-        if points:
-            msg += "\n📋 <b>أبرز النقاط:</b>\n"
-            for i, point in enumerate(points, 1):
-                # تنظيف النقطة واختصارها
-                clean_point = point.strip()
-                if len(clean_point) > 120:
-                    clean_point = clean_point[:117] + "..."
-                msg += f"   {i}. {clean_point}\n"
-    # 🆕 الكلمات المفتاحية المهمة
-    keywords = extract_keywords(f"{title} {summary}", max_keywords=6)
-    if keywords:
-        msg += f"\n🔑 <b>كلمات مفتاحية:</b> {', '.join(keywords)}\n"
+    # 🆕 الملخص مباشرة (بدون "أبرز النقاط")
+    if show_summary and summary_ar and translate:
+        # تنظيف وتنسيق الملخص
+        clean_summary = summary_ar.strip()
+        if len(clean_summary) > 300:
+            clean_summary = clean_summary[:297] + "..."
+        msg += f"\n📋 {clean_summary}\n"
+    elif show_summary and summary:
+        translated_summary = translate_to_arabic(summary[:400])
+        if translated_summary and translated_summary != summary:
+            clean_summary = translated_summary.strip()
+            if len(clean_summary) > 300:
+                clean_summary = clean_summary[:297] + "..."
+            msg += f"\n📋 {clean_summary}\n"
     # الرابط
     if link:
         msg += f"\n🔗 <a href='{link}'>رابط المصدر</a>\n"
@@ -751,7 +757,6 @@ def build_latest_news(limit=10):
         translate_news_item(item)
         msg += fmt_news_item(item, show_summary=False, translate=True)
         msg += "\n━━━━━━━━━━━━━━━━━━\n"  # 🆕 فاصل بين كل خبر
-    msg += "⚠️ <i>ليس نصيحة استثمارية</i>"
     return msg
 
 def build_breaking_news(limit=5):
@@ -761,14 +766,13 @@ def build_breaking_news(limit=5):
     news = deduplicate_news(news)
     breaking = [n for n in news if "breaking" in classify_news(n) or "hack" in classify_news(n)]
     if not breaking:
-        return "✅ <b>لا توجد أخبار عاجلة حالياً</b>\n\nالسوق هادئ نسبياً.\n\n⚠️ <i>ليس نصيحة استثمارية</i>"
+        return "✅ <b>لا توجد أخبار عاجلة حالياً</b>\n\nالسوق هادئ نسبياً.\n\n"
     msg = "🔥 <b>أخبار عاجلة</b>\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
     for item in breaking[:limit]:
         translate_news_item(item)
         msg += fmt_news_item(item, show_summary=True, translate=True)
         msg += "\n━━━━━━━━━━━━━━━━━━\n"  # 🆕 فاصل
-    msg += "⚠️ <i>ليس نصيحة استثمارية</i>"
     return msg
 
 def build_macro_news(limit=8):
@@ -779,14 +783,13 @@ def build_macro_news(limit=8):
     macro = [n for n in news if n.get("category") == "macro" or
              "fed" in classify_news(n) or "trump" in classify_news(n)]
     if not macro:
-        return "ℹ️ لا توجد أخبار اقتصادية حديثة.\n\n⚠️ <i>ليس نصيحة استثمارية</i>"
+        return "ℹ️ لا توجد أخبار اقتصادية حديثة.\n\n"
     msg = "🇺🇸 <b>أخبار الاقتصاد الكلي</b>\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
     for item in macro[:limit]:
         translate_news_item(item)
         msg += fmt_news_item(item, show_summary=False, translate=True)
         msg += "\n━━━━━━━━━━━━━━━━━━\n"  # 🆕 فاصل
-    msg += "⚠️ <i>ليس نصيحة استثمارية</i>"
     return msg
 
 def build_coin_news(symbol, limit=5):
@@ -801,14 +804,13 @@ def build_coin_news(symbol, limit=5):
         if symbol in coins:
             coin_news.append(n)
     if not coin_news:
-        return f"ℹ️ لا توجد أخبار حديثة عن <b>{symbol}</b>\n\n⚠️ <i>ليس نصيحة استثمارية</i>"
+        return f"ℹ️ لا توجد أخبار حديثة عن <b>{symbol}</b>\n\n"
     msg = f"💎 <b>أخبار {symbol}</b>\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
     for item in coin_news[:limit]:
         translate_news_item(item)
         msg += fmt_news_item(item, show_summary=False, translate=True)
         msg += "\n━━━━━━━━━━━━━━━━━━\n"  # 🆕 فاصل
-    msg += "⚠️ <i>ليس نصيحة استثمارية</i>"
     return msg
 
 # ═══════════════════════════════════════════════════════════
@@ -856,7 +858,7 @@ def scan_news_loop():
                 msg = "🚨 <b>تنبيه خبري</b>\n"
                 msg += "━━━━━━━━━━━━━━━━━━\n\n"
                 msg += fmt_news_item(item, show_summary=True, translate=True)
-                msg += "\n⚠️ <i>ليس نصيحة استثمارية</i>"
+                msg += "\n"
                 broadcast_alert(msg)
                 alerts_sent += 1
             if alerts_sent > 0:

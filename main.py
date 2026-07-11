@@ -23,7 +23,10 @@ SEND_TO_CHANNEL = os.environ.get("SEND_TO_CHANNEL", "false").lower() == "true"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("NewsBot")
 tz = pytz.timezone(TIMEZONE)
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; WhaleNewsBot/1.0)"}
+# 🔧 إصلاح: User-Agent مناسب لتجنب حظر Reddit والمصادر الأخرى
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; WhaleNewsBot/1.0; +https://github.com/whale-news)"}
+# 🔧 إصلاح: User-Agent مخصص لـ Reddit (يتطلبه Reddit API)
+REDDIT_HEADERS = {"User-Agent": "WhaleNewsBot/1.0 by u/whale_news_bot"}
 
 # ═══════════════════════════════════════════════════════════
 # مصادر الأخبار (RSS)
@@ -117,7 +120,7 @@ KEYWORDS_WHALES = [
     "elon musk", "michael saylor", "warren buffett", "bill ackman", "ray dalio", "cathie wood", "whale", "whales",
     "blackrock", "microstrategy", "satoshi", "binance", "cz", "changpeng zhao", "sam bankman-fried", "sbf",
     "vitalik", "vitalik buterin", "charles hoskinson", "brian armstrong", "coinbase ceo",
-    "institutional", "inflows", "outflows", "accumulation", " accumulation",
+    "institutional", "inflows", "outflows", "accumulation",
 ]
 
 KEYWORDS_TECH = [  # 🆕 فئة جديدة للأخبار التقنية والتحديثات
@@ -153,10 +156,15 @@ _cache = {}
 _started = False
 last_id = 0
 _user_state = {}
-ALERT_COOLDOWN = 21600  # 🆕 6 ساعات بين تنبيهين لنفس الخبر
-last_alerts_hashes = {}  # hash الخبر → آخر وقت تنبيه
+# 🔧 إصلاح: تطبيق ALERT_COOLDOWN فعلياً (ساعات بين تنبيهين لنفس الخبر)
+ALERT_COOLDOWN = 21600  # 6 ساعات بين تنبيهين لنفس الخبر
+last_alerts_hashes = {}  # hash الخبر → آخر وقت تنبيه (يُستخدم الآن)
 # 🆕 ذاكرة دائمة للأخبار المُرسلة (لن تُعاد أبداً)
-SENT_NEWS_FILE = "/tmp/sent_news.json"
+# 🔧 إصلاح: استخدام مسار دائم بدلاً من /tmp الذي يُمسح عند كل deploy
+import os as _os
+_PERSISTENT_DIR = _os.environ.get("PERSISTENT_DIR", _os.path.expanduser("~/bot_data"))
+_os.makedirs(_PERSISTENT_DIR, exist_ok=True)
+SENT_NEWS_FILE = _os.path.join(_PERSISTENT_DIR, "sent_news.json")
 sent_news_hashes = set()  # كل أخبار تم إرسالها
 
 def load_sent_news():
@@ -179,31 +187,50 @@ def save_sent_news():
 
 # 🔔 إعدادات التنبيهات
 auto_alerts_enabled = True
-alert_categories = {"crypto": True, "macro": True, "breaking": True}
-SETTINGS_FILE = "/tmp/news_settings.json"
+alert_categories = {"crypto": True, "macro": True, "breaking": True, "tech": True, "market": True}
+# 🔧 إصلاح: نقل الإعدادات للملف الدائم
+SETTINGS_FILE = _os.path.join(_PERSISTENT_DIR, "news_settings.json")
+# 🆕 متغيرات قابلة للتبديل وقت التشغيل
+channel_enabled = None  # None = استخدم قيمة env var الافتراضية
+bot_shutdown = False  # True = البوت متوقف تماماً (المالك فقط يمكنه إعادة تشغيله)
 
 def load_settings():
-    global auto_alerts_enabled, alert_categories
+    """🔧 تحميل الإعدادات من الملف الدائم (يشمل channel_enabled و bot_shutdown)"""
+    global auto_alerts_enabled, alert_categories, channel_enabled, bot_shutdown
     try:
         with open(SETTINGS_FILE, "r") as f:
             s = json.load(f)
             auto_alerts_enabled = s.get("auto_alerts_enabled", True)
-            alert_categories = s.get("alert_categories", {"crypto": True, "macro": True, "breaking": True})
+            alert_categories = s.get("alert_categories", {"crypto": True, "macro": True, "breaking": True, "tech": True, "market": True})
+            # 🆕 تحميل حالة القناة (None = استخدم env var)
+            channel_enabled = s.get("channel_enabled", None)
+            # 🆕 تحميل حالة الإيقاف الكامل
+            bot_shutdown = s.get("bot_shutdown", False)
     except Exception:
         pass
 
 def save_settings():
+    """🔧 حفظ الإعدادات في الملف الدائم"""
     try:
         with open(SETTINGS_FILE, "w") as f:
             json.dump({
                 "auto_alerts_enabled": auto_alerts_enabled,
-                "alert_categories": alert_categories
+                "alert_categories": alert_categories,
+                "channel_enabled": channel_enabled,
+                "bot_shutdown": bot_shutdown,
             }, f)
     except Exception as e:
         log.warning(f"save_settings err: {e}")
 
+def is_channel_enabled():
+    """🆕 يعيد True إذا كان الإرسال للقناة مفعّل (يحترم التبديل وقت التشغيل)"""
+    if channel_enabled is not None:
+        return channel_enabled and bool(CHANNEL_ID)
+    return SEND_TO_CHANNEL and bool(CHANNEL_ID)
+
 # 🔒 القائمة البيضاء
-ALLOWED_FILE = "/tmp/allowed_users.json"
+# 🔧 إصلاح: نقل القائمة البيضاء للملف الدائم
+ALLOWED_FILE = _os.path.join(_PERSISTENT_DIR, "allowed_users.json")
 
 def load_dynamic_allowed():
     try:
@@ -300,16 +327,35 @@ def set_cached(key, data):
 # جلب وتحليل الأخبار
 # ═══════════════════════════════════════════════════════════
 def parse_date(date_str):
-    """يحول تاريخ RSS إلى timestamp"""
+    """يحول تاريخ RSS إلى timestamp
+    🔧 إصلاح: دعم صيغ متعددة (RFC 822, ISO 8601, Atom)
+    """
     if not date_str:
         return 0
+    # محاولة RFC 822 أولاً (الأكثر شيوعاً في RSS)
     try:
-        # معظم RSS يستخدم RFC 822: "Mon, 01 Jul 2024 12:00:00 GMT"
         from email.utils import parsedate_to_datetime
         dt = parsedate_to_datetime(date_str)
         return dt.timestamp()
     except Exception:
         pass
+    # 🔧 إصلاح: محاولة ISO 8601 (مثل 2024-07-01T12:00:00Z)
+    try:
+        # إزالة Z في النهاية إن وُجد
+        clean = date_str.strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(clean)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except Exception:
+        pass
+    # محاولة صيغ أخرى شائعة
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%a, %d %b %Y %H:%M:%S %z"):
+        try:
+            dt = datetime.strptime(date_str.strip(), fmt)
+            return dt.timestamp()
+        except Exception:
+            pass
     return 0
 
 def clean_html(text):
@@ -424,10 +470,19 @@ def translate_to_arabic(text, force=False):
                     translated_parts.append(sentence[0])
             translated = "".join(translated_parts).strip()
             if translated:
-                # 🆕 تحسين الترجمة باستخدام القاموس
+                # 🔧 إصلاح: تطبيق قاموس المصطلحات الاقتصادية لتحسين جودة الترجمة
+                # نستبدل المصطلحات المغلوطة بالترجمة الصحيحة
+                translated_lower = translated.lower()
                 for en_term, ar_term in ECONOMIC_TERMS.items():
-                    # تجنب استبدال المصطلحات إذا كانت الترجمة خاطئة
-                    pass  # الترجمة من Google عادة جيدة، نكتفي بها
+                    # استبدال المصطلح الإنجليزي إن ظهر في الترجمة (يحدث أحياناً)
+                    if en_term in translated_lower:
+                        # استبدال preserving case (مبدئي)
+                        translated = re.sub(
+                            re.escape(en_term),
+                            ar_term,
+                            translated,
+                            flags=re.IGNORECASE
+                        )
                 _translation_cache[cache_key] = translated
                 return translated
     except Exception as e:
@@ -472,7 +527,8 @@ def parse_rss_source(source_name, source_info):
     try:
         if is_json:
             # Reddit JSON
-            r = requests.get(url, headers=HEADERS, timeout=15)
+            # 🔧 إصلاح: استخدام REDDIT_HEADERS المخصص لتجنب الحظر
+            r = requests.get(url, headers=REDDIT_HEADERS, timeout=15)
             if r.status_code == 200:
                 data = r.json()
                 for post in data.get("data", {}).get("children", [])[:20]:
@@ -603,9 +659,10 @@ def classify_news(item):
     return categories
 
 def get_coin_keywords(text):
-    """🆕 يستخرج العملات بدقة باستخدام حدود الكلمات"""
+    """🆕 يستخرج العملات بدقة باستخدام حدود الكلمات
+    🔧 إصلاح: استخدام \b لتجنب المطابقة الجزئية (link في linktree)
+    """
     text_lower = text.lower()
-    coins = []
     coin_map = {
         "bitcoin": "BTC", "btc": "BTC",
         "ethereum": "ETH", "eth": "ETH", "ether": "ETH",
@@ -615,19 +672,21 @@ def get_coin_keywords(text):
         "dogecoin": "DOGE", "doge": "DOGE",
         "avalanche": "AVAX", "avax": "AVAX",
         "polygon": "MATIC", "matic": "MATIC",
-        "chainlink": "LINK", "link": "LINK",
+        "chainlink": "LINK",  # link محذوف من المفرد - يُطابق فقط كـ chainlink
         "polkadot": "DOT", "dot": "DOT",
         "litecoin": "LTC", "ltc": "LTC",
         "binance": "BNB", "bnb": "BNB",
         "tether": "USDT", "usdt": "USDT",
         "aptos": "APT", "apt": "APT",
         "arbitrum": "ARB", "arb": "ARB",
-        "optimism": "OP", "op token": "OP",
+        "optimism": "OP",
         "sui": "SUI", "sei": "SEI", "toncoin": "TON",
     }
     found = set()
     for keyword, symbol in coin_map.items():
-        if keyword in text_lower:
+        # 🔧 إصلاح: حدود الكلمات (\b) لتجنب المطابقة الجزئية
+        pattern = r'\b' + re.escape(keyword) + r'\b'
+        if re.search(pattern, text_lower):
             found.add(symbol)
     return list(found)
 
@@ -736,13 +795,17 @@ def extract_keywords(text, max_keywords=6):
     return important_keywords
 
 def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
-    """🆕 تنسيق مبسط: صورة + العنوان + الملخص + الرابط فقط (بدون ترويسة)"""
+    """🆕 تنسيق مبسط: صورة + العنوان + الملخص + الرابط فقط (بدون ترويسة)
+    🔧 إصلاح: استخدام time_ago() و extract_keywords() و translate_source_name()
+    """
     title = item.get("title", "")
     title_ar = item.get("title_ar", "")
     summary = item.get("summary", "")
     summary_ar = item.get("summary_ar", "")
     link = item.get("link", "")
-    image_url = item.get("image", "")  # 🆕 استخراج الصورة
+    image_url = item.get("image", "")
+    source = item.get("source", "")
+    timestamp = item.get("timestamp", 0)
     categories = classify_news(item)
     # ترجمة العنوان للعربية
     if translate and title and not title_ar:
@@ -753,7 +816,7 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
         item["summary_ar"] = summary_ar
     # العنوان النهائي (عربي فقط)
     final_title = title_ar if title_ar and translate else title
-    # 🆕 تحديد رمز الخبر
+    # تحديد رمز الخبر
     if "breaking" in categories:
         icon = "🚨"
     elif "hack" in categories:
@@ -764,14 +827,18 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
         icon = "📊"
     elif "whale" in categories:
         icon = "🐋"
+    elif "tech" in categories:
+        icon = "🔧"
+    elif "market" in categories:
+        icon = "📈"
     else:
         icon = "📰"
-    # 🆕 البناء الجديد (بدون ترويسة في بداية الخبر)
+    # 🔧 إصلاح: استخدام translate_source_name() و time_ago()
+    source_ar = translate_source_name(source)
+    time_str = time_ago(timestamp)
+    # البناء
     msg = ""
-    # 🆕 الصورة تُرسل عبر sendPhoto، لذلك لا نضعها في النص
-    # العنوان
     msg += f"{icon} <b>{final_title}</b>\n\n"
-    # الملخص مباشرة
     if show_summary:
         if summary_ar and translate:
             clean_summary = summary_ar.strip()
@@ -785,9 +852,18 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
                 if len(clean_summary) > 300:
                     clean_summary = clean_summary[:297] + "..."
                 msg += f"📋 {clean_summary}\n"
-    # الرابط
+    # 🔧 إصلاح: إضافة الكلمات المفتاحية المترجمة
+    keywords = extract_keywords(f"{title} {summary}")
+    if keywords:
+        msg += f"\n🏷️ {' • '.join(keywords[:5])}\n"
+    # 🔧 إصلاح: إضافة المصدر + الوقت
+    if source_ar:
+        msg += f"\n📡 {source_ar}"
+        if time_str:
+            msg += f" • {time_str}"
+        msg += "\n"
     if link:
-        msg += f"\n🔗 <a href='{link}'>رابط المصدر</a>\n"
+        msg += f"🔗 <a href='{link}'>رابط المصدر</a>\n"
     return msg
 
 def translate_source_name(source):
@@ -916,15 +992,53 @@ def build_coin_news(symbol, limit=5):
 # التنبيهات التلقائية
 # ═══════════════════════════════════════════════════════════
 def news_hash(item):
-    """hash فريد للخبر"""
-    title = item.get("title", "")
-    return hashlib.md5(title.encode()).hexdigest()[:12]
+    """hash فريد للخبر
+    🔧 إصلاح: hash أذكى - يشمل العنوان (مُطبّع) + المصدر
+    """
+    title = item.get("title", "").lower().strip()
+    # تطبيع شديد: إزالة الرموز والمسافات الزائدة
+    normalized = re.sub(r'[^\w\s]', '', title)
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    # إزالة الكلمات الشائعة في البداية
+    normalized = re.sub(r'^(breaking|update|news|alert|urgent|just in)[\s:]*', '', normalized)
+    # إضافة المصدر للـ hash لتجنب التكرار عبر مصادر مختلفة بنفس العنوان
+    source = item.get("source", "").lower()
+    hash_input = f"{normalized[:80]}|{source}"
+    return hashlib.md5(hash_input.encode()).hexdigest()[:12]
+
+def is_category_allowed(category):
+    """🔧 إصلاح: فحص إن كانت الفئة مفعّلة في alert_categories"""
+    # mapping: category → key in alert_categories
+    cat_map = {
+        "breaking": "breaking",
+        "hack": "breaking",      # اختراقات تُعتبر عاجلة
+        "etf": "crypto",
+        "tech": "tech",
+        "market": "market",
+        "whale": "crypto",
+        "fed": "macro",
+        "trump": "macro",
+    }
+    key = cat_map.get(category, "crypto")
+    return alert_categories.get(key, True)
 
 def scan_news_loop():
-    """يفحص الأخبار الجديدة ويرسل تنبيهات للأخبار المهمة (عاجل/اختراق/تقني/سوقي)"""
+    """يفحص الأخبار الجديدة ويرسل تنبيهات للأخبار المهمة (عاجل/اختراق/تقني/سوقي)
+    🔧 إصلاحات:
+    - احترام alert_categories
+    - تطبيق ALERT_COOLDOWN
+    - استخدام deduplicate_news قبل الفلترة
+    - منع التكرار عبر المصادر
+    - 🆕 احترام bot_shutdown
+    """
     time.sleep(20)
     while True:
         try:
+            # 🆕 احترام الإيقاف الكامل للبوت
+            if bot_shutdown:
+                log.info("🔇 Bot is shutdown — skipping news scan")
+                time.sleep(300)
+                continue
             if not auto_alerts_enabled:
                 time.sleep(300)
                 continue
@@ -936,24 +1050,36 @@ def scan_news_loop():
             if not news:
                 time.sleep(300)
                 continue
+            # 🔧 إصلاح: إزالة المكرر قبل الفلترة
+            news = deduplicate_news(news)
             now = time.time()
             alerts_sent = 0
-            # 🆕 نفحص آخر 40 خبر
+            # نفحص آخر 40 خبر
             for item in news[:40]:
                 categories = classify_news(item)
-                # 🆕 نرسل الأخبار المهمة: عاجل، اختراق، ETF، تقني، أو سوقي
+                # الأخبار المهمة
                 important_cats = ["breaking", "hack", "etf", "tech", "market", "whale", "fed", "trump"]
-                if not any(c in categories for c in important_cats):
+                matched_cats = [c for c in categories if c in important_cats]
+                if not matched_cats:
+                    continue
+                # 🔧 إصلاح: احترام alert_categories - إن كانت كل الفئات المطابقة معطّلة، تخطّي
+                allowed_cats = [c for c in matched_cats if is_category_allowed(c)]
+                if not allowed_cats:
                     continue
                 h = news_hash(item)
-                key = f"news_{h}"
                 # 🆕 ذاكرة دائمة: إذا الخبر أُرسل من قبل، لا تعد إرساله أبداً
                 if h in sent_news_hashes:
                     continue
-                # 🆕 تحديث الذاكرة الدائمة
+                # 🔧 إصلاح: تطبيق ALERT_COOLDOWN - فحص آخر تنبيه
+                if h in last_alerts_hashes:
+                    last_time = last_alerts_hashes[h]
+                    if now - last_time < ALERT_COOLDOWN:
+                        continue
+                # تحديث الذاكرة الدائمة + cooldown
                 sent_news_hashes.add(h)
                 save_sent_news()
-                # 🆕 ترجمة الخبر قبل الإرسال
+                last_alerts_hashes[h] = now
+                # ترجمة الخبر قبل الإرسال
                 translate_news_item(item)
                 # إرسال للجميع - التنسيق المبسط
                 msg = fmt_news_item(item, show_summary=True, translate=True)
@@ -962,6 +1088,10 @@ def scan_news_loop():
                 alerts_sent += 1
             if alerts_sent > 0:
                 log.info(f"🔔 Sent {alerts_sent} news alerts")
+            # 🔧 إصلاح: تنظيف last_alerts_hashes من المدخلات القديمة (>24 ساعة)
+            old_hashes = [h for h, t in last_alerts_hashes.items() if now - t > 86400]
+            for h in old_hashes:
+                del last_alerts_hashes[h]
             time.sleep(300)  # كل 5 دقائق
         except Exception as e:
             log.warning(f"scan_news_loop err: {e}")
@@ -996,7 +1126,9 @@ def send_telegram(chat_id, msg, image_url=None):
         return False
 
 def send_msg(msg, kb=None, cid=None):
-    """إرسال رسالة عادية (للمالك أو مستخدم محدد)"""
+    """إرسال رسالة عادية (للمالك أو مستخدم محدد)
+    🔧 إصلاح: تسجيل الأخطاء بدلاً من إخفائها
+    """
     t = cid or CHAT_ID
     if not t or not TOKEN:
         return
@@ -1007,12 +1139,16 @@ def send_msg(msg, kb=None, cid=None):
             p["reply_markup"] = json.dumps(kb) if isinstance(kb, dict) else kb
         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
                       json=p, timeout=15)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"send_msg err: {e}")
 
 def send_to_channel(msg, image_url=None):
-    """🆕 إرسال رسالة إلى القناة العامة (مع صورة إن وُجدت)"""
-    if not TOKEN or not CHANNEL_ID or not SEND_TO_CHANNEL:
+    """🆕 إرسال رسالة إلى القناة العامة (مع صورة إن وُجدت)
+    🔧 إصلاح: استخدام is_channel_enabled() بدلاً من SEND_TO_CHANNEL الثابت
+    """
+    if not TOKEN or not CHANNEL_ID:
+        return False
+    if not is_channel_enabled():
         return False
     result = send_telegram(CHANNEL_ID, msg, image_url)
     if result:
@@ -1020,9 +1156,15 @@ def send_to_channel(msg, image_url=None):
     return result
 
 def broadcast_alert(msg, image_url=None):
-    """🆕 إرسال التنبيه لكل المستخدمين + القناة (مع صورة إن وُجدت)"""
-    # 🆕 إرسال للقناة العامة أولاً
-    if SEND_TO_CHANNEL and CHANNEL_ID:
+    """🆕 إرسال التنبيه لكل المستخدمين + القناة (مع صورة إن وُجدت)
+    🔧 إصلاح: احترام is_channel_enabled() و bot_shutdown
+    """
+    # 🆕 احترام إيقاف البوت الكامل
+    if bot_shutdown:
+        log.info("🔇 Bot is shutdown — skipping broadcast")
+        return
+    # إرسال للقناة العامة أولاً (احترام is_channel_enabled)
+    if is_channel_enabled():
         send_to_channel(msg, image_url)
     # إرسال للمستخدمين الخاصين
     if not TOKEN or not ALLOWED_USERS:
@@ -1068,6 +1210,12 @@ def handle_update(u):
             handle_cb(cid, d, cb_id)
 
 def handle_msg(cid, txt, chat=None):
+    # 🆕 احترام الإيقاف الكامل للبوت (فقط المالك يمكنه استخدام البوت)
+    if bot_shutdown and not is_owner(cid):
+        # رد مرة واحدة فقط برسالة الإيقاف (لتفادي الإزعاج)
+        if txt == "/start":
+            send_msg("🔇 <b>البوت متوقف حالياً للصيانة.</b>\n\nيرجى المحاولة لاحقاً.", None, cid)
+        return
     # 🛡️ أوامر المالك فقط
     if is_owner(cid):
         if txt.startswith("/add "):
@@ -1132,8 +1280,11 @@ def handle_msg(cid, txt, chat=None):
             msg += "━━━━━━━━━━━━━━━━━━\n\n"
             msg += "📡 المصادر: CoinDesk, Cointelegraph, Decrypt, CNBC, Fed, Reddit\n"
             msg += f"🔔 التنبيهات: {'🟢 مفعّل' if auto_alerts_enabled else '🔴 معطّل'}\n"
-            msg += f"👥 المستخدمون: {len(ALLOWED_USERS)}\n\n"
-            msg += "اختر من القائمة بالأسفل:"
+            msg += f"👥 المستخدمون: {len(ALLOWED_USERS)}\n"
+            # 🔧 إصلاح: استخدام CHANNEL_LINK و CHANNEL_NAME بدلاً من كونها ميتة
+            if CHANNEL_LINK:
+                msg += f"📢 القناة: <a href='{CHANNEL_LINK}'>{CHANNEL_NAME}</a>\n"
+            msg += "\nاختر من القائمة بالأسفل:"
             send_msg(msg, main_kb(), cid)
         else:
             first_name = chat.get("first_name", "") if chat else ""
@@ -1143,6 +1294,9 @@ def handle_msg(cid, txt, chat=None):
             msg += "📡 مصادر موثوقة متعددة\n\n"
             msg += "✅ <b>تم تفعيل استقبال الأخبار</b>\n"
             msg += "⏳ سيصلك تنبيه فور ظهور خبر عاجل\n\n"
+            # 🔧 إصلاح: عرض رابط القناة العامة للمستخدمين العاديين
+            if CHANNEL_LINK:
+                msg += f"📢 انضم لقناتنا: <a href='{CHANNEL_LINK}'>{CHANNEL_NAME}</a>\n\n"
             msg += "💡 <i>أنت مستلم للأخبار فقط.</i>"
             send_msg(msg, None, cid)
     elif txt == "📰 آخر الأخبار":
@@ -1185,42 +1339,123 @@ def handle_msg(cid, txt, chat=None):
             send_msg("ℹ️ أنت مستلم للأخبار فقط. انتظر التنبيهات التلقائية.", None, cid)
 
 def show_settings(cid):
-    """عرض إعدادات التنبيهات"""
+    """عرض إعدادات التنبيهات
+    🔧 إصلاح: عرض الفئات الحقيقية المحترمة + إضافة أزرار تبديل
+    🆕 إضافة زر تبديل الإرسال للقناة + زر إيقاف البوت الكامل (للمالك فقط)
+    """
     status = "🟢 مفعّل" if auto_alerts_enabled else "🔴 معطّل"
+    shutdown_status = "🔴 متوقف" if bot_shutdown else "🟢 يعمل"
+    channel_status = "🟢 مفعّل" if is_channel_enabled() else "🔴 معطّل"
     msg = "⚙️ <b>إعدادات التنبيهات</b>\n"
     msg += "━━━━━━━━━━━━━━━━━━\n\n"
-    msg += f"🔔 <b>الحالة:</b> {status}\n"
+    msg += f"🔔 <b>التنبيهات:</b> {status}\n"
+    msg += f"🔇 <b>حالة البوت:</b> {shutdown_status}\n"
+    msg += f"📢 <b>القناة العامة:</b> {channel_status}\n"
+    if CHANNEL_ID:
+        msg += f"   ┗ المعرف: <code>{CHANNEL_ID}</code>\n"
     msg += f"⏰ <b>الفحص كل:</b> 5 دقائق\n"
-    msg += f"🔒 <b>Cooldown:</b> 30 دقيقة لكل خبر\n\n"
-    msg += "📊 <b>فئات التنبيه:</b>\n"
-    msg += f"  📰 أخبار كريبتو: {'🟢' if alert_categories.get('crypto', True) else '🔴'}\n"
-    msg += f"  🇺🇸 اقتصاد كلي: {'🟢' if alert_categories.get('macro', True) else '🔴'}\n"
+    msg += f"🔒 <b>Cooldown:</b> 6 ساعات لكل خبر\n\n"
+    msg += "📊 <b>فئات التنبيه (محترمة فعلياً):</b>\n"
     msg += f"  🚨 أخبار عاجلة: {'🟢' if alert_categories.get('breaking', True) else '🔴'}\n"
-    kb = {"inline_keyboard": [
+    msg += f"  📰 كريبتو (ETF/حيتان): {'🟢' if alert_categories.get('crypto', True) else '🔴'}\n"
+    msg += f"  🇺🇸 اقتصاد كلي (Fed/Trump): {'🟢' if alert_categories.get('macro', True) else '🔴'}\n"
+    msg += f"  🔧 تقني: {'🟢' if alert_categories.get('tech', True) else '🔴'}\n"
+    msg += f"  📈 سوقي: {'🟢' if alert_categories.get('market', True) else '🔴'}\n"
+    # بناء لوحة المفاتيح
+    kb_buttons = [
         [{"text": f"{'🔴 إيقاف' if auto_alerts_enabled else '🟢 تفعيل'} التنبيهات", "callback_data": "toggle_alerts"}],
-        [{"text": "✅ تم", "callback_data": "done_settings"}]
-    ]}
+        [
+            {"text": f"{'🟢' if alert_categories.get('breaking', True) else '🔴'} عاجل", "callback_data": "toggle_breaking"},
+            {"text": f"{'🟢' if alert_categories.get('crypto', True) else '🔴'} كريبتو", "callback_data": "toggle_crypto"},
+        ],
+        [
+            {"text": f"{'🟢' if alert_categories.get('macro', True) else '🔴'} اقتصاد", "callback_data": "toggle_macro"},
+            {"text": f"{'🟢' if alert_categories.get('tech', True) else '🔴'} تقني", "callback_data": "toggle_tech"},
+        ],
+        [
+            {"text": f"{'🟢' if alert_categories.get('market', True) else '🔴'} سوقي", "callback_data": "toggle_market"},
+        ],
+        # 🆕 زر تبديل الإرسال للقناة (يظهر فقط إذا كان CHANNEL_ID مضبوطاً)
+    ]
+    if CHANNEL_ID:
+        kb_buttons.append([
+            {"text": f"{'🔴 إيقاف' if is_channel_enabled() else '🟢 تفعيل'} الإرسال للقناة",
+             "callback_data": "toggle_channel"}
+        ])
+    # 🆕 زر إيقاف/تشغيل البوت الكامل (المالك فقط)
+    if is_owner(cid):
+        if bot_shutdown:
+            kb_buttons.append([
+                {"text": "🟢 تشغيل البوت (إلغاء الإيقاف)", "callback_data": "toggle_shutdown"}
+            ])
+        else:
+            kb_buttons.append([
+                {"text": "🔴 إيقاف البوت نهائياً (المالك فقط)", "callback_data": "toggle_shutdown"}
+            ])
+    kb_buttons.append([{"text": "✅ تم", "callback_data": "done_settings"}])
+    kb = {"inline_keyboard": kb_buttons}
     send_msg(msg, kb, cid)
 
 def handle_cb(cid, d, cb_id):
-    global auto_alerts_enabled
+    global auto_alerts_enabled, channel_enabled, bot_shutdown
     if not is_allowed(cid):
         try:
             requests.post(f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
                           json={"callback_query_id": cb_id, "text": "🔒 مرفوض"}, timeout=10)
-        except:
-            pass
+        except Exception as e:
+            log.warning(f"answerCallbackQuery err: {e}")
         return
     try:
         requests.post(f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
                       json={"callback_query_id": cb_id, "text": "✅"}, timeout=10)
-    except:
-        pass
+    except Exception as e:
+        log.warning(f"answerCallbackQuery err: {e}")
+    # 🔧 إصلاح: تبديل الفئات الفردية فعلياً
+    category_toggles = {
+        "toggle_breaking": "breaking",
+        "toggle_crypto": "crypto",
+        "toggle_macro": "macro",
+        "toggle_tech": "tech",
+        "toggle_market": "market",
+    }
     if d == "toggle_alerts":
         auto_alerts_enabled = not auto_alerts_enabled
         save_settings()
         status = "🟢 مفعّل" if auto_alerts_enabled else "🔴 معطّل"
         send_msg(f"✅ التنبيهات: <b>{status}</b>", main_kb(), cid)
+    elif d in category_toggles:
+        cat_key = category_toggles[d]
+        alert_categories[cat_key] = not alert_categories.get(cat_key, True)
+        save_settings()
+        status = "🟢 مفعّل" if alert_categories[cat_key] else "🔴 معطّل"
+        send_msg(f"✅ فئة {cat_key}: <b>{status}</b>", main_kb(), cid)
+    elif d == "toggle_channel":
+        # 🆕 تبديل الإرسال للقناة (المالك فقط)
+        if not is_owner(cid):
+            send_msg("🔒 هذا الخيار للمالك فقط.", main_kb(), cid)
+            return
+        if not CHANNEL_ID:
+            send_msg("❌ لم يتم ضبط CHANNEL_ID في الإعدادات.", main_kb(), cid)
+            return
+        # تبديل القيمة: None → False, False → True, True → False
+        current = is_channel_enabled()
+        channel_enabled = not current
+        save_settings()
+        status = "🟢 مفعّل" if channel_enabled else "🔴 معطّل"
+        send_msg(f"📢 الإرسال للقناة: <b>{status}</b>", main_kb(), cid)
+    elif d == "toggle_shutdown":
+        # 🆕 إيقاف/تشغيل البوت الكامل (المالك فقط)
+        if not is_owner(cid):
+            send_msg("🔒 هذا الخيار للمالك فقط.", main_kb(), cid)
+            return
+        bot_shutdown = not bot_shutdown
+        save_settings()
+        if bot_shutdown:
+            send_msg("🔴 <b>تم إيقاف البوت نهائياً!</b>\n\n❌ لن تُرسل أي تنبيهات.\n❌ لن يستجيب لأي مستخدم (إلا المالك).\n\n💡 لإعادة التشغيل: الإعدادات → تشغيل البوت", main_kb(), cid)
+            log.warning(f"🛑 Bot SHUTDOWN by owner {cid}")
+        else:
+            send_msg("🟢 <b>تم تشغيل البوت من جديد!</b>\n\n✅ التنبيهات مفعّلة.\n✅ الاستجابة عادية.", main_kb(), cid)
+            log.info(f"✅ Bot RESTARTED by owner {cid}")
     elif d == "done_settings":
         send_msg("✅ تم حفظ الإعدادات", main_kb(), cid)
 

@@ -1136,14 +1136,14 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
     keywords = extract_keywords(f"{title} {summary}")
     if keywords:
         msg += f"\n🏷️ {' • '.join(keywords[:5])}\n"
-    # 🔧 إصلاح: إضافة المصدر + الوقت
-    if source_ar:
-        msg += f"\n📡 {source_ar}"
-        if time_str:
-            msg += f" • {time_str}"
-        msg += "\n"
+    # 🔧 إصلاح: إزالة سطر المصدر والوقت بناءً على طلب المستخدم
+    # if source_ar:
+    #     msg += f"\n📡 {source_ar}"
+    #     if time_str:
+    #         msg += f" • {time_str}"
+    #     msg += "\n"
     if link:
-        msg += f"🔗 <a href='{link}'>رابط المصدر</a>\n"
+        msg += f"\n🔗 <a href='{link}'>رابط المصدر</a>\n"
     return msg
 
 def translate_source_name(source):

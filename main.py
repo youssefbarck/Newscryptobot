@@ -1292,6 +1292,16 @@ def scan_news_loop():
                 alerts_sent += 1
             # 🆕 سجل تشخيصي شامل
             log.info(f"📊 News scan: total={total_news}, important={important_news}, already_sent={already_sent}, old_skipped={old_news_skipped}, alerts_sent={alerts_sent}, sent_hashes={len(sent_news_hashes)}")
+            # 🆕 تحديث الإحصائيات اليومية
+            try:
+                # جمع فئات الأخبار المهمة في هذه الدورة
+                cats_today = []
+                for item in news[:40]:
+                    if item.get("timestamp", 0) > 0:
+                        cats_today.extend(classify_news(item))
+                update_daily_stats(alerts_sent=alerts_sent, important=important_news, total=total_news, categories=cats_today)
+            except Exception:
+                pass
             if alerts_sent > 0:
                 log.info(f"🔔 Sent {alerts_sent} news alerts")
             elif important_news > 0:
@@ -1764,6 +1774,122 @@ def self_ping():
         # 🔧 إصلاح: 5 دقائق بدلاً من 10 (آمن ضد النوم)
         time.sleep(300)
 
+
+# 🆕 إحصائيات يومية للملخص
+_daily_stats = {
+    "alerts_sent": 0,
+    "important_found": 0,
+    "total_scanned": 0,
+    "categories": {"breaking": 0, "hack": 0, "etf": 0, "fed": 0, "trump": 0, "whale": 0, "tech": 0, "market": 0},
+    "date": datetime.now(tz).strftime("%Y-%m-%d")
+}
+
+def update_daily_stats(alerts_sent=0, important=0, total=0, categories=None):
+    """🆕 تحديث إحصائيات اليوم"""
+    global _daily_stats
+    # تحقق من تغير اليوم (إعادة تعيين الإحصائيات)
+    today = datetime.now(tz).strftime("%Y-%m-%d")
+    if _daily_stats["date"] != today:
+        log.info(f"📅 New day - resetting daily stats (was {_daily_stats['date']})")
+        _daily_stats = {
+            "alerts_sent": 0, "important_found": 0, "total_scanned": 0,
+            "categories": {"breaking": 0, "hack": 0, "etf": 0, "fed": 0, "trump": 0, "whale": 0, "tech": 0, "market": 0},
+            "date": today
+        }
+    _daily_stats["alerts_sent"] += alerts_sent
+    _daily_stats["important_found"] += important
+    _daily_stats["total_scanned"] += total
+    if categories:
+        for cat in categories:
+            if cat in _daily_stats["categories"]:
+                _daily_stats["categories"][cat] += 1
+
+
+def build_daily_summary():
+    """🆕 بناء ملخص يومي للأخبار"""
+    today = datetime.now(tz).strftime("%Y-%m-%d")
+    now_str = datetime.now(tz).strftime("%H:%M")
+    msg = "📊 <b>الملخص اليومي للأخبار</b>\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n\n"
+    msg += f"📅 التاريخ: {today}\n"
+    msg += f"⏰ الوقت: {now_str}\n\n"
+    msg += "📈 <b>إحصائيات اليوم:</b>\n"
+    msg += f"   🔔 تنبيهات مُرسَلة: <b>{_daily_stats['alerts_sent']}</b>\n"
+    msg += f"   📰 أخبار مهمة: <b>{_daily_stats['important_found']}</b>\n"
+    msg += f"   📊 إجمالي فُحصت: <b>{_daily_stats['total_scanned']}</b>\n\n"
+    # توزيع الفئات
+    cats = _daily_stats["categories"]
+    total_cats = sum(cats.values())
+    if total_cats > 0:
+        msg += "🏷️ <b>توزيع الفئات:</b>\n"
+        # ترتيب الفئات تنازلياً
+        sorted_cats = sorted(cats.items(), key=lambda x: -x[1])
+        for cat, count in sorted_cats:
+            if count > 0:
+                icon = {"breaking": "🚨", "hack": "⚠️", "etf": "📊", "fed": "🏛️",
+                        "trump": "🇺🇸", "whale": "🐋", "tech": "🔧", "market": "📈"}.get(cat, "📰")
+                cat_name = {"breaking": "عاجل", "hack": "اختراق", "etf": "ETF", "fed": "الفيدرالي",
+                            "trump": "ترامب", "whale": "حيتان", "tech": "تقني", "market": "سوقي"}.get(cat, cat)
+                pct = (count / total_cats) * 100
+                msg += f"   {icon} {cat_name}: {count} ({pct:.0f}%)\n"
+    else:
+        msg += "ℹ️ لم تُرصد فئات محددة اليوم\n"
+    msg += "\n"
+    # آخر أخبار اليوم (آخر 5)
+    try:
+        news = get_all_news()
+        if news:
+            news = deduplicate_news(news)
+            # فلترة أخبار اليوم فقط
+            today_start = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            today_news = [n for n in news if n.get("timestamp", 0) >= today_start]
+            if today_news:
+                msg += f"📰 <b>آخر {min(5, len(today_news))} أخبار اليوم:</b>\n\n"
+                for item in today_news[:5]:
+                    title = item.get("title_ar") or item.get("title", "")
+                    if not title:
+                        title = item.get("title", "")
+                        title = translate_to_arabic(title)
+                    if len(title) > 80:
+                        title = title[:77] + "..."
+                    source = translate_source_name(item.get("source", ""))
+                    msg += f"• {title}\n"
+                    msg += f"  📡 {source}\n"
+    except Exception as e:
+        log.warning(f"daily summary news err: {e}")
+    msg += "\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n"
+    msg += "🤖 <i>تم إنشاء هذا الملخص تلقائياً بواسطة البوت</i>"
+    return msg
+
+
+def daily_summary_loop():
+    """🆕 يرسل ملخصاً يومياً في الساعة 23:59 بتوقيت المستخدم"""
+    log.info("📅 Daily summary loop started - will send at 23:59 daily")
+    last_summary_date = None
+    while True:
+        try:
+            now = datetime.now(tz)
+            today = now.strftime("%Y-%m-%d")
+            # تحقق: هل الساعة 23:59 (أو 23:58-00:02 للتسامح)؟
+            # وهل لم نرسل الملخص اليوم؟
+            if now.hour == 23 and now.minute >= 58 and last_summary_date != today:
+                log.info(f"📅 Sending daily summary for {today}")
+                # بناء الملخص
+                msg = build_daily_summary()
+                # إرسال لكل المستخدمين + القناة
+                broadcast_alert(msg, None)
+                last_summary_date = today
+                log.info("📅 Daily summary sent successfully")
+                # انتظر 5 دقائق قبل الفحص التالي (تجاوز نافذة 23:58-00:02)
+                time.sleep(300)
+                continue
+            # فحص كل دقيقة
+            time.sleep(60)
+        except Exception as e:
+            log.warning(f"daily_summary_loop err: {e}")
+            time.sleep(60)
+
 def start_bot():
     global _started
     if _started:
@@ -1808,6 +1934,9 @@ def start_bot():
     threading.Thread(target=lambda: run_with_restart("self_ping", self_ping),
                      daemon=True).start()
     threading.Thread(target=lambda: run_with_restart("news_scan", scan_news_loop),
+                     daemon=True).start()
+    # 🆕 thread الملخص اليومي (23:59)
+    threading.Thread(target=lambda: run_with_restart("daily_summary", daily_summary_loop),
                      daemon=True).start()
     if not wh:
         def poll():

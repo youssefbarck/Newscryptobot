@@ -75,18 +75,25 @@ NEWS_SOURCES = {
         "lang": "en"
     },
     # 🐋 مصادر الأثرياء والمستثمرين
-    # 🔧 إصلاح: تحديث رابط Benzinga (القديم لم يعد يعمل)
-    "Benzinga Markets": {
-        "url": "https://www.benzinga.com/feed/rss",
-        "category": "macro",
+    # 🔧 إصلاح: Benzinga يحظر البوتات (403) → استبدلنا بـ Crypto.News
+    "Crypto.News": {
+        "url": "https://crypto.news/feed/",
+        "category": "crypto",
         "lang": "en"
     },
     # 🔍 مجتمعي
+    # 🔧 إصلاح: Reddit JSON يُحظر → استخدم RSS من old.reddit.com
     "Reddit r/CryptoCurrency": {
-        "url": "https://www.reddit.com/r/CryptoCurrency/new.json?limit=20",
+        "url": "https://old.reddit.com/r/CryptoCurrency/.rss",
         "category": "crypto",
         "lang": "en",
-        "is_json": True
+        "is_reddit_rss": True  # marker لاستخدام REDDIT_HEADERS
+    },
+    # 🆕 مصدر إضافي: NewsBTC
+    "NewsBTC": {
+        "url": "https://www.newsbtc.com/feed/",
+        "category": "crypto",
+        "lang": "en"
     },
 }
 
@@ -664,11 +671,11 @@ def parse_rss_source(source_name, source_info):
     url = source_info["url"]
     category = source_info["category"]
     is_json = source_info.get("is_json", False)
+    is_reddit_rss = source_info.get("is_reddit_rss", False)
     items = []
     try:
         if is_json:
-            # Reddit JSON
-            # 🔧 إصلاح: استخدام REDDIT_HEADERS المخصص لتجنب الحظر
+            # Reddit JSON (قديم)
             r = requests.get(url, headers=REDDIT_HEADERS, timeout=15)
             if r.status_code == 200:
                 data = r.json()
@@ -698,8 +705,11 @@ def parse_rss_source(source_name, source_info):
                     })
         else:
             # RSS XML
-            r = requests.get(url, headers=HEADERS, timeout=15)
-            if r.status_code == 200:
+            # 🔧 إصلاح: استخدام REDDIT_HEADERS لمصادر Reddit RSS
+            headers_to_use = REDDIT_HEADERS if is_reddit_rss else HEADERS
+            r = requests.get(url, headers=headers_to_use, timeout=15)
+            # Reddit قد يرجع 429 لكن مع محتوى صالح
+            if r.status_code == 200 or (is_reddit_rss and r.status_code == 429 and r.text):
                 root = ET.fromstring(r.content)
                 # RSS 2.0
                 for item in root.findall('.//item')[:20]:
@@ -1727,19 +1737,32 @@ def health():
 def ping():
     return jsonify({"pong": True})
 
+# 🆕 endpoint خاص للـ keepalive - خفيف وسريع
+@app.route("/keepalive")
+def keepalive():
+    return jsonify({"status": "alive", "ts": int(time.time())})
+
 # ═══════════════════════════════════════════════════════════
 # تشغيل البوت
 # ═══════════════════════════════════════════════════════════
 def self_ping():
+    """🔧 إصلاح: ping كل 5 دقائق (Render ينام بعد 15 دقيقة)"""
     if not RENDER_URL:
+        log.warning("RENDER_URL not set - self_ping disabled")
         return
     time.sleep(30)
+    ping_count = 0
     while True:
         try:
-            requests.get(f"{RENDER_URL}/ping", timeout=10)
-        except Exception:
-            pass
-        time.sleep(600)
+            # 🔧 إصلاح: استخدام /keepalive (أخف) + ping كل 5 دقائق
+            r = requests.get(f"{RENDER_URL}/keepalive", timeout=10)
+            ping_count += 1
+            if ping_count % 12 == 0:  # سجل كل ساعة (12 ping × 5 دقائق)
+                log.info(f"💓 Keepalive: {ping_count} pings sent (status: {r.status_code})")
+        except Exception as e:
+            log.warning(f"self_ping err: {e}")
+        # 🔧 إصلاح: 5 دقائق بدلاً من 10 (آمن ضد النوم)
+        time.sleep(300)
 
 def start_bot():
     global _started

@@ -395,13 +395,15 @@ SETTINGS_FILE = _os.path.join(_PERSISTENT_DIR, "news_settings.json")
 # 🆕 متغيرات قابلة للتبديل وقت التشغيل
 channel_enabled = None  # None = استخدم قيمة env var الافتراضية
 bot_shutdown = False  # True = البوت متوقف تماماً (المالك فقط يمكنه إعادة تشغيله)
+# 🆕 تفعيل/إيقاف الملخص اليومي
+daily_summary_enabled = True  # True = يرسل ملخصاً في 23:59
 # 🆕 وقت إعادة التشغيل بعد إيقاف - لمنع إرسال الأخبار القديمة المتراكمة
 bot_resume_time = 0  # timestamp لآخر مرة أُعيد فيها التشغيل
 _skip_old_news_once = False  # علم لتجاوز الأخبار القديمة مرة واحدة بعد الاستئناف
 
 def load_settings():
     """🔧 تحميل الإعدادات من Gist (مع fallback محلي)"""
-    global auto_alerts_enabled, alert_categories, channel_enabled, bot_shutdown, bot_resume_time
+    global auto_alerts_enabled, alert_categories, channel_enabled, bot_shutdown, bot_resume_time, daily_summary_enabled
     loaded = False
     # محاولة من Gist أولاً
     if _GIST_ID_SETTINGS:
@@ -414,7 +416,8 @@ def load_settings():
                 channel_enabled = s.get("channel_enabled", None)
                 bot_shutdown = s.get("bot_shutdown", False)
                 bot_resume_time = s.get("bot_resume_time", 0)
-                log.info(f"✅ Loaded settings from Gist (channel={channel_enabled}, shutdown={bot_shutdown})")
+                daily_summary_enabled = s.get("daily_summary_enabled", True)
+                log.info(f"✅ Loaded settings from Gist (channel={channel_enabled}, shutdown={bot_shutdown}, summary={daily_summary_enabled})")
                 loaded = True
             except Exception as e:
                 log.warning(f"gist settings parse err: {e}")
@@ -428,6 +431,7 @@ def load_settings():
                 channel_enabled = s.get("channel_enabled", None)
                 bot_shutdown = s.get("bot_shutdown", False)
                 bot_resume_time = s.get("bot_resume_time", 0)
+                daily_summary_enabled = s.get("daily_summary_enabled", True)
                 log.info(f"✅ Loaded settings from local file")
         except Exception:
             pass
@@ -440,6 +444,7 @@ def save_settings():
         "channel_enabled": channel_enabled,
         "bot_shutdown": bot_shutdown,
         "bot_resume_time": bot_resume_time,
+        "daily_summary_enabled": daily_summary_enabled,
     }, ensure_ascii=False, indent=2)
     # حفظ في Gist
     if _GIST_ID_SETTINGS:
@@ -1775,6 +1780,11 @@ def show_settings(cid):
             {"text": f"{'🔴 إيقاف' if is_channel_enabled() else '🟢 تفعيل'} الإرسال للقناة",
              "callback_data": "toggle_channel"}
         ])
+    # 🆕 زر تبديل الملخص اليومي
+    kb_buttons.append([
+        {"text": f"{'🔴 إيقاف' if daily_summary_enabled else '🟢 تفعيل'} الملخص اليومي",
+         "callback_data": "toggle_summary"}
+    ])
     # 🆕 زر إيقاف/تشغيل البوت الكامل (المالك فقط)
     if is_owner(cid):
         if bot_shutdown:
@@ -1790,7 +1800,7 @@ def show_settings(cid):
     send_msg(msg, kb, cid)
 
 def handle_cb(cid, d, cb_id):
-    global auto_alerts_enabled, channel_enabled, bot_shutdown, bot_resume_time, _skip_old_news_once
+    global auto_alerts_enabled, channel_enabled, bot_shutdown, bot_resume_time, _skip_old_news_once, daily_summary_enabled
     if not is_allowed(cid):
         try:
             requests.post(f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
@@ -1846,6 +1856,15 @@ def handle_cb(cid, d, cb_id):
             log.warning(f"📢 Could not verify save: {e}")
         status = "🟢 مفعّل" if channel_enabled else "🔴 معطّل"
         send_msg(f"📢 الإرسال للقناة: <b>{status}</b>\n\n💾 تم الحفظ في: <code>{SETTINGS_FILE}</code>", main_kb(), cid)
+    elif d == "toggle_summary":
+        # 🆕 تبديل الملخص اليومي (المالك فقط)
+        if not is_owner(cid):
+            send_msg("🔒 هذا الخيار للمالك فقط.", main_kb(), cid)
+            return
+        daily_summary_enabled = not daily_summary_enabled
+        save_settings()
+        status = "🟢 مفعّل" if daily_summary_enabled else "🔴 معطّل"
+        send_msg(f"📅 الملخص اليومي: <b>{status}</b>", main_kb(), cid)
     elif d == "toggle_shutdown":
         # 🆕 إيقاف/تشغيل البوت الكامل (المالك فقط)
         if not is_owner(cid):
@@ -1987,7 +2006,7 @@ def build_daily_summary():
     else:
         msg += "ℹ️ لم تُرصد فئات محددة اليوم\n"
     msg += "\n"
-    # آخر أخبار اليوم (آخر 5)
+    # آخر أخبار اليوم (آخر 5) - 🆕 فقط الأخبار المهمة المُصنَّفة
     try:
         news = get_all_news()
         if news:
@@ -1995,18 +2014,35 @@ def build_daily_summary():
             # فلترة أخبار اليوم فقط
             today_start = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
             today_news = [n for n in news if n.get("timestamp", 0) >= today_start]
-            if today_news:
-                msg += f"📰 <b>آخر {min(5, len(today_news))} أخبار اليوم:</b>\n\n"
-                for item in today_news[:5]:
-                    title = item.get("title_ar") or item.get("title", "")
-                    if not title:
-                        title = item.get("title", "")
-                        title = translate_to_arabic(title)
-                    if len(title) > 80:
-                        title = title[:77] + "..."
+            # 🆕 فلترة: فقط الأخبار المهمة المُصنَّفة (استبعاد Reddit والإعلانات)
+            important_today = []
+            for item in today_news:
+                source = item.get("source", "").lower()
+                title = item.get("title", "").lower()
+                # استبعاد Reddit والمحتوى الترويجي
+                if "reddit" in source:
+                    continue
+                if any(spam in title for spam in ["tap to enter", "raffle", "giveaway", "win free"]):
+                    continue
+                # فقط الأخبار المُصنَّفة
+                cats = classify_news(item)
+                if cats:
+                    important_today.append(item)
+            if important_today:
+                msg += f"📰 <b>آخر {min(5, len(important_today))} أخبار مهمة اليوم:</b>\n\n"
+                for item in important_today[:5]:
+                    title = item.get("title", "")
+                    title_ar = item.get("title_ar", "")
+                    if not title_ar:
+                        title_ar = translate_to_arabic(title)
+                    final_title = title_ar if title_ar and title_ar != title else title
+                    if len(final_title) > 80:
+                        final_title = final_title[:77] + "..."
                     source = translate_source_name(item.get("source", ""))
-                    msg += f"• {title}\n"
+                    msg += f"• {final_title}\n"
                     msg += f"  📡 {source}\n"
+            else:
+                msg += "ℹ️ لا توجد أخبار مهمة مُصنَّفة اليوم\n"
     except Exception as e:
         log.warning(f"daily summary news err: {e}")
     msg += "\n"
@@ -2016,11 +2052,20 @@ def build_daily_summary():
 
 
 def daily_summary_loop():
-    """🆕 يرسل ملخصاً يومياً في الساعة 23:59 بتوقيت المستخدم"""
+    """🆕 يرسل ملخصاً يومياً في الساعة 23:59 بتوقيت المستخدم
+    🔧 إصلاح: احترام daily_summary_enabled
+    """
+    global daily_summary_enabled
     log.info("📅 Daily summary loop started - will send at 23:59 daily")
     last_summary_date = None
     while True:
         try:
+            # 🆕 إعادة تحميل الإعدادات
+            load_settings()
+            # 🆕 إذا كان الملخص معطّل، تخطّي
+            if not daily_summary_enabled:
+                time.sleep(300)
+                continue
             now = datetime.now(tz)
             today = now.strftime("%Y-%m-%d")
             # تحقق: هل الساعة 23:59 (أو 23:58-00:02 للتسامح)؟

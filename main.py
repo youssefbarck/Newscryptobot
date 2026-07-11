@@ -95,6 +95,37 @@ NEWS_SOURCES = {
         "category": "crypto",
         "lang": "en"
     },
+    # 🆕🆕 مصادر موثوقة وآنية (إضافة جديدة)
+    # 🌍 الجزيرة - تغطية جيوسياسية ممتازة (الشرق الأوسط، إيران، إسرائيل)
+    "Al Jazeera": {
+        "url": "https://www.aljazeera.com/xml/rss/all.xml",
+        "category": "geopolitics",
+        "lang": "en"
+    },
+    # 💼 MarketWatch - أسواق مالية وأسهم
+    "MarketWatch": {
+        "url": "https://www.marketwatch.com/rss/topstories",
+        "category": "stocks",
+        "lang": "en"
+    },
+    # 💼 Yahoo Finance - أسواق واقتصاد
+    "Yahoo Finance": {
+        "url": "https://finance.yahoo.com/news/rssindex",
+        "category": "stocks",
+        "lang": "en"
+    },
+    # 🇺🇸 CNBC Top News - أخبار عامة واقتصادية
+    "CNBC Top News": {
+        "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
+        "category": "macro",
+        "lang": "en"
+    },
+    # 🪙 BeInCrypto - مصدر كريبتو إضافي
+    "BeInCrypto": {
+        "url": "https://beincrypto.com/feed/",
+        "category": "crypto",
+        "lang": "en"
+    },
 }
 
 # 🆕 كلمات مفتاحية شاملة جداً للفلترة
@@ -129,6 +160,29 @@ KEYWORDS_WHALES = [
     "blackrock", "microstrategy", "satoshi", "binance", "cz", "changpeng zhao", "sam bankman-fried", "sbf",
     "vitalik", "vitalik buterin", "charles hoskinson", "brian armstrong", "coinbase ceo",
     "institutional", "inflows", "outflows", "accumulation",
+    # 🆕🆕 شخصيات مؤثرة جداً (تصريحات تتحرك بها الأسواق)
+    "eric trump", "donald trump jr", "don jr", "ivanka trump", "jared kushner", "melania trump",
+    "melania", "trump family", "trump organization", "truth social", "trump media",
+    "jd vance", "vp pick", "vice president",
+    "jerome powell", "powell", "fed chair", "federal reserve chair",
+    "joe biden", "kamala harris", "harris",
+    "netanyahu", "benjamin netanyahu", "khamenei", "ayatollah",
+    "mbs", "mohammed bin salman", "crown prince",
+    "schumer", "pelosi", "mccarthy", "mcconnell", "speaker",
+    "gary gensler", "sec chair", "sec chief",
+    "janet yellen", "treasury secretary", "yellen",
+    "bill gates", "jeff bezzos", "mark zuckerberg", "zuckerberg",
+    "sam altman", "openai ceo", "altman",
+    "jensen huang", "nvidia ceo", "huang",
+    "tim cook", "apple ceo",
+    "sundar pichai", "google ceo",
+    "satya nadella", "microsoft ceo",
+    "larry fink", "blackrock ceo", "fink",
+    "david einhorn", "paul tudor", "carl icahn",
+    "naval ravikant", "balaji srinivasan", "balaji",
+    "michael dell", "dell ceo",
+    "jack dorsey", "square ceo", "block ceo",
+    "pro-crypto", "anti-crypto", "crypto advocate", "crypto critic",
 ]
 
 KEYWORDS_TECH = [  # 🆕 فئة جديدة للأخبار التقنية والتحديثات
@@ -155,6 +209,63 @@ KEYWORDS_ETF = [
 KEYWORDS_HACK = [
     "hack", "exploit", "stolen", "drained", "vulnerability", "flash loan", "rug pull", "breach", "cyberattack", "security breach",
     "rekt", "drained", "empty", "compromised", "attacker", "hacker", "malicious", "phishing",
+]
+
+# 🆕 فئة الجيوسياسة - الأحداث التي تؤثر على الكريبتو والأسهم والفيدرالي
+KEYWORDS_GEOPOLITICS = [
+    # حروب وصراعات
+    "war", "conflict", "military", "strike", "airstrike", "attack", "invasion", "ceasefire",
+    "missile", "drone strike", "escalation", "retaliation", "offensive", "troops", "deploy",
+    "nuclear", "weapon", "armed", "combat", "frontline", "battlefield",
+    # دول ومناطق ساخنة
+    "iran", "israel", "gaza", "palestine", "hamas", "hezbollah", "houthi",
+    "russia", "ukraine", "putin", "zelensky", "kyiv", "moscow", "crimea",
+    "china", "taiwan", "beijing", "xi jinping", "ccp", "chinese communist",
+    "north korea", "kim jong", "pyongyang",
+    "middle east", "gulf", "red sea", "suez canal", " hormuz",
+    "syria", "lebanon", "yemen", "iraq", "afghanistan",
+    "india", "pakistan", "kashmir",
+    # طاقة ونفط (مؤثر جداً على الأسواق)
+    "oil", "crude", "crude oil", "opec", "opec+", "energy crisis", "pipeline",
+    "oil price", "oil surge", "oil spike", "gas price", "natural gas",
+    "petroleum", "refinery", "sanctions oil",
+    # عقوبات اقتصادية
+    "sanction", "sanctions", "embargo", "trade ban", "economic sanction",
+    "swift", "freeze assets", "seize",
+    # منظمات دولية
+    "nato", "un security", "united nations", "eu summit", "g7", "g20",
+    "opec meeting", "opec cut", "opec decision",
+    # توترات دبلوماسية
+    "diplomatic crisis", "expel ambassador", "sever ties", "recall ambassador",
+    "diplomatic tension", "diplomatic row",
+]
+
+# 🆕 فئة الأسواق العالمية - الأسهم والسلع التي تؤثر على الكريبتو
+KEYWORDS_STOCKS = [
+    # مؤشرات الأسهم
+    "s&p", "s&p 500", "nasdaq", "dow jones", "dow", "wall street",
+    "stock market", "equities", "stock index", "index futures",
+    "tech stocks", "ai stocks", "chip stocks", "semiconductor",
+    "magnificent seven", "mag 7", "famg", "faang",
+    # شركات كبرى مؤثرة
+    "nvidia", "apple", "microsoft", "google", "alphabet", "amazon", "meta",
+    "tesla", "jpmorgan", "goldman sachs", "berkshire",
+    # سلع وذهب
+    "gold", "gold price", "silver", "precious metal",
+    "commodities", "commodity", "copper", "lithium",
+    # سندات وعوائد
+    "treasury yields", "bond market", "yields surge", "yields drop",
+    "10-year yield", "2-year yield", "yield curve",
+    # عملات
+    "dollar index", "dxy", "usd strength", "dollar surge",
+    "yen", "yuan", "euro", "pound",
+    # بنوك مركزية أخرى
+    "ecb", "european central bank", "boj", "bank of japan", "bank of england",
+    "pboc", "people's bank of china",
+    # بيانات اقتصادية مؤثرة
+    "jobs report", "nonfarm", "non-farm", "unemployment claims",
+    "consumer sentiment", "consumer confidence", "pmi", "manufacturing",
+    "services pmi", "industrial production",
 ]
 
 # ═══════════════════════════════════════════════════════════
@@ -277,7 +388,8 @@ def save_sent_news(force=False):
 
 # 🔔 إعدادات التنبيهات
 auto_alerts_enabled = True
-alert_categories = {"crypto": True, "macro": True, "breaking": True, "tech": True, "market": True}
+# 🆕 إضافة فئتي الجيوسياسة والأسواق العالمية
+alert_categories = {"crypto": True, "macro": True, "breaking": True, "tech": True, "market": True, "geopolitics": True, "stocks": True}
 # 🔧 إصلاح: نقل الإعدادات للملف الدائم
 SETTINGS_FILE = _os.path.join(_PERSISTENT_DIR, "news_settings.json")
 # 🆕 متغيرات قابلة للتبديل وقت التشغيل
@@ -781,7 +893,9 @@ def get_all_news():
     return all_items
 
 def classify_news(item):
-    """🆕 يصنف الخبر بدقة باستخدام حدود الكلمات وفئات موسعة"""
+    """🆕 يصنف الخبر بدقة باستخدام حدود الكلمات وفئات موسعة
+    🔧 إصلاح: إضافة فئتي الجيوسياسة والأسواق العالمية
+    """
     title = item.get("title", "").lower()
     summary = item.get("summary", "").lower()
     text = f"{title} {summary}"
@@ -807,6 +921,12 @@ def classify_news(item):
         categories.append("tech")
     if any(has_word(text, kw) for kw in KEYWORDS_MARKET):
         categories.append("market")
+    # 🆕 فئة الجيوسياسة (حروب، إيران، إسرائيل، روسيا، نفط، إلخ)
+    if any(has_word(text, kw) for kw in KEYWORDS_GEOPOLITICS):
+        categories.append("geopolitics")
+    # 🆕 فئة الأسواق العالمية (أسهم، ذهب، سندات، بنوك مركزية)
+    if any(has_word(text, kw) for kw in KEYWORDS_STOCKS):
+        categories.append("stocks")
     return categories
 
 def get_coin_keywords(text):
@@ -982,6 +1102,10 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
         icon = "🔧"
     elif "market" in categories:
         icon = "📈"
+    elif "geopolitics" in categories:
+        icon = "🌍"  # 🆕 جيوسياسة
+    elif "stocks" in categories:
+        icon = "💼"  # 🆕 أسواق عالمية
     else:
         icon = "📰"
     # 🔧 إصلاح: استخدام translate_source_name() و time_ago()
@@ -1018,16 +1142,27 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
     return msg
 
 def translate_source_name(source):
-    """🆕 ترجمة أسماء المصادر للعربية"""
+    """🆕 ترجمة أسماء المصادر للعربية
+    🆕🆕 إضافة المصادر الجديدة الموثوقة
+    """
     sources_ar = {
         "CoinDesk": "كوين ديسك",
         "Cointelegraph": "كوين تيليغراف",
         "Decrypt": "ديكريبٽ",
         "Bitcoin.com": "بيتكوين دوت كوم",
-        "CNBC Economy": "سي إن بي سي",
+        "CNBC Economy": "سي إن بي سي - اقتصاد",
+        "CNBC White House": "سي إن بي سي - البيت الأبيض",
+        "CNBC Top News": "سي إن بي سي - عام",
         "Federal Reserve": "الفيدرالي الأمريكي",
         "Forexlive": "فوركس لايف",
         "Reddit r/CryptoCurrency": "مجتمع الكريبتو",
+        "Crypto.News": "كريبتو نيوز",
+        "NewsBTC": "نيوز بي تي سي",
+        # 🆕 مصادر جديدة
+        "Al Jazeera": "الجزيرة",
+        "MarketWatch": "ماركت ووتش",
+        "Yahoo Finance": "ياهو فاينانس",
+        "BeInCrypto": "بي إن كريبتو",
     }
     return sources_ar.get(source, source)
 
@@ -1158,7 +1293,9 @@ def news_hash(item):
     return hashlib.md5(hash_input.encode()).hexdigest()[:12]
 
 def is_category_allowed(category):
-    """🔧 إصلاح: فحص إن كانت الفئة مفعّلة في alert_categories"""
+    """🔧 إصلاح: فحص إن كانت الفئة مفعّلة في alert_categories
+    🆕 إضافة فئتي الجيوسياسة والأسواق العالمية
+    """
     # mapping: category → key in alert_categories
     cat_map = {
         "breaking": "breaking",
@@ -1169,6 +1306,9 @@ def is_category_allowed(category):
         "whale": "crypto",
         "fed": "macro",
         "trump": "macro",
+        # 🆕 فئات جديدة
+        "geopolitics": "geopolitics",  # حروب، إيران، نفط، إلخ
+        "stocks": "stocks",            # أسهم، ذهب، سندات
     }
     key = cat_map.get(category, "crypto")
     return alert_categories.get(key, True)
@@ -1260,7 +1400,7 @@ def scan_news_loop():
                     continue
                 categories = classify_news(item)
                 # الأخبار المهمة
-                important_cats = ["breaking", "hack", "etf", "tech", "market", "whale", "fed", "trump"]
+                important_cats = ["breaking", "hack", "etf", "tech", "market", "whale", "fed", "trump", "geopolitics", "stocks"]
                 matched_cats = [c for c in categories if c in important_cats]
                 if not matched_cats:
                     continue
@@ -1606,6 +1746,8 @@ def show_settings(cid):
     msg += f"  🇺🇸 اقتصاد كلي (Fed/Trump): {'🟢' if alert_categories.get('macro', True) else '🔴'}\n"
     msg += f"  🔧 تقني: {'🟢' if alert_categories.get('tech', True) else '🔴'}\n"
     msg += f"  📈 سوقي: {'🟢' if alert_categories.get('market', True) else '🔴'}\n"
+    msg += f"  🌍 جيوسياسة (حروب/نفط): {'🟢' if alert_categories.get('geopolitics', True) else '🔴'}\n"
+    msg += f"  💼 أسواق عالمية (أسهم/ذهب): {'🟢' if alert_categories.get('stocks', True) else '🔴'}\n"
     # بناء لوحة المفاتيح
     kb_buttons = [
         [{"text": f"{'🔴 إيقاف' if auto_alerts_enabled else '🟢 تفعيل'} التنبيهات", "callback_data": "toggle_alerts"}],
@@ -1619,6 +1761,12 @@ def show_settings(cid):
         ],
         [
             {"text": f"{'🟢' if alert_categories.get('market', True) else '🔴'} سوقي", "callback_data": "toggle_market"},
+            # 🆕 زر الجيوسياسة
+            {"text": f"{'🟢' if alert_categories.get('geopolitics', True) else '🔴'} جيوسياسة", "callback_data": "toggle_geopolitics"},
+        ],
+        [
+            # 🆕 زر الأسواق العالمية
+            {"text": f"{'🟢' if alert_categories.get('stocks', True) else '🔴'} أسواق", "callback_data": "toggle_stocks"},
         ],
         # 🆕 زر تبديل الإرسال للقناة (يظهر فقط إذا كان CHANNEL_ID مضبوطاً)
     ]
@@ -1662,6 +1810,8 @@ def handle_cb(cid, d, cb_id):
         "toggle_macro": "macro",
         "toggle_tech": "tech",
         "toggle_market": "market",
+        "toggle_geopolitics": "geopolitics",
+        "toggle_stocks": "stocks",
     }
     if d == "toggle_alerts":
         auto_alerts_enabled = not auto_alerts_enabled
@@ -1780,7 +1930,7 @@ _daily_stats = {
     "alerts_sent": 0,
     "important_found": 0,
     "total_scanned": 0,
-    "categories": {"breaking": 0, "hack": 0, "etf": 0, "fed": 0, "trump": 0, "whale": 0, "tech": 0, "market": 0},
+    "categories": {"breaking": 0, "hack": 0, "etf": 0, "fed": 0, "trump": 0, "whale": 0, "tech": 0, "market": 0, "geopolitics": 0, "stocks": 0},
     "date": datetime.now(tz).strftime("%Y-%m-%d")
 }
 
@@ -1793,7 +1943,7 @@ def update_daily_stats(alerts_sent=0, important=0, total=0, categories=None):
         log.info(f"📅 New day - resetting daily stats (was {_daily_stats['date']})")
         _daily_stats = {
             "alerts_sent": 0, "important_found": 0, "total_scanned": 0,
-            "categories": {"breaking": 0, "hack": 0, "etf": 0, "fed": 0, "trump": 0, "whale": 0, "tech": 0, "market": 0},
+            "categories": {"breaking": 0, "hack": 0, "etf": 0, "fed": 0, "trump": 0, "whale": 0, "tech": 0, "market": 0, "geopolitics": 0, "stocks": 0},
             "date": today
         }
     _daily_stats["alerts_sent"] += alerts_sent
@@ -1827,9 +1977,11 @@ def build_daily_summary():
         for cat, count in sorted_cats:
             if count > 0:
                 icon = {"breaking": "🚨", "hack": "⚠️", "etf": "📊", "fed": "🏛️",
-                        "trump": "🇺🇸", "whale": "🐋", "tech": "🔧", "market": "📈"}.get(cat, "📰")
+                        "trump": "🇺🇸", "whale": "🐋", "tech": "🔧", "market": "📈",
+                        "geopolitics": "🌍", "stocks": "💼"}.get(cat, "📰")
                 cat_name = {"breaking": "عاجل", "hack": "اختراق", "etf": "ETF", "fed": "الفيدرالي",
-                            "trump": "ترامب", "whale": "حيتان", "tech": "تقني", "market": "سوقي"}.get(cat, cat)
+                            "trump": "ترامب", "whale": "حيتان", "tech": "تقني", "market": "سوقي",
+                            "geopolitics": "جيوسياسة", "stocks": "أسواق عالمية"}.get(cat, cat)
                 pct = (count / total_cats) * 100
                 msg += f"   {icon} {cat_name}: {count} ({pct:.0f}%)\n"
     else:

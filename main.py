@@ -167,12 +167,15 @@ _GITHUB_TOKEN = _os.environ.get("GITHUB_TOKEN", "")
 _GIST_ID_SETTINGS = _os.environ.get("GIST_ID_SETTINGS", "")  # Gist ID for news_settings.json
 _GIST_ID_SENT_NEWS = _os.environ.get("GIST_ID_SENT_NEWS", "")  # Gist ID for sent_news.json
 _GIST_ID_ALLOWED = _os.environ.get("GIST_ID_ALLOWED", "")  # Gist ID for allowed_users.json
-# fallback محلي (للحالات الطارئة)
-_PERSISTENT_DIR = _os.environ.get("PERSISTENT_DIR", "/tmp")
+# 🔧 إصلاح: استخدام /tmp كـ fallback محلي (موجود دائماً على Render)
+_PERSISTENT_DIR = "/tmp"
 SENT_NEWS_FILE = _os.path.join(_PERSISTENT_DIR, "sent_news.json")
 SETTINGS_FILE_LOCAL = _os.path.join(_PERSISTENT_DIR, "news_settings.json")
 ALLOWED_FILE_LOCAL = _os.path.join(_PERSISTENT_DIR, "allowed_users.json")
 sent_news_hashes = set()  # كل أخبار تم إرسالها
+# 🔧 إصلاح: علم لتأجيل الحفظ (batch save) لتقليل طلبات API
+_sent_news_dirty = False  # True = يوجد تغييرات غير محفوظة
+_last_sent_news_save = 0  # آخر وقت حفظ (timestamp)
 
 # 🆕 دوال GitHub Gist للمخزن الدائم المجاني
 def _gist_get(gist_id, filename):
@@ -239,18 +242,31 @@ def load_sent_news():
     except Exception:
         sent_news_hashes = set()
 
-def save_sent_news():
-    """🆕 حفظ الأخبار المُرسلة (في Gist + محلي)"""
+def save_sent_news(force=False):
+    """🆕 حفظ الأخبار المُرسلة (في Gist + محلي)
+    🔧 إصلاح: حفظ مجمّع (batch) - كل 60 ثانية أو عند الإجبار
+    """
+    global _sent_news_dirty, _last_sent_news_save
+    _sent_news_dirty = True
+    now = time.time()
+    # 🔧 إصلاح: حفظ فقط كل 60 ثانية أو عند الإجبار (force=True)
+    if not force and (now - _last_sent_news_save) < 60:
+        return
+    _sent_news_dirty = False
+    _last_sent_news_save = now
     content = json.dumps({"hashes": list(sent_news_hashes)[-500:]})
     # حفظ في Gist
     if _GIST_ID_SENT_NEWS:
-        _gist_set(_GIST_ID_SENT_NEWS, "sent_news.json", content)
-    # حفظ محلي كـ cache
+        if _gist_set(_GIST_ID_SENT_NEWS, "sent_news.json", content):
+            log.info(f"💾 Saved {len(sent_news_hashes)} hashes to Gist")
+        else:
+            log.warning("⚠️ Failed to save sent_news to Gist")
+    # حفظ محلي كـ cache (في /tmp الذي يوجد دائماً)
     try:
         with open(SENT_NEWS_FILE, "w") as f:
             f.write(content)
-    except Exception as e:
-        log.warning(f"save_sent_news local err: {e}")
+    except Exception:
+        pass
 
 # 🔔 إعدادات التنبيهات
 auto_alerts_enabled = True
@@ -312,12 +328,13 @@ def save_settings():
             log.info("💾 Settings saved to Gist")
         else:
             log.warning("⚠️ Failed to save settings to Gist")
-    # حفظ محلي كـ cache
+    # حفظ محلي كـ cache - 🔧 إصلاح: إنشاء المجلد أولاً
     try:
+        _os.makedirs(_os.path.dirname(SETTINGS_FILE_LOCAL), exist_ok=True)
         with open(SETTINGS_FILE_LOCAL, "w") as f:
             f.write(content)
-    except Exception as e:
-        log.warning(f"save_settings local err: {e}")
+    except Exception:
+        pass
 
 def is_channel_enabled():
     """🆕 يعيد True إذا كان الإرسال للقناة مفعّل (يحترم التبديل وقت التشغيل)
@@ -362,12 +379,13 @@ def save_dynamic_allowed(users_set):
     if _GIST_ID_ALLOWED:
         if not _gist_set(_GIST_ID_ALLOWED, "allowed_users.json", content):
             log.warning("⚠️ Failed to save allowed_users to Gist")
-    # حفظ محلي
+    # حفظ محلي - 🔧 إصلاح: إنشاء المجلد أولاً
     try:
+        _os.makedirs(_os.path.dirname(ALLOWED_FILE_LOCAL), exist_ok=True)
         with open(ALLOWED_FILE_LOCAL, "w") as f:
             f.write(content)
-    except Exception as e:
-        log.warning(f"save_allowed local err: {e}")
+    except Exception:
+        pass
 
 _dynamic_allowed = load_dynamic_allowed()
 
@@ -1212,12 +1230,18 @@ def scan_news_loop():
             news = deduplicate_news(news)
             now = time.time()
             alerts_sent = 0
+            # 🆕 سجل تشخيصي: كم خبراً متاحاً وكم مستوفياً للشروط
+            total_news = len(news)
+            important_news = 0
+            already_sent = 0
+            old_news_skipped = 0
             # نفحص آخر 40 خبر
             for item in news[:40]:
                 # 🆕 فحص إضافي: تجاوز الأخبار القديمة (timestamp < 30 دقيقة)
                 # هذا يمنع إرسال أخبار قديمة جداً حتى لو لم تكن في sent_news_hashes
                 item_ts = item.get("timestamp", 0)
                 if item_ts > 0 and (now - item_ts) > 1800:  # 30 دقيقة
+                    old_news_skipped += 1
                     # أضفها لـ sent_news_hashes حتى لا تُفحص مرة أخرى
                     h_old = news_hash(item)
                     if h_old not in sent_news_hashes:
@@ -1230,6 +1254,7 @@ def scan_news_loop():
                 matched_cats = [c for c in categories if c in important_cats]
                 if not matched_cats:
                     continue
+                important_news += 1
                 # 🔧 إصلاح: احترام alert_categories - إن كانت كل الفئات المطابقة معطّلة، تخطّي
                 allowed_cats = [c for c in matched_cats if is_category_allowed(c)]
                 if not allowed_cats:
@@ -1237,6 +1262,7 @@ def scan_news_loop():
                 h = news_hash(item)
                 # 🆕 ذاكرة دائمة: إذا الخبر أُرسل من قبل، لا تعد إرساله أبداً
                 if h in sent_news_hashes:
+                    already_sent += 1
                     continue
                 # 🔧 إصلاح: تطبيق ALERT_COOLDOWN - فحص آخر تنبيه
                 if h in last_alerts_hashes:
@@ -1254,8 +1280,16 @@ def scan_news_loop():
                 image_url = item.get("image", "")
                 broadcast_alert(msg, image_url)
                 alerts_sent += 1
+            # 🆕 سجل تشخيصي شامل
+            log.info(f"📊 News scan: total={total_news}, important={important_news}, already_sent={already_sent}, old_skipped={old_news_skipped}, alerts_sent={alerts_sent}, sent_hashes={len(sent_news_hashes)}")
             if alerts_sent > 0:
                 log.info(f"🔔 Sent {alerts_sent} news alerts")
+            elif important_news > 0:
+                log.info(f"ℹ️ Found {important_news} important news but all already sent or in cooldown")
+            else:
+                log.info("ℹ️ No important news found in this scan")
+            # 🔧 إصلاح: حفظ مجمّع إجباري في نهاية كل دورة
+            save_sent_news(force=True)
             # 🔧 إصلاح: تنظيف last_alerts_hashes من المدخلات القديمة (>24 ساعة)
             old_hashes = [h for h, t in last_alerts_hashes.items() if now - t > 86400]
             for h in old_hashes:

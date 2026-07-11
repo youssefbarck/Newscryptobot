@@ -193,10 +193,13 @@ SETTINGS_FILE = _os.path.join(_PERSISTENT_DIR, "news_settings.json")
 # 🆕 متغيرات قابلة للتبديل وقت التشغيل
 channel_enabled = None  # None = استخدم قيمة env var الافتراضية
 bot_shutdown = False  # True = البوت متوقف تماماً (المالك فقط يمكنه إعادة تشغيله)
+# 🆕 وقت إعادة التشغيل بعد إيقاف - لمنع إرسال الأخبار القديمة المتراكمة
+bot_resume_time = 0  # timestamp لآخر مرة أُعيد فيها التشغيل
+_skip_old_news_once = False  # علم لتجاوز الأخبار القديمة مرة واحدة بعد الاستئناف
 
 def load_settings():
     """🔧 تحميل الإعدادات من الملف الدائم (يشمل channel_enabled و bot_shutdown)"""
-    global auto_alerts_enabled, alert_categories, channel_enabled, bot_shutdown
+    global auto_alerts_enabled, alert_categories, channel_enabled, bot_shutdown, bot_resume_time
     try:
         with open(SETTINGS_FILE, "r") as f:
             s = json.load(f)
@@ -206,6 +209,8 @@ def load_settings():
             channel_enabled = s.get("channel_enabled", None)
             # 🆕 تحميل حالة الإيقاف الكامل
             bot_shutdown = s.get("bot_shutdown", False)
+            # 🆕 تحميل وقت آخر استئناف
+            bot_resume_time = s.get("bot_resume_time", 0)
     except Exception:
         pass
 
@@ -218,15 +223,25 @@ def save_settings():
                 "alert_categories": alert_categories,
                 "channel_enabled": channel_enabled,
                 "bot_shutdown": bot_shutdown,
+                "bot_resume_time": bot_resume_time,
             }, f)
     except Exception as e:
         log.warning(f"save_settings err: {e}")
 
 def is_channel_enabled():
-    """🆕 يعيد True إذا كان الإرسال للقناة مفعّل (يحترم التبديل وقت التشغيل)"""
+    """🆕 يعيد True إذا كان الإرسال للقناة مفعّل (يحترم التبديل وقت التشغيل)
+    🔧 إصلاح: قراءة صريحة للمتغير العالمي + سجل للتشخيص
+    """
+    global channel_enabled
+    # قراءة القيمة الحالية
     if channel_enabled is not None:
-        return channel_enabled and bool(CHANNEL_ID)
-    return SEND_TO_CHANNEL and bool(CHANNEL_ID)
+        result = channel_enabled and bool(CHANNEL_ID)
+        log.info(f"📢 is_channel_enabled: channel_enabled={channel_enabled}, result={result}")
+        return result
+    # fallback إلى env var
+    result = SEND_TO_CHANNEL and bool(CHANNEL_ID)
+    log.info(f"📢 is_channel_enabled: using env fallback SEND_TO_CHANNEL={SEND_TO_CHANNEL}, result={result}")
+    return result
 
 # 🔒 القائمة البيضاء
 # 🔧 إصلاح: نقل القائمة البيضاء للملف الدائم
@@ -1030,7 +1045,11 @@ def scan_news_loop():
     - استخدام deduplicate_news قبل الفلترة
     - منع التكرار عبر المصادر
     - 🆕 احترام bot_shutdown
+    - 🔧 إصلاح: قراءة channel_enabled مباشرة من globals في كل دورة
+    - 🆕 منع إرسال الأخبار القديمة المتراكمة أثناء فترة الإيقاف
     """
+    global bot_shutdown, channel_enabled, auto_alerts_enabled, alert_categories
+    global bot_resume_time, _skip_old_news_once
     time.sleep(20)
     while True:
         try:
@@ -1041,6 +1060,50 @@ def scan_news_loop():
                 continue
             if not auto_alerts_enabled:
                 time.sleep(300)
+                continue
+            # 🔧 إصلاح: إعادة تحميل الإعدادات من الملف في كل دورة
+            # هذا يضمن أن أي تغيير في channel_enabled يُقرأ حتى لو لم يُرَ من thread آخر
+            try:
+                with open(SETTINGS_FILE, "r") as f:
+                    s = json.load(f)
+                    if "channel_enabled" in s:
+                        channel_enabled = s["channel_enabled"]
+                    if "bot_shutdown" in s:
+                        bot_shutdown = s["bot_shutdown"]
+                    if "auto_alerts_enabled" in s:
+                        auto_alerts_enabled = s["auto_alerts_enabled"]
+                    if "alert_categories" in s:
+                        alert_categories = s["alert_categories"]
+                    if "bot_resume_time" in s:
+                        bot_resume_time = s["bot_resume_time"]
+            except Exception:
+                pass
+            # 🆕 فحص: هل نحن في أول دورة بعد استئناف البوت؟
+            # إذا نعم، نضيف كل الأخبار الحالية (القديمة) لـ sent_news_hashes دون إرسال
+            if bot_resume_time > 0 and not _skip_old_news_once:
+                log.info(f"🔄 First scan after resume at {datetime.fromtimestamp(bot_resume_time, tz=tz).strftime('%H:%M:%S')} — marking old news as sent")
+                # مسح الكاش للحصول على أخبار طازجة
+                if "all_news" in _cache:
+                    del _cache["all_news"]
+                old_news = get_all_news()
+                old_news = deduplicate_news(old_news)
+                skipped_count = 0
+                for item in old_news:
+                    item_ts = item.get("timestamp", 0)
+                    # الأخبار الأقدم من وقت الاستئناف = قديمة، تجاوزها
+                    if item_ts > 0 and item_ts < bot_resume_time:
+                        h = news_hash(item)
+                        if h not in sent_news_hashes:
+                            sent_news_hashes.add(h)
+                            skipped_count += 1
+                if skipped_count > 0:
+                    save_sent_news()
+                    log.info(f"⏭️ Skipped {skipped_count} old news items (accumulated during shutdown)")
+                _skip_old_news_once = True
+                # إعادة ضبط bot_resume_time بعد المعالجة
+                bot_resume_time = 0
+                save_settings()
+                time.sleep(60)  # انتظر دقيقة قبل بدء الفحص الحقيقي
                 continue
             log.info("🔍 Scanning news for important alerts...")
             # مسح الكاش للحصول على أخبار طازجة
@@ -1056,6 +1119,16 @@ def scan_news_loop():
             alerts_sent = 0
             # نفحص آخر 40 خبر
             for item in news[:40]:
+                # 🆕 فحص إضافي: تجاوز الأخبار القديمة (timestamp < 30 دقيقة)
+                # هذا يمنع إرسال أخبار قديمة جداً حتى لو لم تكن في sent_news_hashes
+                item_ts = item.get("timestamp", 0)
+                if item_ts > 0 and (now - item_ts) > 1800:  # 30 دقيقة
+                    # أضفها لـ sent_news_hashes حتى لا تُفحص مرة أخرى
+                    h_old = news_hash(item)
+                    if h_old not in sent_news_hashes:
+                        sent_news_hashes.add(h_old)
+                        save_sent_news()
+                    continue
                 categories = classify_news(item)
                 # الأخبار المهمة
                 important_cats = ["breaking", "hack", "etf", "tech", "market", "whale", "fed", "trump"]
@@ -1144,11 +1217,13 @@ def send_msg(msg, kb=None, cid=None):
 
 def send_to_channel(msg, image_url=None):
     """🆕 إرسال رسالة إلى القناة العامة (مع صورة إن وُجدت)
-    🔧 إصلاح: استخدام is_channel_enabled() بدلاً من SEND_TO_CHANNEL الثابت
+    🔧 إصلاح: فحص مزدوج + سجل عند الحظر
     """
     if not TOKEN or not CHANNEL_ID:
+        log.info("📢 send_to_channel: BLOCKED (no TOKEN or CHANNEL_ID)")
         return False
     if not is_channel_enabled():
+        log.info("📢 send_to_channel: BLOCKED by is_channel_enabled()=False")
         return False
     result = send_telegram(CHANNEL_ID, msg, image_url)
     if result:
@@ -1157,15 +1232,20 @@ def send_to_channel(msg, image_url=None):
 
 def broadcast_alert(msg, image_url=None):
     """🆕 إرسال التنبيه لكل المستخدمين + القناة (مع صورة إن وُجدت)
-    🔧 إصلاح: احترام is_channel_enabled() و bot_shutdown
+    🔧 إصلاح: احترام is_channel_enabled() و bot_shutdown + سجلات تشخيص
     """
+    global bot_shutdown, channel_enabled
     # 🆕 احترام إيقاف البوت الكامل
     if bot_shutdown:
         log.info("🔇 Bot is shutdown — skipping broadcast")
         return
-    # إرسال للقناة العامة أولاً (احترام is_channel_enabled)
-    if is_channel_enabled():
+    # 🔧 إصلاح: فحص صريح قبل الإرسال للقناة
+    channel_ok = is_channel_enabled()
+    log.info(f"📡 broadcast_alert: channel_ok={channel_ok}, channel_enabled={channel_enabled}")
+    if channel_ok:
         send_to_channel(msg, image_url)
+    else:
+        log.info("📡 broadcast_alert: SKIPPED channel (disabled by owner)")
     # إرسال للمستخدمين الخاصين
     if not TOKEN or not ALLOWED_USERS:
         send_msg(msg)
@@ -1397,7 +1477,7 @@ def show_settings(cid):
     send_msg(msg, kb, cid)
 
 def handle_cb(cid, d, cb_id):
-    global auto_alerts_enabled, channel_enabled, bot_shutdown
+    global auto_alerts_enabled, channel_enabled, bot_shutdown, bot_resume_time, _skip_old_news_once
     if not is_allowed(cid):
         try:
             requests.post(f"https://api.telegram.org/bot{TOKEN}/answerCallbackQuery",
@@ -1441,20 +1521,35 @@ def handle_cb(cid, d, cb_id):
         current = is_channel_enabled()
         channel_enabled = not current
         save_settings()
+        log.info(f"📢 Channel toggle: was={current}, now={channel_enabled}, saved to {SETTINGS_FILE}")
+        # 🔧 إصلاح: تأكيد الحفظ
+        try:
+            with open(SETTINGS_FILE, "r") as f:
+                saved = json.load(f)
+                log.info(f"📢 Verified saved channel_enabled={saved.get('channel_enabled')}")
+        except Exception as e:
+            log.warning(f"📢 Could not verify save: {e}")
         status = "🟢 مفعّل" if channel_enabled else "🔴 معطّل"
-        send_msg(f"📢 الإرسال للقناة: <b>{status}</b>", main_kb(), cid)
+        send_msg(f"📢 الإرسال للقناة: <b>{status}</b>\n\n💾 تم الحفظ في: <code>{SETTINGS_FILE}</code>", main_kb(), cid)
     elif d == "toggle_shutdown":
         # 🆕 إيقاف/تشغيل البوت الكامل (المالك فقط)
         if not is_owner(cid):
             send_msg("🔒 هذا الخيار للمالك فقط.", main_kb(), cid)
             return
         bot_shutdown = not bot_shutdown
+        # 🆕 عند إعادة التشغيل، سجّل وقت الاستئناف لمنع إرسال الأخبار القديمة
+        if not bot_shutdown:
+            bot_resume_time = time.time()
+            _skip_old_news_once = False  # إعادة ضبط العلم
+            log.info(f"🔄 Bot resumed at {bot_resume_time} — old news will be skipped")
+        else:
+            log.warning(f"🛑 Bot SHUTDOWN by owner {cid}")
         save_settings()
         if bot_shutdown:
-            send_msg("🔴 <b>تم إيقاف البوت نهائياً!</b>\n\n❌ لن تُرسل أي تنبيهات.\n❌ لن يستجيب لأي مستخدم (إلا المالك).\n\n💡 لإعادة التشغيل: الإعدادات → تشغيل البوت", main_kb(), cid)
+            send_msg("🔴 <b>تم إيقاف البوت نهائياً!</b>\n\n❌ لن تُرسل أي تنبيهات.\n❌ لن يستجيب لأي مستخدم (إلا المالك).\n\n💡 لإعادة التشغيل: الإعدادات → تشغيل البوت\n\nℹ️ عند إعادة التشغيل، لن تُرسل الأخبار القديمة المتراكمة أثناء الإيقاف.", main_kb(), cid)
             log.warning(f"🛑 Bot SHUTDOWN by owner {cid}")
         else:
-            send_msg("🟢 <b>تم تشغيل البوت من جديد!</b>\n\n✅ التنبيهات مفعّلة.\n✅ الاستجابة عادية.", main_kb(), cid)
+            send_msg("🟢 <b>تم تشغيل البوت من جديد!</b>\n\n✅ التنبيهات مفعّلة.\n✅ الاستجابة عادية.\n⏭️ تم تجاوز الأخبار القديمة المتراكمة أثناء الإيقاف.", main_kb(), cid)
             log.info(f"✅ Bot RESTARTED by owner {cid}")
     elif d == "done_settings":
         send_msg("✅ تم حفظ الإعدادات", main_kb(), cid)

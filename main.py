@@ -790,11 +790,14 @@ def _restore_terms(translated_text, restore_map):
     return result
 
 
+_deepl_disabled_until = 0  # 🆕 تعطيل DeepL مؤقتاً عند فشل الاتصال لتقليل التحذيرات
+
 def translate_to_arabic(text, force=False):
     """ترجمة النص للعربية بجودة عالية
     🆕🆕 حماية أسماء المشاريع والتوكنات من الترجمة الخاطئة
     🌟 دعم DeepL API (الأفضل) مع Fallback لـ Google
     """
+    global _deepl_disabled_until
     if not text or len(text) < 3:
         return text
     # اختصار النص الطويل جداً قبل الترجمة
@@ -809,11 +812,11 @@ def translate_to_arabic(text, force=False):
     protected_text, restore_map = _protect_terms(text)
     translated = None
 
-    # 🌟 محاولة 1: DeepL API (إذا كان المفتاح متوفراً)
+    # 🌟 محاولة 1: DeepL API (إذا كان المفتاح متوفراً ولم يتم تعطيله مؤقتاً)
     deepl_key = _os.environ.get("DEEPL_API_KEY", "")
-    if deepl_key:
+    now_ts = time.time()
+    if deepl_key and now_ts > _deepl_disabled_until:
         try:
-            # DeepL Free API endpoint
             r = requests.post(
                 "https://api-free.deepl.com/v2/translate",
                 data={
@@ -828,11 +831,14 @@ def translate_to_arabic(text, force=False):
                 translated = r.json()["translations"][0]["text"]
                 log.info("🌐 DeepL translation: SUCCESS")
             else:
-                log.warning(f"DeepL API returned {r.status_code}")
+                # 🆕 تعطيل DeepL لمدة ساعة لتقليل التحذيرات المزعجة
+                _deepl_disabled_until = now_ts + 3600
+                log.warning(f"DeepL API returned {r.status_code} — disabling DeepL for 1 hour, falling back to Google.")
         except Exception as e:
-            log.warning(f"DeepL translate err: {e}")
+            _deepl_disabled_until = now_ts + 3600
+            log.warning(f"DeepL translate err: {e} — disabling DeepL for 1 hour.")
 
-    # 🔄 محاولة 2: Google Translate (Fallback إذا فشل DeepL أو لم يُضبط)
+    # 🔄 محاولة 2: Google Translate (Fallback دائم)
     if not translated:
         try:
             url = "https://translate.googleapis.com/translate_a/single"

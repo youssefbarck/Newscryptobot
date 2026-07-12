@@ -1,52 +1,54 @@
-# News Bot - بوت الأخبار العاجلة
+# Crypto & Macro News Bot
 
 بوت يرسل الأخبار المهمة فقط إلى تلغرام كل 5 دقائق، يعمل بالكامل على GitHub Actions (مجاني 100%).
 
-## المميزات
+## 🎯 نطاق التغطية
 
-- ⏡ يعمل كل 5 دقائق تلقائياً
-- 🚨 يرسل الأخبار المهمة فقط (فلترة بالكلمات المفتاحية)
-- 🔄 يدعم عدة مصادر RSS
-- 🛡 يمنع التكرار (يحفظ حالة الأخبار المُرسلة)
-- 💾 مجاني 100% (على ريبو public)
-- 📊 إحصائيات تراكمية
+البوت يفلتر الأخبار ويرسل فقط ما يقع في إحدى هذه الفئات:
 
-## التثبيت
+| الفئة | الأمثلة |
+|------|------|
+| ₿ **كريبتو** | Bitcoin, Ethereum, ETFs, SEC, Binance, Coinbase, DeFi, NFT, Halving |
+| 🏛 **تصريحات مسؤولين** | Jerome Powell, Christine Lagarde, Janet Yellen, Gary Gensler, Presidents, Treasury, Fed, ECB, IMF |
+| 📈 **أسواق مالية** | S&P, Nasdaq, yields, inflation, CPI, jobs report, rate decisions |
 
-### 1. أنشئ ريبو public على GitHub
+## ⚙️ آلية العمل
 
-ارفع هذه الملفات:
+1. كل 5 دقائق يجمع الأخبار من 14+ مصدر RSS
+2. يصنّف كل خبر إلى (crypto / official / market) بناءً على الكلمات المفتاحية
+3. يقبل الخبر فقط إذا:
+   - تطابق مع كلمتين أو أكثر في إحدى الفئات، **أو**
+   - احتوى على كلمة عاجلة (Breaking / عاجل) + تطابق واحد
+4. يمنع التكرار عبر `state.json` (hash العنوان)
+5. يرسل الأخبار مرتبة حسب درجة التطابق
+
+## 📦 الملفات
 
 ```
 news-bot/
 ├── .github/workflows/
-│   ├── news-bot.yml      # الـ workflow الرئيسي
+│   ├── news-bot.yml      # تشغيل كل 5 دقائق
 │   └── keepalive.yml     # يمنع نوم الريبو
 ├── bot.py                # الكود الرئيسي
-├── requirements.txt      # المكتبات
-├── state.json            # حالة البوت (تُحدّث تلقائياً)
+├── requirements.txt
+├── state.json
 └── README.md
 ```
 
+## 🚀 التثبيت
+
+### 1. ارفع الملفات لريبو public على GitHub
+
 ### 2. أنشئ بوت تلغرام
+- راسل **@BotFather** → `/newbot` → احفظ التوكن
+- راسل **@userinfobot** → احصل على `CHAT_ID`
+- (للقنوات) أضف البوت كـ administrator
 
-1. راسل **@BotFather** على تلغرام
-2. أرسل `/newbot`
-3. اتبع التعليمات للحصول على التوكن
-4. راسل **@userinfobot** للحصول على `CHAT_ID` الخاص بك
-   - أو استخدم `@yourchannel` إذا كنت تريد الإرسال لقناة
-
-> **للقنوات**: أضف البوت كـ administrator في القناة
-
-### 3. أضف الـ Secrets
-
-من إعدادات الريبو:
+### 3. أضف Secrets
 
 ```
 Settings → Secrets and variables → Actions → New repository secret
 ```
-
-أضف سرّين:
 
 | Name | Value |
 |------|-------|
@@ -54,70 +56,65 @@ Settings → Secrets and variables → Actions → New repository secret
 | `CHAT_ID` | `123456789` أو `@yourchannel` |
 
 ### 4. اختبار يدوي
+تبويب **Actions** → **News Bot** → **Run workflow**
 
-1. اذهب لتبويب **Actions**
-2. اختر **News Bot**
-3. اضغط **Run workflow**
-4. شاهد الـ logs للتأكد من العمل
+## 🔧 التخصيص
 
-### 5. التشغيل التلقائي
-
-- الـ schedule سيعمل تلقائياً كل 5 دقائق
-- أول تشغيل مجدول قد يتأخر 5-15 دقيقة (طبيعي في GitHub)
-
-## تخصيص المصادر
-
+### إضافة مصادر RSS
 عدّل القاموس `SOURCES` في `bot.py`:
 
 ```python
 SOURCES = {
-    "BBC عربي":    "https://feeds.bbci.co.uk/arabic/rss.xml",
-    "العربي":      "https://www.alaraby.co.uk/rss",
+    "CoinDesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
     # أضف مصادرك هنا
 }
 ```
 
-## تخصيص الكلمات المفتاحية
+### إضافة كلمات مفتاحية
+عدّل المجموعات في `bot.py`:
+- `CRYPTO_KEYWORDS_EN` / `CRYPTO_KEYWORDS_AR` — مصطلحات الكريبتو
+- `OFFICIALS_KEYWORDS_EN` / `OFFICIALS_KEYWORDS_AR` — أسماء المسؤولين والمؤسسات
+- `MARKET_KEYWORDS_EN` / `MARKET_KEYWORDS_AR` — مصطلحات الأسواق
 
-عدّل المجموعة `IMPORTANT_KEYWORDS` في `bot.py`:
+### ضبط حساسية الفلتر
+في الدالة `main()`:
 
 ```python
-IMPORTANT_KEYWORDS = {
-    "عاجل", "مهم", "خطير",
-    # أضف كلماتك هنا
-}
+# تقليل الضجيج (إرسال أقل، جودة أعلى)
+if score < 3 and "عاجل" not in (reason or ""):
+    continue
+
+# أو زيادة الحساسية (إرسال أكثر)
+if score < 1 and "عاجل" not in (reason or ""):
+    continue
 ```
+
+## 📨 شكل الرسالة
+
+```
+₿ كريبتو  [CoinDesk]
+
+BlackRock Files for Spot Ethereum ETF
+
+🏷 السبب: عاجل + crypto
+🕐 النشر: Sat, 12 Jul 2025 14:3
+
+🔗 https://www.coindesk.com/...
+```
+
+## ⚠️ حدود GitHub Actions
+
+- الحد الأدنى لـ cron: 5 دقائق
+- قد يتأخر 5-15 دقيقة في الذروة
+- الريبو public: دقائق غير محدودة ✅
+- الريبو private: 2000 دقيقة/شهر ❌
 
 ## استكشاف الأخطاء
 
-### البوت لا يعمل
-
-1. تحقق من Secrets في إعدادات الريبو
-2. تأكد أن الريبو **public** (للحصول على دقائق غير محدودة)
-3. راجع الـ logs في تبويب Actions
-
-### لم تصل أي رسالة
-
-- قد لا توجد أخبار مهمة في آخر 5 دقائق (هذا طبيعي)
-- جرّب تشغيل `workflow_dispatch` يدوياً للتحقق
-
-### رسالة "flood limit"
-
-- زد قيمة `SEND_DELAY` في `bot.py` (مثلاً 3 ثوانٍ)
-
-### الـ schedule توقف
-
-- GitHub يوقف الـ schedules على الريوهات الخاملة 60 يوم
-- الـ workflow `keepalive.yml` يحل هذه المشكلة تلقائياً
-
-## حدود GitHub Actions
-
-- الحد الأدنى لـ cron: 5 دقائق
-- قد يتأخر التشغيل 5-15 دقيقة في الذروة
-- مدة كل job: حد أقصى 6 ساعات
-- الريو public: دقائق غير محدودة ✅
-- الريو private: 2000 دقيقة/شهر ❌
-
-## الترخيص
-
-حر للاستخدام والتعديل
+| المشكلة | الحل |
+|---|---|
+| لم تصل رسائل | قد لا توجد أخبار مهمة. جرّب تشغيل يدوي |
+| رسائل كثيرة جداً | ارفع شرط `score` إلى 3 أو أكثر |
+| رسائل قليلة جداً | اخفض شرط `score` إلى 1 |
+| Flood limit | زد `SEND_DELAY` في `bot.py` |
+| مصدر لا يعمل | تحقق من الرابط في المتصفح أولاً |

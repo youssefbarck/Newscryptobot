@@ -1159,6 +1159,32 @@ def extract_keywords(text, max_keywords=6):
             break
     return important_keywords
 
+def detect_content_type(item):
+    """🆕 يكتشف طبيعة المنشور (خبر، تحذير، قصة شخصية) ويعيد ترويسة مميزة"""
+    title = item.get("title", "").lower()
+    summary = item.get("summary", "").lower()
+    source = item.get("source", "").lower()
+    text = f"{title} {summary}"
+    
+    # 🚨 1. تحذير احتيال/اختراق
+    scam_keywords = ["rug pull", "scam", "phishing", "fraud", "beware", "stay away", 
+                     "do not use", "warning", "alert", "hacked", "stolen", "drained",
+                     "lost my", "lost everything", "got scammed", "my funds", "drained",
+                     "malicious", "fake", "impersonator", "drain"]
+    if any(kw in text for kw in scam_keywords):
+        return "🚨 <b>تحذير أمني / احتيال</b>"
+    
+    # 👤 2. قصة/تجربة شخصية (غالباً من Reddit)
+    story_keywords = ["i lost", "i got", "my experience", "how i lost", "my mistake", 
+                      "lesson learned", "i was", "i sent", "i accidentally", "my wallet",
+                      "what i learned", "my story", "i fell for"]
+    if "reddit" in source and any(kw in text for kw in story_keywords):
+        return "👤 <b>قصة / تجربة شخصية</b>"
+    
+    # 📰 3. خبر عادي (افتراضي)
+    return "📰 <b>خبر عام</b>"
+
+
 def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
     """🆕 تنسيق مبسط: صورة + العنوان + الملخص + الرابط فقط (بدون ترويسة)
     🔧 إصلاح: استخدام time_ago() و extract_keywords() و translate_source_name()
@@ -1207,6 +1233,10 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
     time_str = time_ago(timestamp)
     # البناء
     msg = ""
+    # 🆕 إضافة ترويسة مميزة توضح طبيعة المنشور
+    content_type = detect_content_type(item)
+    msg += f"{content_type}\n"
+    msg += f"━━━━━━━━━━━━━━━━━━\n"
     msg += f"{icon} <b>{final_title}</b>\n\n"
     if show_summary:
         if summary_ar and translate:

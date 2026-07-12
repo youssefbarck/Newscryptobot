@@ -34,7 +34,7 @@ jobs:
           cache: 'pip'
       - run: pip install -r requirements.txt
       - run: python main.py
-      - name: Save state
+            - name: Save state
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -42,5 +42,6 @@ jobs:
           git add news_settings.json 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "chore: update state [skip ci]"
-            git push
+            git pull --rebase origin main || true
+            git push || true
           fi

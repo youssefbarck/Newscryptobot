@@ -793,6 +793,7 @@ def _restore_terms(translated_text, restore_map):
 def translate_to_arabic(text, force=False):
     """ترجمة النص للعربية بجودة عالية
     🆕🆕 حماية أسماء المشاريع والتوكنات من الترجمة الخاطئة
+    🌟 دعم DeepL API (الأفضل) مع Fallback لـ Google
     """
     if not text or len(text) < 3:
         return text
@@ -803,45 +804,71 @@ def translate_to_arabic(text, force=False):
     cache_key = hashlib.md5(text.encode()).hexdigest()[:12]
     if not force and cache_key in _translation_cache:
         return _translation_cache[cache_key]
-    try:
-        # 🆕🆕 خطوة 1: حماية المصطلحات (استبدالها بـ placeholders)
-        protected_text, restore_map = _protect_terms(text)
-        # Google Translate endpoint مجاني (بدون API key)
-        url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            "client": "gtx",
-            "sl": "en",  # source language
-            "tl": "ar",  # target language
-            "dt": "t",
-            "q": protected_text  # 🆕 نرسل النص المحمي
-        }
-        r = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            # استخراج النص المترجم
-            translated_parts = []
-            for sentence in data[0]:
-                if sentence and sentence[0]:
-                    translated_parts.append(sentence[0])
-            translated = "".join(translated_parts).strip()
-            if translated:
-                # 🆕🆕 خطوة 2: استعادة المصطلحات الأصلية (إزالة الـ placeholders)
-                translated = _restore_terms(translated, restore_map)
-                # 🔧 إصلاح: تطبيق قاموس المصطلحات الاقتصادية لتحسين جودة الترجمة
-                translated_lower = translated.lower()
-                for en_term, ar_term in ECONOMIC_TERMS.items():
-                    if en_term in translated_lower:
-                        translated = re.sub(
-                            re.escape(en_term),
-                            ar_term,
-                            translated,
-                            flags=re.IGNORECASE
-                        )
-                _translation_cache[cache_key] = translated
-                return translated
-    except Exception as e:
-        log.warning(f"translate err: {e}")
-    return text  # في حالة الفشل، ارجع النص الأصلي
+    
+    # 🆕🆕 خطوة 1: حماية المصطلحات (استبدالها بـ placeholders)
+    protected_text, restore_map = _protect_terms(text)
+    translated = None
+
+    # 🌟 محاولة 1: DeepL API (إذا كان المفتاح متوفراً)
+    deepl_key = _os.environ.get("DEEPL_API_KEY", "")
+    if deepl_key:
+        try:
+            # DeepL Free API endpoint
+            r = requests.post(
+                "https://api-free.deepl.com/v2/translate",
+                data={
+                    "auth_key": deepl_key,
+                    "text": protected_text,
+                    "source_lang": "EN",
+                    "target_lang": "AR"
+                },
+                timeout=10
+            )
+            if r.status_code == 200:
+                translated = r.json()["translations"][0]["text"]
+        except Exception as e:
+            log.warning(f"DeepL translate err: {e}")
+
+    # 🔄 محاولة 2: Google Translate (Fallback إذا فشل DeepL أو لم يُضبط)
+    if not translated:
+        try:
+            url = "https://translate.googleapis.com/translate_a/single"
+            params = {
+                "client": "gtx",
+                "sl": "en",
+                "tl": "ar",
+                "dt": "t",
+                "q": protected_text
+            }
+            r = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                translated_parts = []
+                for sentence in data[0]:
+                    if sentence and sentence[0]:
+                        translated_parts.append(sentence[0])
+                translated = "".join(translated_parts).strip()
+        except Exception as e:
+            log.warning(f"Google translate err: {e}")
+
+    # معالجة النتيجة النهائية
+    if translated:
+        # 🆕🆕 خطوة 2: استعادة المصطلحات الأصلية (إزالة الـ placeholders)
+        translated = _restore_terms(translated, restore_map)
+        # 🔧 تطبيق قاموس المصطلحات الاقتصادية
+        translated_lower = translated.lower()
+        for en_term, ar_term in ECONOMIC_TERMS.items():
+            if en_term in translated_lower:
+                translated = re.sub(
+                    re.escape(en_term),
+                    ar_term,
+                    translated,
+                    flags=re.IGNORECASE
+                )
+        _translation_cache[cache_key] = translated
+        return translated
+            
+    return text  # في حالة الفشل التام، ارجع النص الأصلي
 
 def translate_news_item(item):
     """ترجمة عنوان وملخص الخبر للعربية"""

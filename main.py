@@ -704,8 +704,96 @@ ECONOMIC_TERMS = {
     "gold": "الذهب",
 }
 
+# 🆕🆕 قاموس الاستثناءات: أسماء مشاريع وتوكنات لا تُترجم (تبقى بالإنجليزية)
+# هذه المصطلحات نحميها من Google Translate بوضعها في placeholders أثناء الترجمة
+TRANSLATION_EXCEPTIONS = [
+    # 🔥 أمثلة شائعة تُترجم خطأً
+    "sauce", "saucer", "saucerswap",
+    "shiba inu", "shib", "doge", "dogelon mars",
+    "pepe", "wojak", "chad",
+    # 🏛️ بروتوكولات DeFi ومنصات
+    "uniswap", "pancakeswap", "sushiswap", "curve", "aave", "compound",
+    "maker", "dai", "synthetix", "yearn", "yfi",
+    "lido", "rocket pool", "frax",
+    # 🔗 Layer 2 والشبكات
+    "polygon", "arbitrum", "optimism", "base", "zksync", "starknet",
+    "scroll", "linea", "mantle", "blast", "manta",
+    "aptos", "sui", "sei", "celestia",
+    "solana", "avalanche", "fantom", "near",
+    # 💰 عملات ومشاريع
+    "chainlink", "link", "polkadot", "cosmos", "atom",
+    "ripple", "xrp", "cardano", "ada",
+    "litecoin", "bitcoin cash", "ethereum classic",
+    "filecoin", "arweave", "the graph", "render",
+    "theta", "vechain", "eos", "tron", "tezos",
+    "decentraland", "sandbox", "axie infinity", "illuvium",
+    # 🏢 شركات وبورصات
+    "binance", "coinbase", "kraken", "okx", "bybit", "kucoin",
+    "huobi", "gemini", "bitfinex", "crypto.com",
+    "grayscale", "blackrock", "fidelity",
+    # 🪙 عملات مستقرة
+    "usdt", "usdc", "tether", "busd", "dai", "tusd", "frax",
+    # 📱 تطبيقات ومحافظ
+    "metamask", "trust wallet", "phantom", "rabby",
+    # 🤖 مشاريع AI
+    "fetch.ai", "ocean protocol", "render", "singularitynet",
+    "bittensor", "tao",
+    # 🎮 Gaming والميم
+    "floki", "bonk", "pepecoin", "memecoin",
+    # 🔧 أدوات
+    "etherscan", "blockchain.com", "coingecko", "coinmarketcap",
+    # 📊 مؤشرات (تبقى كما هي)
+    "s&p 500", "nasdaq 100", "dow jones",
+    # 🌐 أخرى
+    "web3", "dao", "ico", "ido", "ieo", "ipo",
+    "erc20", "erc721", "bep20", "trc20",
+]
+
+# تحويل القائمة إلى set للبحث السريع
+_EXC_SET = set(TRANSLATION_EXCEPTIONS)
+
+
+def _protect_terms(text):
+    """🆕 يستبدل المصطلحات المحمية بـ placeholders قبل الترجمة
+    يعيد tuple: (النص مع placeholders, قاموس الاستعادة)
+    """
+    restore_map = {}
+    protected_text = text
+    for i, term in enumerate(TRANSLATION_EXCEPTIONS):
+        if term in protected_text.lower():
+            placeholder = f"XCRYPTO{i}X"
+            # استبدال preserve case
+            pattern = re.compile(re.escape(term), re.IGNORECASE)
+            protected_text = pattern.sub(placeholder, protected_text)
+            restore_map[placeholder] = term
+    return protected_text, restore_map
+
+
+def _restore_terms(translated_text, restore_map):
+    """🆕 يعيد المصطلحات الأصلية مكان الـ placeholders بعد الترجمة"""
+    if not restore_map:
+        return translated_text
+    result = translated_text
+    for placeholder, original in restore_map.items():
+        # الـ placeholder قد يتغير شكله قليلاً بعد الترجمة (مثلاً XCRYPTO0X → XCRYPTO0X)
+        # نبحث عن النمط العام
+        pattern = re.compile(r"XCRYPTO\d+X", re.IGNORECASE)
+        # نبحث عن الـ placeholder المحدد أولاً
+        if placeholder.lower() in result.lower():
+            result = re.sub(re.escape(placeholder), original, result, flags=re.IGNORECASE)
+        else:
+            # محاولة البحث عن النمط العام واستبداله بالأصل
+            # نأخذ أول match ونستبدله بالأصل
+            match = pattern.search(result)
+            if match and match.group() not in restore_map.values():
+                result = result[:match.start()] + original + result[match.end():]
+    return result
+
+
 def translate_to_arabic(text, force=False):
-    """ترجمة النص للعربية بجودة عالية"""
+    """ترجمة النص للعربية بجودة عالية
+    🆕🆕 حماية أسماء المشاريع والتوكنات من الترجمة الخاطئة
+    """
     if not text or len(text) < 3:
         return text
     # اختصار النص الطويل جداً قبل الترجمة
@@ -716,6 +804,8 @@ def translate_to_arabic(text, force=False):
     if not force and cache_key in _translation_cache:
         return _translation_cache[cache_key]
     try:
+        # 🆕🆕 خطوة 1: حماية المصطلحات (استبدالها بـ placeholders)
+        protected_text, restore_map = _protect_terms(text)
         # Google Translate endpoint مجاني (بدون API key)
         url = "https://translate.googleapis.com/translate_a/single"
         params = {
@@ -723,7 +813,7 @@ def translate_to_arabic(text, force=False):
             "sl": "en",  # source language
             "tl": "ar",  # target language
             "dt": "t",
-            "q": text
+            "q": protected_text  # 🆕 نرسل النص المحمي
         }
         r = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         if r.status_code == 200:
@@ -735,13 +825,12 @@ def translate_to_arabic(text, force=False):
                     translated_parts.append(sentence[0])
             translated = "".join(translated_parts).strip()
             if translated:
+                # 🆕🆕 خطوة 2: استعادة المصطلحات الأصلية (إزالة الـ placeholders)
+                translated = _restore_terms(translated, restore_map)
                 # 🔧 إصلاح: تطبيق قاموس المصطلحات الاقتصادية لتحسين جودة الترجمة
-                # نستبدل المصطلحات المغلوطة بالترجمة الصحيحة
                 translated_lower = translated.lower()
                 for en_term, ar_term in ECONOMIC_TERMS.items():
-                    # استبدال المصطلح الإنجليزي إن ظهر في الترجمة (يحدث أحياناً)
                     if en_term in translated_lower:
-                        # استبدال preserving case (مبدئي)
                         translated = re.sub(
                             re.escape(en_term),
                             ar_term,
@@ -1132,10 +1221,12 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
                 if len(clean_summary) > 300:
                     clean_summary = clean_summary[:297] + "..."
                 msg += f"📋 {clean_summary}\n"
-    # 🔧 إصلاح: إضافة الكلمات المفتاحية المترجمة
+    # 🔧 إصلاح: إضافة الكلمات المفتاحية المترجمة مع وسم # قبل كل كلمة
     keywords = extract_keywords(f"{title} {summary}")
     if keywords:
-        msg += f"\n🏷️ {' • '.join(keywords[:5])}\n"
+        # 🆕 إضافة # قبل كل وسم
+        hashtags = [f"#{kw.replace(' ', '_')}" for kw in keywords[:5]]
+        msg += f"\n{' '.join(hashtags)}\n"
     # 🔧 إصلاح: إزالة سطر المصدر والوقت بناءً على طلب المستخدم
     # if source_ar:
     #     msg += f"\n📡 {source_ar}"

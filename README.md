@@ -1,26 +1,14 @@
-# Crypto & Macro News Bot
+# News Bot (Crypto & Macro) - GitHub Actions Edition
 
-بوت يرسل الأخبار المهمة فقط إلى تلغرام كل 5 دقائق، يعمل بالكامل على GitHub Actions (مجاني 100%).
+بوت أخبار الكريبتو والماكرو المالية، يعمل بالكامل على GitHub Actions (مجاني 100%).
 
-## 🎯 نطاق التغطية
+## 🎯 ماذا يفعل البوت؟
 
-البوت يفلتر الأخبار ويرسل فقط ما يقع في إحدى هذه الفئات:
-
-| الفئة | الأمثلة |
-|------|------|
-| ₿ **كريبتو** | Bitcoin, Ethereum, ETFs, SEC, Binance, Coinbase, DeFi, NFT, Halving |
-| 🏛 **تصريحات مسؤولين** | Jerome Powell, Christine Lagarde, Janet Yellen, Gary Gensler, Presidents, Treasury, Fed, ECB, IMF |
-| 📈 **أسواق مالية** | S&P, Nasdaq, yields, inflation, CPI, jobs report, rate decisions |
-
-## ⚙️ آلية العمل
-
-1. كل 5 دقائق يجمع الأخبار من 14+ مصدر RSS
-2. يصنّف كل خبر إلى (crypto / official / market) بناءً على الكلمات المفتاحية
-3. يقبل الخبر فقط إذا:
-   - تطابق مع كلمتين أو أكثر في إحدى الفئات، **أو**
-   - احتوى على كلمة عاجلة (Breaking / عاجل) + تطابق واحد
-4. يمنع التكرار عبر `state.json` (hash العنوان)
-5. يرسل الأخبار مرتبة حسب درجة التطابق
+- يفحص 16+ مصدر RSS كل 5 دقائق (CoinDesk, CoinTelegraph, CNBC, Federal Reserve...)
+- يفلتر الأخبار المهمة (breaking / hack / etf / tech / market / whale / fed / trump / geopolitics)
+- يترجم العناوين للعربية
+- يرسلها لقناة تلغرام + للمستخدمين المسموحين
+- يحفظ الأخبار المُرسلة في `sent_news.json` (يُcommit للريبو) لمنع التكرار
 
 ## 📦 الملفات
 
@@ -29,92 +17,101 @@ news-bot/
 ├── .github/workflows/
 │   ├── news-bot.yml      # تشغيل كل 5 دقائق
 │   └── keepalive.yml     # يمنع نوم الريبو
-├── bot.py                # الكود الرئيسي
-├── requirements.txt
-├── state.json
+├── main.py               # الكود الرئيسي (معدّل لـ GA)
+├── requirements.txt      # pytz + requests + Flask + feedparser
+├── sent_news.json        # ذاكرة الأخبار المُرسلة
 └── README.md
 ```
 
-## 🚀 التثبيت
+## 🔧 التعديلات على main.py
 
-### 1. ارفع الملفات لريبو public على GitHub
+1. **وضع GitHub Actions** (`GITHUB_ACTIONS=true`):
+   - شغل دورة واحدة فقط (no `while True`)
+   - لا يبدأ Flask server
+   - لا يضبط webhook
+   - لا يبدأ threads
+   - يخرج بعد الانتهاء
 
-### 2. أنشئ بوت تلغرام
-- راسل **@BotFather** → `/newbot` → احفظ التوكن
-- راسل **@userinfobot** → احصل على `CHAT_ID`
-- (للقنوات) أضف البوت كـ administrator
+2. **تغيير مسار التخزين**:
+   - على Render: `/tmp/` (كما كان)
+   - على GitHub Actions: المجلد الحالي (ليُcommit للريبو)
 
-### 3. أضف Secrets
+3. **`requirements.txt`** يشمل: `pytz`, `requests`, `Flask`, `feedparser`
+
+## 🚀 الإعداد
+
+### 1. ارفع الملفات لريبو GitHub **public**
+
+### 2. أضف Secrets في إعدادات الريبو
 
 ```
 Settings → Secrets and variables → Actions → New repository secret
 ```
 
-| Name | Value |
-|------|-------|
-| `TELEGRAM_TOKEN` | `123456:ABC-DEF...` |
-| `CHAT_ID` | `123456789` أو `@yourchannel` |
+**المتغيرات المطلوبة:**
+
+| Secret | القيمة | ملاحظة |
+|--------|--------|--------|
+| `TELEGRAM_BOT_TOKEN` | `123:ABC-DEF...` | من @BotFather |
+| `TELEGRAM_CHAT_ID` | `123456789` | ID المالك (من @userinfobot) |
+| `CHANNEL_ID` | `@your_channel` أو `-100xxx` | ID القناة |
+| `CHANNEL_LINK` | `https://t.me/your_channel` | رابط القناة |
+| `CHANNEL_NAME` | `📢 قناتي` | اسم القناة للعرض |
+| `SEND_TO_CHANNEL` | `true` | تفعيل الإرسال للقناة |
+| `TIMEZONE` | `Africa/Algiers` | التوقيت المحلي |
+
+**متغيرات اختيارية (للتخزين في Gist بدل الريبو):**
+
+| Secret | الوصف |
+|--------|------|
+| `GIST_ID_SENT_NEWS` | ID of gist for sent_news.json |
+| `GIST_ID_SETTINGS` | ID of gist for settings.json |
+| `GITHUB_TOKEN` | PAT مع صلاحية gist |
+
+> إذا لم تضع GIST IDs، سيُحفظ `sent_news.json` في الريبو تلقائياً (commit بعد كل تشغيل).
+
+### 3. أضف البوت كـ Administrator في القناة
+
+مهم جداً! من إعدادات القناة → Administrators → Add Bot.
 
 ### 4. اختبار يدوي
-تبويب **Actions** → **News Bot** → **Run workflow**
 
-## 🔧 التخصيص
+من تبويب **Actions** → **News Bot** → **Run workflow**
 
-### إضافة مصادر RSS
-عدّل القاموس `SOURCES` في `bot.py`:
-
-```python
-SOURCES = {
-    "CoinDesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    # أضف مصادرك هنا
-}
+شاهد الـ logs، يجب أن ترى:
 ```
-
-### إضافة كلمات مفتاحية
-عدّل المجموعات في `bot.py`:
-- `CRYPTO_KEYWORDS_EN` / `CRYPTO_KEYWORDS_AR` — مصطلحات الكريبتو
-- `OFFICIALS_KEYWORDS_EN` / `OFFICIALS_KEYWORDS_AR` — أسماء المسؤولين والمؤسسات
-- `MARKET_KEYWORDS_EN` / `MARKET_KEYWORDS_AR` — مصطلحات الأسواق
-
-### ضبط حساسية الفلتر
-في الدالة `main()`:
-
-```python
-# تقليل الضجيج (إرسال أقل، جودة أعلى)
-if score < 3 and "عاجل" not in (reason or ""):
-    continue
-
-# أو زيادة الحساسية (إرسال أكثر)
-if score < 1 and "عاجل" not in (reason or ""):
-    continue
-```
-
-## 📨 شكل الرسالة
-
-```
-₿ كريبتو  [CoinDesk]
-
-BlackRock Files for Spot Ethereum ETF
-
-🏷 السبب: عاجل + crypto
-🕐 النشر: Sat, 12 Jul 2025 14:3
-
-🔗 https://www.coindesk.com/...
+🤖 Running in GitHub Actions mode (one-shot)
+📰 إجمالي الأخبار: 150
+  ✉️ [breaking] Bitcoin surges past...
+  ✉️ [fed] Powell signals rate cut...
+📊 النتائج:
+   • إجمالي الأخبار: 150
+   • أخبار مهمة: 8
+   • تم إرسالها: 3
+   • أُرسلت سابقاً: 5
+✅ انتهى. سيتم التشغيل التالي بعد 5 دقائق.
 ```
 
 ## ⚠️ حدود GitHub Actions
 
 - الحد الأدنى لـ cron: 5 دقائق
 - قد يتأخر 5-15 دقيقة في الذروة
-- الريبو public: دقائق غير محدودة ✅
+- الريبو **public**: دقائق غير محدودة ✅
 - الريبو private: 2000 دقيقة/شهر ❌
+
+## 🔄 التراجع لـ Render
+
+الكود لا يزال يدعم Render! إذا أردت العودة:
+1. ارفع `main.py` لـ Render (دون أي تعديل)
+2. أضف نفس الـ env vars في Render
+3. سيعمل `start_bot()` تلقائياً (لأن `GITHUB_ACTIONS` لن يكون true)
 
 ## استكشاف الأخطاء
 
 | المشكلة | الحل |
 |---|---|
-| لم تصل رسائل | قد لا توجد أخبار مهمة. جرّب تشغيل يدوي |
-| رسائل كثيرة جداً | ارفع شرط `score` إلى 3 أو أكثر |
-| رسائل قليلة جداً | اخفض شرط `score` إلى 1 |
-| Flood limit | زد `SEND_DELAY` في `bot.py` |
-| مصدر لا يعمل | تحقق من الرابط في المتصفح أولاً |
+| `ModuleNotFoundError: pytz` | تأكد أن `requirements.txt` يحتوي `pytz` |
+| لا تصل أخبار | تأكد أن البوت admin في القناة + `SEND_TO_CHANNEL=true` |
+| تكرار الأخبار | تأكد أن `sent_news.json` يُcommit للريبو |
+| `chat not found` | `CHANNEL_ID` غلط، استخدم `@channel` أو `-100xxx` |
+| Workflow لا يعمل تلقائياً | تأكد وجود commit على main خلال 60 يوم (keepalive.yml) |

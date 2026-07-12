@@ -286,7 +286,11 @@ _GIST_ID_SETTINGS = _os.environ.get("GIST_ID_SETTINGS", "")  # Gist ID for news_
 _GIST_ID_SENT_NEWS = _os.environ.get("GIST_ID_SENT_NEWS", "")  # Gist ID for sent_news.json
 _GIST_ID_ALLOWED = _os.environ.get("GIST_ID_ALLOWED", "")  # Gist ID for allowed_users.json
 # 🔧 إصلاح: استخدام /tmp كـ fallback محلي (موجود دائماً على Render)
-_PERSISTENT_DIR = "/tmp"
+# 🆕 في GitHub Actions نحفظ في المجلد الحالي ليُcommit للريبو
+if _os.environ.get("GITHUB_ACTIONS") == "true" or _os.environ.get("RUN_MODE") == "oneshot":
+    _PERSISTENT_DIR = _os.getcwd()  # المجلد الحالي ليُcommit
+else:
+    _PERSISTENT_DIR = "/tmp"
 SENT_NEWS_FILE = _os.path.join(_PERSISTENT_DIR, "sent_news.json")
 SETTINGS_FILE_LOCAL = _os.path.join(_PERSISTENT_DIR, "news_settings.json")
 ALLOWED_FILE_LOCAL = _os.path.join(_PERSISTENT_DIR, "allowed_users.json")
@@ -2351,4 +2355,115 @@ def start_bot():
         threading.Thread(target=lambda: run_with_restart("polling", poll),
                          daemon=True).start()
 
-start_bot()
+# ═══════════════════════════════════════════════════════════
+# نقطة الدخول (Entry point)
+# ═══════════════════════════════════════════════════════════
+# يدعم وضعين:
+# 1) Render (افتراضي): start_bot() - بوت دائم التشغيل مع Flask + webhook/polling
+# 2) GitHub Actions: GITHUB_ACTIONS=true → دورة واحدة فقط ثم خروج
+#    (يتجنب Flask والـ threads والـ webhook لأن GA يقتل العملية بعد دقائق)
+
+if __name__ == "__main__":
+    if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("RUN_MODE") == "oneshot":
+        # === وضع GitHub Actions: دورة واحدة ===
+        print("=" * 60)
+        print("🤖 Running in GitHub Actions mode (one-shot)")
+        print("=" * 60)
+
+        if not TOKEN:
+            print("❌ TELEGRAM_BOT_TOKEN not set!")
+            exit(1)
+
+        # تحميل الإعدادات والأخبار المُرسلة سابقاً
+        load_settings()
+        load_sent_news()
+
+        # تفعيل القناة إذا كانت معطّلة في الإعدادات المحفوظة
+        # (في GA نريد دائماً الإرسال إن وُجد CHANNEL_ID)
+        if CHANNEL_ID and not channel_enabled:
+            channel_enabled = True
+            save_settings()
+
+        # فحص دورة واحدة (بدون while True)
+        try:
+            # مسح الكاش
+            if "all_news" in _cache:
+                del _cache["all_news"]
+            news = get_all_news()
+            if not news:
+                print("⚠️ لا أخبار متاحة. إعادة المحاولة بعد 5 دقائق.")
+                exit(0)
+
+            news = deduplicate_news(news)
+            now = time.time()
+            alerts_sent = 0
+            total_news = len(news)
+            important_news = 0
+            already_sent = 0
+            old_news_skipped = 0
+
+            print(f"📰 إجمالي الأخبار: {total_news}")
+
+            # نفحص آخر 40 خبر
+            for item in news[:40]:
+                item_ts = item.get("timestamp", 0)
+                # تجاهل الأخبار الأقدم من 30 دقيقة
+                if item_ts > 0 and (now - item_ts) > 1800:
+                    old_news_skipped += 1
+                    h_old = news_hash(item)
+                    if h_old not in sent_news_hashes:
+                        sent_news_hashes.add(h_old)
+                    continue
+
+                categories = classify_news(item)
+                important_cats = ["breaking", "hack", "etf", "tech", "market", "whale",
+                                  "fed", "trump", "geopolitics", "stocks"]
+                matched_cats = [c for c in categories if c in important_cats]
+                if not matched_cats:
+                    continue
+
+                important_news += 1
+                allowed_cats = [c for c in matched_cats if is_category_allowed(c)]
+                if not allowed_cats:
+                    continue
+
+                h = news_hash(item)
+                if h in sent_news_hashes:
+                    already_sent += 1
+                    continue
+
+                # تحديث الذاكرة
+                sent_news_hashes.add(h)
+                save_sent_news()
+
+                # ترجمة الخبر قبل الإرسال
+                translate_news_item(item)
+
+                # إرسال للقناة والمستخدمين
+                msg = fmt_news_item(item, show_summary=True, translate=True)
+                image_url = item.get("image", "")
+                broadcast_alert(msg, image_url)
+                alerts_sent += 1
+                print(f"  ✉️ [{','.join(matched_cats)}] {item.get('title', '')[:60]}...")
+                time.sleep(1.5)  # تجنب flood limit
+
+            print("=" * 60)
+            print(f"📊 النتائج:")
+            print(f"   • إجمالي الأخبار: {total_news}")
+            print(f"   • أخبار مهمة: {important_news}")
+            print(f"   • تم إرسالها: {alerts_sent}")
+            print(f"   • أُرسلت سابقاً: {already_sent}")
+            print(f"   • أخبار قديمة: {old_news_skipped}")
+            print("=" * 60)
+
+            save_sent_news(force=True)
+            print("✅ انتهى. سيتم التشغيل التالي بعد 5 دقائق.")
+
+        except Exception as e:
+            import traceback
+            print(f"❌ خطأ: {e}")
+            traceback.print_exc()
+            exit(1)
+    else:
+        # === وضع Render: تشغيل دائم ===
+        start_bot()

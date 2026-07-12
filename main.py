@@ -826,6 +826,9 @@ def translate_to_arabic(text, force=False):
             )
             if r.status_code == 200:
                 translated = r.json()["translations"][0]["text"]
+                log.info("🌐 DeepL translation: SUCCESS")
+            else:
+                log.warning(f"DeepL API returned {r.status_code}")
         except Exception as e:
             log.warning(f"DeepL translate err: {e}")
 
@@ -1212,6 +1215,41 @@ def detect_content_type(item):
     return "📰 <b>خبر عام</b>"
 
 
+def get_market_sentiment(item):
+    """🆕 يحلل سياق الخبر لتحديد تأثيره على السوق (إيجابي/سلبي/معتدل)"""
+    title = item.get("title", "").lower()
+    summary = item.get("summary", "").lower()
+    text = f"{title} {summary}"
+    
+    # كلمات إيجابية (تأثير صاعد/طيب للسوق)
+    positive_keywords = [
+        "surge", "rally", "bullish", "soar", "pump", "breakout", "all-time high", "ath",
+        "approval", "approved", "adopt", "adoption", "partnership", "accumulate", "accumulation",
+        "inflows", "buy", "bull", "upside", "rally", "gain", "gains", "jump", "boom",
+        "spot etf", "pro-crypto", "friendly", "support", "embrace", "mainstream",
+        "upgrade", "milestone", "achievement", "launch", "success"
+    ]
+    
+    # كلمات سلبية (تأثير هابط/سيئ للسوق)
+    negative_keywords = [
+        "crash", "plunge", "bearish", "dump", "bear", "selloff", "sell-off", "liquidation",
+        "ban", "banned", "reject", "rejected", "lawsuit", "sues", "sued", "crackdown",
+        "hack", "exploit", "stolen", "drained", "rug pull", "fraud", "scam", "outflows",
+        "fine", "penalty", "arrest", "indictment", "sec", "gary gensler", "war", "attack",
+        "miss", "missed", "delay", "postpone", "fear", "panic", "decline", "drop", "fall"
+    ]
+    
+    pos_count = sum(1 for kw in positive_keywords if kw in text)
+    neg_count = sum(1 for kw in negative_keywords if kw in text)
+    
+    if pos_count > neg_count:
+        return "🟢 <b>تأثير متوقع: إيجابي صاعد 📈</b>"
+    elif neg_count > pos_count:
+        return "🔴 <b>تأثير متوقع: سلبي هابط 📉</b>"
+    else:
+        return "🟡 <b>تأثير متوقع: معتدل / محايد ➖</b>"
+
+
 def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
     """🆕 تنسيق مبسط: صورة + العنوان + الملخص + الرابط فقط (بدون ترويسة)
     🔧 إصلاح: استخدام time_ago() و extract_keywords() و translate_source_name()
@@ -1292,6 +1330,11 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
     #     msg += "\n"
     if link:
         msg += f"\n🔗 <a href='{link}'>رابط المصدر</a>\n"
+    
+    # 🆕 إضافة ملاحظة التأثير المتوقع على السوق (للأخبار المتعلقة بالعملات والاقتصاد)
+    sentiment = get_market_sentiment(item)
+    msg += f"\n⚠️ <i>{sentiment}</i>\n"
+    
     return msg
 
 def translate_source_name(source):

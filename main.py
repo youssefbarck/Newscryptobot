@@ -824,25 +824,216 @@ TRANSLATION_EXCEPTIONS = [
 # تحويل القائمة إلى set للبحث السريع
 _EXC_SET = set(TRANSLATION_EXCEPTIONS)
 
+# 🆕🆕 قاموس المصطلحات التي تُترجم للعربية (تُحمى أثناء NLLB ثم تُستبدل بالعربية)
+# هذه المصطلحات NLLB قد يترجمها بشكل خاطئ، لذا نحميها ونستبدلها نحن بالعربية الصحيحة
+GLOSSARY_AR = {
+    # 🪙 أسماء العملات والشبكات
+    "bitcoin": "بيتكوين",
+    "ethereum": "إيثيريوم",
+    "ether": "إيثر",
+    "binance": "بايننس",
+    "tether": "تيثر",
+    "ripple": "ريبل",
+    "solana": "سولانا",
+    "cardano": "كاردانو",
+    "avalanche": "أفالانش",
+    "polygon": "بوليجون",
+    "polkadot": "بولكادوت",
+    "chainlink": "تشين لينك",
+    "litecoin": "لايتكوين",
+    "dogecoin": "دوجكوين",
+    "tron": "ترون",
+    "eos": "إيوس",
+    "fantom": "فانتوم",
+    "near": "نير",
+    "aptos": "أبتوس",
+    "sui": "سوي",
+    "arbitrum": "أربيترام",
+    "optimism": "أوبتيزمزم",
+    "starknet": "ستاركنيت",
+    "zksync": "زي كا سينك",
+    # 🏢 شركات ومؤسسات
+    "coinbase": "كوين بيس",
+    "microstrategy": "مايكروستراتيجي",
+    "blackrock": "بلاك روك",
+    "grayscale": "جرايسكيل",
+    "fidelity": "فيديليتي",
+    "kraken": "كراكن",
+    "okx": "OKX",
+    "bybit": "بايبيت",
+    "kucoin": "كوكوين",
+    "huobi": "هووبي",
+    "gemini": "جيميني",
+    "bitfinex": "بيت فينكس",
+    # 👥 شخصيات
+    "satoshi": "ساتوشي",
+    "vitalik": "فيتاليك",
+    "saylor": "سيلور",
+    "gensler": "غنسلر",
+    "powell": "باول",
+    "yellen": "يلين",
+    "lagarde": "لاجارد",
+    # 💻 مصطلحات تقنية مركبة
+    "smart wallet": "المحفظة الذكية",
+    "smart contract": "العقد الذكي",
+    "multi-chain": "متعدد السلاسل",
+    "cross-chain": "عبر السلاسل",
+    "layer 2": "الطبقة الثانية",
+    "layer 1": "الطبقة الأولى",
+    "mainnet": "الشبكة الرئيسية",
+    "testnet": "شبكة الاختبار",
+    "hot wallet": "المحفظة الساخنة",
+    "cold wallet": "المحفظة الباردة",
+    "hardware wallet": "محفظة الأجهزة",
+    "software wallet": "محفظة البرامج",
+    # 📊 مصطلحات السوق
+    "bull market": "السوق الصاعد",
+    "bear market": "السوق الهابط",
+    "all-time high": "أعلى مستوى تاريخي",
+    "all-time low": "أدنى مستوى تاريخي",
+    "market cap": "القيمة السوقية",
+    "market capitalization": "القيمة السوقية",
+    "open interest": "المركزيات المفتوحة",
+    "funding rate": "سعر التمويل",
+    "long squeeze": "ضغط طويل",
+    "short squeeze": "ضغط قصير",
+    # 🏛️ مصطلحات مالية
+    "federal reserve": "الفيدرالي الأمريكي",
+    "interest rate": "سعر الفائدة",
+    "rate cut": "خفض الفائدة",
+    "rate hike": "رفع الفائدة",
+    "rate decision": "قرار الفائدة",
+    "rate pause": "إيقاف الفائدة",
+    "monetary policy": "السياسة النقدية",
+    "quantitative easing": "التيسير الكمي",
+    "balance sheet": "الميزانية العمومية",
+    "treasury bond": "سندات الخزانة",
+    "treasury yields": "عوائد الخزانة",
+    "inflation data": "بيانات التضخم",
+    "nonfarm payrolls": "الوظائف غير الزراعية",
+    "jobless claims": "طلبات إعانة البطالة",
+    # 🌍 مصطلحات جيوسياسية
+    "white house": "البيت الأبيض",
+    "trade war": "الحرب التجارية",
+    "stock market": "سوق الأسهم",
+    "wall street": "وول ستريت",
+    # 🔧 مصطلحات تقنية أخرى
+    "user experience": "تجربة المستخدم",
+    "user interface": "واجهة المستخدم",
+    "verification": "التحقق",
+    "upgrade": "تحديث",
+    "rollout": "إطلاق",
+    "launch": "إطلاق",
+    "release": "إصدار",
+    "roadmap": "خارطة الطريق",
+    "whitepaper": "الورقة البيضاء",
+    "airdrop": "إيردروب",
+    "staking": "التحصيص",
+    "mining": "التعدين",
+    "halving": "النصفية",
+    "hard fork": "الانقسام الصلب",
+    "soft fork": "الانقسام الناعم",
+    "proof of stake": "إثبات الحصة",
+    "proof of work": "إثبات العمل",
+    "consensus": "الإجماع",
+    "validator": "المُتحقق",
+    "node": "العقدة",
+    "decentralized": "لامركزي",
+    "decentralization": "اللامركزية",
+    "institutional": "مؤسسي",
+    "inflows": "تدفقات داخلة",
+    "outflows": "تدفقات خارجة",
+    "fund flow": "تدفق الأموال",
+    "accumulation": "التراكم",
+    # 🆕 كلمات شائعة في الأخبار
+    "saylor": "سيلور",
+    "gensler": "غنسلر",
+    "etf inflows": "تدفقات صندوق ETF",
+    "etf outflows": "تدفقات خارجة من صندوق ETF",
+    "spot bitcoin etf": "صندوق بيتكوين الفوري ETF",
+    "spot ethereum etf": "صندوق إيثيريوم الفوري ETF",
+    "hack": "اختراق",
+    "hacked": "اختراق",
+    "exploit": "ثغرة أمنية",
+    "stolen": "مُسروق",
+    "drained": "تم تصريفه",
+    "rug pull": "احتيال",
+    "breach": "اختراق أمني",
+    "cyberattack": "هجوم سيبراني",
+    "vulnerability": "ثغرة",
+    "phishing": "تصيد",
+    "compromised": "مُخترق",
+    "attacker": "المهاجم",
+    "hacker": "الهاكر",
+    # 📊 مصطلحات حركة السعر
+    "surge": "قفزة",
+    "plunge": "انهيار",
+    "crash": "انهيار",
+    "rally": "ارتفاع",
+    "correction": "تصحيح",
+    "dump": "هبوط حاد",
+    "pump": "ضخ",
+    "liquidation": "تصفية",
+    "leverage": "الرافعة المالية",
+    "futures": "العقود الآجلة",
+    "options": "الخيارات",
+    "long": "مراكز طويلة",
+    "short": "مراكز قصيرة",
+    # 🌍 مصطلحات إضافية
+    "sanction": "عقوبة",
+    "sanctions": "عقوبات",
+    "embargo": "حظر",
+    "tariff": "تعريفة جمركية",
+    "trade war": "الحرب التجارية",
+    "recession": "الركود",
+    "inflation": "التضخم",
+    "yuan": "اليوان",
+    "dollar": "الدولار",
+    "oil": "النفط",
+    "gold": "الذهب",
+    "nasdaq": "ناسداك",
+    "s&p": "مؤشر S&P",
+    "dow jones": "داو جونز",
+}
+
 
 def _protect_terms(text):
     """🆕 يستبدل المصطلحات المحمية بـ placeholders قبل الترجمة
     يعيد tuple: (النص مع placeholders, قاموس الاستعادة)
     🔧 إصلاح: حفظ النص الأصلي (بأحرفه الأصلية) للاستعادة
     🔧 إصلاح: استخدام placeholders بالأرقام فقط بين [[ ]] لتجنب ترجمتها بواسطة NLLB
+    🆕 دمج: نحمي TRANSLATION_EXCEPTIONS (تبقى إنجليزية) + GLOSSARY_AR (تُستبدل بالعربية)
     """
-    restore_map = {}
+    restore_map = {}  # placeholder → (original_text, arabic_translation_or_None)
     protected_text = text
-    for i, term in enumerate(TRANSLATION_EXCEPTIONS):
+    counter = 0
+
+    # 🆕 دمج القائمتين: نحمي كلا النوعين من الترجمة الخاطئة بواسطة NLLB
+    # 1. المصطلحات المركبة أولاً (لتجنب التداخل - "smart wallet" قبل "wallet")
+    all_terms = []
+    # مصطلحات GLOSSARY_AR (ستُستبدل بالعربية بعد الترجمة)
+    for term in GLOSSARY_AR.keys():
+        all_terms.append((term, "glossary"))
+    # مصطلحات TRANSLATION_EXCEPTIONS (ستبقى بالإنجليزية)
+    for term in TRANSLATION_EXCEPTIONS:
+        if term not in GLOSSARY_AR:  # تجنب التكرار
+            all_terms.append((term, "keep"))
+
+    # ترتيب: الأطول أولاً (لتجنب استبدال جزئي)
+    all_terms.sort(key=lambda x: len(x[0]), reverse=True)
+
+    for term, term_type in all_terms:
         if term in protected_text.lower():
-            # استخدام [[رقم]] بدلاً من XCRYPTO (NLLB لا يترجم الأرقام بين أقواس)
-            placeholder = f"[[{i}]]"
+            placeholder = f"[[{counter}]]"
             pattern = re.compile(re.escape(term), re.IGNORECASE)
             match = pattern.search(protected_text)
             if match:
                 original_match = match.group()
                 protected_text = pattern.sub(placeholder, protected_text, count=1)
-                restore_map[placeholder] = original_match
+                # حفظ: (النص الأصلي, الترجمة العربية إن وُجدت)
+                arabic_translation = GLOSSARY_AR.get(term.lower()) if term_type == "glossary" else None
+                restore_map[placeholder] = (original_match, arabic_translation)
+                counter += 1
     return protected_text, restore_map
 
 
@@ -850,21 +1041,22 @@ def _restore_terms(translated_text, restore_map):
     """🆕 يعيد المصطلحات الأصلية مكان الـ placeholders بعد الترجمة
     🔧 إصلاح: الحفاظ على الأحرف الأصلية (USDT بدل usdt)
     🔧 إصلاح: التعامل مع الترجمات التي قد تضيف مسافات حول الأرقام
+    🆕 دمج: استبدال ذكي - المختصرات تبقى إنجليزية، الأسماء تُستبدل بالعربية
     """
     if not restore_map:
         return translated_text
     result = translated_text
     # رتّب الـ placeholders للاستبدال (الأطول أولاً لتجنب التداخل)
-    sorted_placeholders = sorted(restore_map.keys(), key=len, reverse=True)
+    sorted_placeholders = sorted(restore_map.keys(), key=lambda x: int(x.replace("[[", "").replace("]]", "")), reverse=True)
 
     for placeholder in sorted_placeholders:
-        original = restore_map[placeholder]
-        # استبدل الـ placeholder بالقيمة الأصلية
-        # البحث المرن: قد يضيف NLLB مسافات أو يحول الأقواس
-        # مثلاً [[0]] قد تصبح [[ 0 ]] أو [[0]] أو حتى [[٠]] (أرقام عربية)
-        # نبحث عن النمط [[رقم]] مع容忍 للمسافات
+        original, arabic_translation = restore_map[placeholder]
+        # ماذا نستبدل به؟
+        # - لو عندنا ترجمة عربية (glossary) → نستخدمها
+        # - لو لا (keep) → نستخدم النص الأصلي بالإنجليزية
+        replacement = arabic_translation if arabic_translation else original
+
         placeholder_num = placeholder.replace("[[", "").replace("]]", "")
-        # تحويل الرقم ل阿拉伯数字 أيضًا (في حال ترجمها NLLB)
         try:
             num = int(placeholder_num)
             arabic_num = "".join("٠١٢٣٤٥٦٧٨٩"[int(d)] for d in str(num))
@@ -878,13 +1070,12 @@ def _restore_terms(translated_text, restore_map):
                 r"\[\[\s*" + re.escape(arabic_num) + r"\s*\]\]",
             ]
             for pat in patterns_to_try:
-                new_result = re.sub(pat, original, result, flags=re.IGNORECASE)
+                new_result = re.sub(pat, replacement, result, flags=re.IGNORECASE)
                 if new_result != result:
                     result = new_result
                     break
         except Exception:
-            # fallback: استبدال مباشر
-            result = re.sub(re.escape(placeholder), original, result, flags=re.IGNORECASE)
+            result = re.sub(re.escape(placeholder), replacement, result, flags=re.IGNORECASE)
 
     # تنظيف أي placeholders متبقية
     result = re.sub(r"\[\[\s*\d+\s*\]\]", "", result)

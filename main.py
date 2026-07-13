@@ -760,6 +760,7 @@ _EXC_SET = set(TRANSLATION_EXCEPTIONS)
 def _protect_terms(text):
     """🆕 يستبدل المصطلحات المحمية بـ placeholders قبل الترجمة
     يعيد tuple: (النص مع placeholders, قاموس الاستعادة)
+    🔧 إصلاح: حفظ النص الأصلي (بأحرفه الأصلية) للاستعادة
     """
     restore_map = {}
     protected_text = text
@@ -768,40 +769,110 @@ def _protect_terms(text):
             placeholder = f"XCRYPTO{i}X"
             # استبدال preserve case
             pattern = re.compile(re.escape(term), re.IGNORECASE)
-            protected_text = pattern.sub(placeholder, protected_text)
-            restore_map[placeholder] = term
+            # ابحث عن أول match واحفظه بأحرفه الأصلية
+            match = pattern.search(protected_text)
+            if match:
+                original_match = match.group()
+                protected_text = pattern.sub(placeholder, protected_text, count=1)
+                restore_map[placeholder] = original_match
     return protected_text, restore_map
 
 
 def _restore_terms(translated_text, restore_map):
-    """🆕 يعيد المصطلحات الأصلية مكان الـ placeholders بعد الترجمة"""
+    """🆕 يعيد المصطلحات الأصلية مكان الـ placeholders بعد الترجمة
+    🔧 إصلاح: الحفاظ على الأحرف الأصلية (USDT بدل usdt)
+    """
     if not restore_map:
         return translated_text
     result = translated_text
-    for placeholder, original in restore_map.items():
-        # الـ placeholder قد يتغير شكله قليلاً بعد الترجمة (مثلاً XCRYPTO0X → XCRYPTO0X)
-        # نبحث عن النمط العام
-        pattern = re.compile(r"XCRYPTO\d+X", re.IGNORECASE)
-        # نبحث عن الـ placeholder المحدد أولاً
-        if placeholder.lower() in result.lower():
-            result = re.sub(re.escape(placeholder), original, result, flags=re.IGNORECASE)
-        else:
-            # محاولة البحث عن النمط العام واستبداله بالأصل
-            # نأخذ أول match ونستبدله بالأصل
-            match = pattern.search(result)
-            if match and match.group() not in restore_map.values():
-                result = result[:match.start()] + original + result[match.end():]
+    # ابحث عن كل الـ placeholders في النص المترجم
+    pattern = re.compile(r"XCRYPTO\d+X", re.IGNORECASE)
+    # رتّب الـ placeholders للاستبدال (الأطول أولاً لتجنب التداخل)
+    sorted_placeholders = sorted(restore_map.keys(), key=len, reverse=True)
+
+    for placeholder in sorted_placeholders:
+        original = restore_map[placeholder]
+        # استبدل الـ placeholder بالقيمة الأصلية (بدون تطبيع الأحرف)
+        result = re.sub(re.escape(placeholder), original, result, flags=re.IGNORECASE)
+
+    # تنظيف أي placeholders متبقية (في حال فاتنا شيء)
+    result = pattern.sub("", result)
     return result
 
 
 _deepl_disabled_until = 0  # 🆕 تعطيل DeepL مؤقتاً عند فشل الاتصال لتقليل التحذيرات
 
+# 🆕🆕 تحميل نموذج NLLB-200 من Meta (offline، جودة عالية للعربية)
+_nllb_tokenizer = None
+_nllb_model = None
+_nllb_init_failed = False
+
+def _init_nllb():
+    """تحميل نموذج NLLB-200-distilled-600M مرة واحدة"""
+    global _nllb_tokenizer, _nllb_model, _nllb_init_failed
+    if _nllb_model is not None or _nllb_init_failed:
+        return
+    try:
+        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+        model_name = "facebook/nllb-200-distilled-600M"
+        log.info("🤖 Loading NLLB-200 model (first run downloads ~1.2GB)...")
+        _nllb_tokenizer = AutoTokenizer.from_pretrained(model_name)
+        _nllb_model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        log.info("✅ NLLB-200 model loaded successfully")
+    except Exception as e:
+        log.warning(f"⚠️ NLLB init failed: {e} — will use Google fallback")
+        _nllb_init_failed = True
+
+def _translate_nllb(text):
+    """ترجمة عبر NLLB-200 (offline، جودة عالية)"""
+    if _nllb_init_failed:
+        return None
+    _init_nllb()
+    if _nllb_model is None:
+        return None
+    try:
+        inputs = _nllb_tokenizer(text, return_tensors="pt", max_length=512, truncation=True)
+        output = _nllb_model.generate(
+            **inputs,
+            forced_bos_token_id=_nllb_tokenizer.convert_tokens_to_ids("arb_Arab"),
+            max_length=400,
+            num_beams=4,
+            length_penalty=1.0
+        )
+        return _nllb_tokenizer.batch_decode(output, skip_special_tokens=True)[0]
+    except Exception as e:
+        log.warning(f"NLLB translate err: {e}")
+        return None
+
+def _translate_google_fallback(text):
+    """ترجمة عبر Google Translate (fallback عند فشل NLLB)"""
+    try:
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "en",
+            "tl": "ar",
+            "dt": "t",
+            "q": text
+        }
+        r = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            translated_parts = []
+            for sentence in data[0]:
+                if sentence and sentence[0]:
+                    translated_parts.append(sentence[0])
+            return "".join(translated_parts).strip()
+    except Exception as e:
+        log.warning(f"Google translate err: {e}")
+    return None
+
 def translate_to_arabic(text, force=False):
-    """ترجمة النص للعربية بجودة عالية
+    """ترجمة النص للعربية بجودة عالية باستخدام NLLB-200
+    🆕🆕 محرك NLLB (من Meta) - جودة احترافية للأخبار المالية والكريبتو
     🆕🆕 حماية أسماء المشاريع والتوكنات من الترجمة الخاطئة
-    🌟 دعم DeepL API (الأفضل) مع Fallback لـ Google
+    🔄 Fallback لـ Google Translate عند فشل NLLB
     """
-    global _deepl_disabled_until
     if not text or len(text) < 3:
         return text
     # اختصار النص الطويل جداً قبل الترجمة
@@ -811,58 +882,17 @@ def translate_to_arabic(text, force=False):
     cache_key = hashlib.md5(text.encode()).hexdigest()[:12]
     if not force and cache_key in _translation_cache:
         return _translation_cache[cache_key]
-    
+
     # 🆕🆕 خطوة 1: حماية المصطلحات (استبدالها بـ placeholders)
     protected_text, restore_map = _protect_terms(text)
     translated = None
 
-    # 🌟 محاولة 1: DeepL API (إذا كان المفتاح متوفراً ولم يتم تعطيله مؤقتاً)
-    deepl_key = _os.environ.get("DEEPL_API_KEY", "")
-    now_ts = time.time()
-    if deepl_key and now_ts > _deepl_disabled_until:
-        try:
-            r = requests.post(
-                "https://api-free.deepl.com/v2/translate",
-                data={
-                    "auth_key": deepl_key,
-                    "text": protected_text,
-                    "source_lang": "EN",
-                    "target_lang": "AR"
-                },
-                timeout=10
-            )
-            if r.status_code == 200:
-                translated = r.json()["translations"][0]["text"]
-                log.info("🌐 DeepL translation: SUCCESS")
-            else:
-                # 🆕 تعطيل DeepL لمدة ساعة لتقليل التحذيرات المزعجة
-                _deepl_disabled_until = now_ts + 3600
-                log.warning(f"DeepL API returned {r.status_code} — disabling DeepL for 1 hour, falling back to Google.")
-        except Exception as e:
-            _deepl_disabled_until = now_ts + 3600
-            log.warning(f"DeepL translate err: {e} — disabling DeepL for 1 hour.")
+    # 🌟 محاولة 1: NLLB-200 (الأفضل جودة، offline)
+    translated = _translate_nllb(protected_text)
 
-    # 🔄 محاولة 2: Google Translate (Fallback دائم)
+    # 🔄 محاولة 2: Google Translate (Fallback)
     if not translated:
-        try:
-            url = "https://translate.googleapis.com/translate_a/single"
-            params = {
-                "client": "gtx",
-                "sl": "en",
-                "tl": "ar",
-                "dt": "t",
-                "q": protected_text
-            }
-            r = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-            if r.status_code == 200:
-                data = r.json()
-                translated_parts = []
-                for sentence in data[0]:
-                    if sentence and sentence[0]:
-                        translated_parts.append(sentence[0])
-                translated = "".join(translated_parts).strip()
-        except Exception as e:
-            log.warning(f"Google translate err: {e}")
+        translated = _translate_google_fallback(protected_text)
 
     # معالجة النتيجة النهائية
     if translated:
@@ -880,7 +910,7 @@ def translate_to_arabic(text, force=False):
                 )
         _translation_cache[cache_key] = translated
         return translated
-            
+
     return text  # في حالة الفشل التام، ارجع النص الأصلي
 
 def translate_news_item(item):
@@ -1261,8 +1291,9 @@ def get_market_sentiment(item):
 
 
 def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
-    """🆕 تنسيق مبسط: صورة + العنوان + الملخص + الرابط فقط (بدون ترويسة)
-    🔧 إصلاح: استخدام time_ago() و extract_keywords() و translate_source_name()
+    """🆕 تنسيق جديد مبسط:
+    🔵 [العنوان المترجم مع إيموجي العملات 💰]
+    ✉️
     """
     title = item.get("title", "")
     title_ar = item.get("title_ar", "")
@@ -1282,69 +1313,59 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
         item["summary_ar"] = summary_ar
     # العنوان النهائي (عربي فقط)
     final_title = title_ar if title_ar and translate else title
-    # تحديد رمز الخبر
-    if "breaking" in categories:
-        icon = "🚨"
-    elif "hack" in categories:
-        icon = "⚠️"
-    elif "fed" in categories or "trump" in categories:
-        icon = "🇺🇸"
-    elif "etf" in categories:
-        icon = "📊"
-    elif "whale" in categories:
-        icon = "🐋"
-    elif "tech" in categories:
-        icon = "🔧"
-    elif "market" in categories:
-        icon = "📈"
-    elif "geopolitics" in categories:
-        icon = "🌍"  # 🆕 جيوسياسة
-    elif "stocks" in categories:
-        icon = "💼"  # 🆕 أسواق عالمية
-    else:
-        icon = "📰"
-    # 🔧 إصلاح: استخدام translate_source_name() و time_ago()
-    source_ar = translate_source_name(source)
-    time_str = time_ago(timestamp)
-    # البناء
+
+    # 🆕 إضافة إيموجي 💰 بجانب كل ذكر لعملة كريبتو في العنوان
+    coin_emojis = {
+        "bitcoin": "₿", "btc": "₿",
+        "ethereum": "Ξ", "eth": "Ξ", "ether": "Ξ",
+        "usdt": "💰", "tether": "💰",
+        "usdc": "💰",
+        "binance": "🅱️", "bnb": "🅱️",
+        "xrp": "💰", "ripple": "💰",
+        "solana": "◎", "sol": "◎",
+        "cardano": "₳", "ada": "₳",
+        "dogecoin": "Ð", "doge": "Ð",
+        "avalanche": "💰", "avax": "▲",
+        "polygon": "⬡", "matic": "⬡",
+        "polkadot": "●", "dot": "●",
+        "chainlink": "⬡", "link": "⬡",
+    }
+    # إضافة 💰 بعد أي ذكر لعملة في العنوان (مع الحفاظ على حالة الأحرف الأصلية)
+    title_with_emojis = final_title
+    import re as _re
+    for coin, emoji in coin_emojis.items():
+        pattern = _re.compile(r'\b(' + _re.escape(coin) + r')\b', _re.IGNORECASE)
+        # استبدال مع الحفاظ على النص الأصلي (group 1) + إضافة الإيموجي
+        title_with_emojis = pattern.sub(lambda m: m.group(1) + f" {emoji}", title_with_emojis, count=1)
+
+    # البناء بالشكل الجديد المبسط
     msg = ""
-    # 🆕 إضافة ترويسة مميزة توضح طبيعة المنشور
-    content_type = detect_content_type(item)
-    msg += f"{content_type}\n"
-    msg += f"━━━━━━━━━━━━━━━━━━\n"
-    msg += f"{icon} <b>{final_title}</b>\n\n"
+    msg += f"🔵 {title_with_emojis}\n"
+
+    # إضافة الملخص إن وُجد (مترجم للعربية)
     if show_summary:
         if summary_ar and translate:
             clean_summary = summary_ar.strip()
             if len(clean_summary) > 300:
                 clean_summary = clean_summary[:297] + "..."
-            msg += f"📋 {clean_summary}\n"
+            if clean_summary:
+                msg += f"\n{clean_summary}\n"
         elif summary:
             translated_summary = translate_to_arabic(summary[:400])
             if translated_summary and translated_summary != summary:
                 clean_summary = translated_summary.strip()
                 if len(clean_summary) > 300:
                     clean_summary = clean_summary[:297] + "..."
-                msg += f"📋 {clean_summary}\n"
-    # 🔧 إصلاح: إضافة الكلمات المفتاحية المترجمة مع وسم # قبل كل كلمة
-    keywords = extract_keywords(f"{title} {summary}")
-    if keywords:
-        # 🆕 إضافة # قبل كل وسم
-        hashtags = [f"#{kw.replace(' ', '_')}" for kw in keywords[:5]]
-        msg += f"\n{' '.join(hashtags)}\n"
-    # 🔧 إصلاح: إزالة سطر المصدر والوقت بناءً على طلب المستخدم
-    # if source_ar:
-    #     msg += f"\n📡 {source_ar}"
-    #     if time_str:
-    #         msg += f" • {time_str}"
-    #     msg += "\n"
+                if clean_summary:
+                    msg += f"\n{clean_summary}\n"
+
+    # إضافة الرابط إن وُجد
     if link:
-        msg += f"\n🔗 <a href='{link}'>رابط المصدر</a>\n"
-    
-    # 🆕 إضافة ملاحظة التأثير المتوقع على السوق (للأخبار المتعلقة بالعملات والاقتصاد)
-    sentiment = get_market_sentiment(item)
-    msg += f"\n⚠️ <i>{sentiment}</i>\n"
-    
+        msg += f"\n🔗 {link}\n"
+
+    # ✉️ في النهاية
+    msg += "\n✉️\n"
+
     return msg
 
 def translate_source_name(source):

@@ -1112,36 +1112,70 @@ def _restore_terms(translated_text, restore_map):
 
 _deepl_disabled_until = 0  # 🆕 تعطيل DeepL مؤقتاً عند فشل الاتصال لتقليل التحذيرات
 
-# 🆕🆕 محرك الترجمة الأساسي: deep-translator (Google Translate)
-# أسرع 10 مرات من NLLB، جودة ثابتة، لا يحرف الـ placeholders
-# NLLB متاح كـ fallback (لكن معطل افتراضياً لأنه بطيء وأحياناً ينتج أخطاء كارثية)
+# 🆕🆕 محرك الترجمة الأساسي: NLLB-200 (Meta) - أفضل جودة للأخبار المالية
+# ✅ يفهم السياق المالي بشكل أفضل من Google
+# ✅ لا يخلط بين الكلمات ("US-Iran escalation" يترجمها بشكل صحيح)
+# ✅ ينتج ترجمات طبيعية (وليس حرفية مثل Google)
+# deep-translator (Google) متاح كـ fallback سريع
 _nllb_tokenizer = None
 _nllb_model = None
 _nllb_init_failed = False
 
 def _init_nllb():
-    """تحميل نموذج NLLB-200-distilled-600M (معطل افتراضياً)"""
+    """تحميل نموذج NLLB-200-distilled-600M مرة واحدة"""
     global _nllb_tokenizer, _nllb_model, _nllb_init_failed
     if _nllb_model is not None or _nllb_init_failed:
         return
-    # 🆕 NLLB معطل - نستخدم deep-translator فقط (أسرع وأكثر استقراراً)
-    _nllb_init_failed = True
-    return
+    try:
+        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+        import torch
+        model_name = "facebook/nllb-200-distilled-600M"
+        log.info("🤖 Loading NLLB-200 model (first run downloads ~1.2GB)...")
+        _nllb_tokenizer = AutoTokenizer.from_pretrained(model_name)
+        # 🆕 تحميل على CPU مع تحسينات السرعة
+        _nllb_model = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float32,  # CPU يعمل أفضل مع float32
+            low_cpu_mem_usage=True
+        )
+        _nllb_model.eval()  # وضع الاستدلال (أسرع)
+        log.info("✅ NLLB-200 model loaded successfully")
+    except Exception as e:
+        log.warning(f"⚠️ NLLB init failed: {e} — will use deep-translator fallback")
+        _nllb_init_failed = True
 
 def _translate_nllb(text):
-    """ترجمة عبر NLLB-200 (معطل - نستخدم deep-translator)"""
-    return None
+    """ترجمة عبر NLLB-200 (offline، جودة عالية للأخبار المالية)
+    🔧 تحسين: استخدام greedy decoding (أسرع) بدل beam search
+    """
+    if _nllb_init_failed:
+        return None
+    _init_nllb()
+    if _nllb_model is None:
+        return None
+    try:
+        import torch
+        inputs = _nllb_tokenizer(text, return_tensors="pt", max_length=512, truncation=True)
+        with torch.no_grad():  # 🆕 وضع الاستدلال (أسرع)
+            output = _nllb_model.generate(
+                **inputs,
+                forced_bos_token_id=_nllb_tokenizer.convert_tokens_to_ids("arb_Arab"),
+                max_length=400,
+                num_beams=1,  # 🆕 greedy decoding (أسرع 4x من beam search)
+                length_penalty=1.0,
+                do_sample=False
+            )
+        return _nllb_tokenizer.batch_decode(output, skip_special_tokens=True)[0]
+    except Exception as e:
+        log.warning(f"NLLB translate err: {e}")
+        return None
 
 def _translate_deep_translator(text):
-    """🆕 محرك الترجمة الأساسي: deep-translator (Google Translate)
-    ✅ أسرع 10 مرات من NLLB
-    ✅ جودة ثابتة للأخبار المالية
-    ✅ لا يحرف الـ placeholders
-    ✅ يستخدم Google Translate API الرسمي
+    """🆕 محرك الترجمة الاحتياطي: deep-translator (Google Translate)
+    يُستخدم عند فشل NLLB أو كـ fallback سريع
     """
     try:
         from deep_translator import GoogleTranslator
-        # تقسيم النصوص الطويلة (Google حد 5000 حرف)
         if len(text) > 4500:
             chunks = [text[i:i+4500] for i in range(0, len(text), 4500)]
             translated_chunks = GoogleTranslator(source='en', target='ar').translate_batch(chunks)
@@ -1152,7 +1186,7 @@ def _translate_deep_translator(text):
         return None
 
 def _translate_google_fallback(text):
-    """ترجمة عبر Google Translate REST API (fallback عند فشل deep-translator)"""
+    """ترجمة عبر Google Translate REST API (fallback نهائي)"""
     try:
         url = "https://translate.googleapis.com/translate_a/single"
         params = {
@@ -1175,10 +1209,11 @@ def _translate_google_fallback(text):
     return None
 
 def translate_to_arabic(text, force=False):
-    """ترجمة النص للعربية بجودة عالية
-    🆕🆕 محرك أساسي: deep-translator (Google Translate) - أسرع وأكثر استقراراً
+    """ترجمة النص للعربية بجودة احترافية
+    🆕🆕 محرك أساسي: NLLB-200 (Meta) - جودة عالية للأخبار المالية
+    🆕🆕 محرك احتياطي: deep-translator (Google) - سريع عند فشل NLLB
     🆕🆕 حماية ذكية: المختصرات تبقى إنجليزية، الأسماء تُستبدل بالعربية
-    🔄 Fallback متعدد: deep-translator → Google REST → النص الأصلي
+    🔄 Fallback متعدد: NLLB → deep-translator → Google REST → النص الأصلي
     """
     if not text or len(text) < 3:
         return text
@@ -1194,16 +1229,16 @@ def translate_to_arabic(text, force=False):
     protected_text, restore_map = _protect_terms(text)
     translated = None
 
-    # 🌟 محاولة 1: deep-translator (الأسرع والأكثر استقراراً)
-    translated = _translate_deep_translator(protected_text)
+    # 🌟 محاولة 1: NLLB-200 (الأفضل جودة للأخبار المالية)
+    translated = _translate_nllb(protected_text)
 
-    # 🔄 محاولة 2: Google Translate REST API (Fallback)
+    # 🔄 محاولة 2: deep-translator (Fallback سريع)
+    if not translated:
+        translated = _translate_deep_translator(protected_text)
+
+    # 🔄 محاولة 3: Google Translate REST API (Fallback نهائي)
     if not translated:
         translated = _translate_google_fallback(protected_text)
-
-    # 🔄 محاولة 3: NLLB (معطل افتراضياً، يُستخدم فقط لو فشل كل شيء)
-    if not translated:
-        translated = _translate_nllb(protected_text)
 
     # معالجة النتيجة النهائية
     if translated:

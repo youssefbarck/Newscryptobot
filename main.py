@@ -1610,8 +1610,12 @@ def scan_news_loop():
                 matched_cats = [c for c in categories if c in important_cats]
                 if not matched_cats:
                     continue
-                # 🆕 فلتر سياق الكريبتو: الخبر يجب أن يذكر الكريبتو صراحة
-                # ما عدا فئتي hack/etf (لأنهما كريبتو بطبيعتها)
+                # 🚨 فلتر صارم جداً: فقط الأخبار الحرجة التي تتحرك بها الأسواق
+                # المنطق: (كريبتو + حدث جوهري) أو (حدث ماكرو كبير مثل قرار الفائدة)
+                # الأخبار الجانبية (تحليلات، توقعات، إعلانات صغيرة) تُرفض
+                news_text = (item.get("title", "") + " " + item.get("summary", "")).lower()
+
+                # (1) سياق الكريبتو
                 crypto_context_keywords = [
                     "bitcoin", "btc", "ethereum", "eth", "ether", "crypto", "cryptocurrency",
                     "blockchain", "altcoin", "stablecoin", "defi", "nft", "token", "coin",
@@ -1625,14 +1629,75 @@ def scan_news_loop():
                     "بيتكوين", "إيثيريوم", "كريبتو", "عملة رقمية", "عملة مشفرة", "بلوكتشين",
                     "بايننس", "كوين بيس", "توكين", "تعدين", "محفظة",
                 ]
-                news_text = (item.get("title", "") + " " + item.get("summary", "")).lower()
                 has_crypto_context = any(kw in news_text for kw in crypto_context_keywords)
-                # الفئات التي تعتبر كريبتو بطبيعتها (لا تحتاج سياق إضافي)
-                pure_crypto_cats = {"hack", "etf", "tech"}
-                has_pure_crypto_cat = any(c in pure_crypto_cats for c in matched_cats)
-                # لو الخبر ليس فيه سياق كريبتو وليس hack/etf/tech → تخطّي
-                if not has_crypto_context and not has_pure_crypto_cat:
+
+                # (2) حدث جوهري (اختراق/موافقة/تحرك مؤسسي/تنظيم)
+                critical_event_keywords = [
+                    "hack", "hacked", "exploit", "stolen", "drained", "drain",
+                    "vulnerability", "flash loan", "rug pull", "breach", "cyberattack",
+                    "security breach", "rekt", "compromised", "attacker", "hacker",
+                    "phishing", "empty", "lost funds", "$10m", "$50m", "$100m", "$500m",
+                    "million stolen", "billion stolen",
+                    "approval", "approved", "reject", "rejected", "etf", "spot etf",
+                    "sec approves", "sec rejects", "sec sues", "sec charges",
+                    "19b-4", "s-1", "lawsuit", "sues", "sued", "crackdown",
+                    "ban", "banned", "prohibit", "sanction", "penalty", "fraud",
+                    "charges", "arrest", "indictment", "settlement", "fined", "fine",
+                    "mica", "mica regulation", "clarity act", "genius act",
+                    "stablecoin act", "fit21", "market structure",
+                    "fed", "federal reserve", "interest rate", "rate cut", "rate hike",
+                    "rate decision", "powell", "fomc", "monetary policy",
+                    "cpi", "core cpi", "ppi", "nonfarm payrolls", "inflation data",
+                    "quantitative easing", "balance sheet", "rate pause", "emergency cut",
+                    "ecb", "bank of england", "bank of japan", "pboc",
+                    "blackrock", "microstrategy", "saylor", " grayscale",
+                    "institutional inflows", "institutional outflows",
+                    "record inflows", "record outflows", "fund flow",
+                    "accumulation", "buy $", "purchases bitcoin", "adds bitcoin",
+                    "halving", "hard fork", "the merge", "ethereum 2.0",
+                    "mainnet launch", "upgrade",
+                    "crash", "surge", "plunge", "pump", "dump", "all-time high", "ath",
+                    "all-time low", "atl", "liquidation", "long squeeze", "short squeeze",
+                    "10% drop", "10% surge", "20% drop", "20% surge",
+                    "trump crypto", "trump bitcoin", "powell crypto",
+                    "gensler", "sec chair", "yellen crypto",
+                    "saylor", "vitalik", "cz", "binance ceo",
+                    "elon musk bitcoin", "elon musk crypto", "elon musk doge",
+                ]
+                has_critical_event = any(kw in news_text for kw in critical_event_keywords)
+
+                # (3) حدث ماكرو كبير (يُعفى من شرط سياق الكريبتو)
+                # أخبار الفيدرالي/الفائدة/CPI تتحرك بها كل الأسواق بما فيها الكريبتو
+                macro_critical_keywords = [
+                    "rate cut", "rate hike", "rate decision", "rate pause",
+                    "emergency cut", "fomc", "powell", "federal reserve",
+                    "cpi", "core cpi", "ppi", "nonfarm payrolls",
+                    "interest rate decision", "fed cuts", "fed hikes",
+                    "fed signals", "powell signals", "powell says",
+                ]
+                has_macro_critical = any(kw in news_text for kw in macro_critical_keywords)
+
+                # القبول: (سياق كريبتو + حدث جوهري) أو (حدث ماكرو كبير)
+                if not ((has_crypto_context and has_critical_event) or has_macro_critical):
                     continue
+
+                # (4) كلمات ترفض الخبر تلقائياً (حتى لو طابق الكلمات أعلاه)
+                rejection_keywords = [
+                    "price prediction", "price target", "forecast",
+                    "analyst says", "analyst predicts", "analyst expects",
+                    "could reach", "might reach", "may hit",
+                    "top 10", "top 5", "best coins", "best crypto",
+                    "how to buy", "how to trade", "tutorial",
+                    "watch these", "watch list", "watchlist",
+                    "newsletter", "weekly recap", "daily recap",
+                    "interview", "podcast", "review",
+                    "guide", "explained", "what is",
+                    "5 coins", "10 coins", "3 coins",
+                ]
+                has_rejection = any(kw in news_text for kw in rejection_keywords)
+                if has_rejection:
+                    continue
+
                 important_news += 1
                 # 🔧 إصلاح: احترام alert_categories - إن كانت كل الفئات المطابقة معطّلة، تخطّي
                 allowed_cats = [c for c in matched_cats if is_category_allowed(c)]
@@ -2445,8 +2510,11 @@ if __name__ == "__main__":
                 if not matched_cats:
                     continue
 
-                # 🆕 فلتر سياق الكريبتو: الخبر يجب أن يذكر الكريبتو صراحة
-                # ما عدا فئات hack/etf/tech (لأنها كريبتو بطبيعتها)
+                # 🚨 فلتر صارم جداً: فقط الأخبار الحرجة التي تتحرك بها الأسواق
+                # المنطق: (كريبتو + حدث جوهري) أو (حدث ماكرو كبير مثل قرار الفائدة)
+                news_text = (item.get("title", "") + " " + item.get("summary", "")).lower()
+
+                # (1) سياق الكريبتو
                 crypto_context_keywords = [
                     "bitcoin", "btc", "ethereum", "eth", "ether", "crypto", "cryptocurrency",
                     "blockchain", "altcoin", "stablecoin", "defi", "nft", "token", "coin",
@@ -2460,12 +2528,72 @@ if __name__ == "__main__":
                     "بيتكوين", "إيثيريوم", "كريبتو", "عملة رقمية", "عملة مشفرة", "بلوكتشين",
                     "بايننس", "كوين بيس", "توكين", "تعدين", "محفظة",
                 ]
-                news_text = (item.get("title", "") + " " + item.get("summary", "")).lower()
                 has_crypto_context = any(kw in news_text for kw in crypto_context_keywords)
-                pure_crypto_cats = {"hack", "etf", "tech"}
-                has_pure_crypto_cat = any(c in pure_crypto_cats for c in matched_cats)
-                # لو الخبر ليس فيه سياق كريبتو وليس hack/etf/tech → تخطّي
-                if not has_crypto_context and not has_pure_crypto_cat:
+
+                # (2) حدث جوهري (اختراق/موافقة/تحرك مؤسسي/تنظيم)
+                critical_event_keywords = [
+                    "hack", "hacked", "exploit", "stolen", "drained", "drain",
+                    "vulnerability", "flash loan", "rug pull", "breach", "cyberattack",
+                    "security breach", "rekt", "compromised", "attacker", "hacker",
+                    "phishing", "empty", "lost funds", "$10m", "$50m", "$100m", "$500m",
+                    "million stolen", "billion stolen",
+                    "approval", "approved", "reject", "rejected", "etf", "spot etf",
+                    "sec approves", "sec rejects", "sec sues", "sec charges",
+                    "19b-4", "s-1", "lawsuit", "sues", "sued", "crackdown",
+                    "ban", "banned", "prohibit", "sanction", "penalty", "fraud",
+                    "charges", "arrest", "indictment", "settlement", "fined", "fine",
+                    "mica", "mica regulation", "clarity act", "genius act",
+                    "stablecoin act", "fit21", "market structure",
+                    "fed", "federal reserve", "interest rate", "rate cut", "rate hike",
+                    "rate decision", "powell", "fomc", "monetary policy",
+                    "cpi", "core cpi", "ppi", "nonfarm payrolls", "inflation data",
+                    "quantitative easing", "balance sheet", "rate pause", "emergency cut",
+                    "ecb", "bank of england", "bank of japan", "pboc",
+                    "blackrock", "microstrategy", "saylor", " grayscale",
+                    "institutional inflows", "institutional outflows",
+                    "record inflows", "record outflows", "fund flow",
+                    "accumulation", "buy $", "purchases bitcoin", "adds bitcoin",
+                    "halving", "hard fork", "the merge", "ethereum 2.0",
+                    "mainnet launch", "upgrade",
+                    "crash", "surge", "plunge", "pump", "dump", "all-time high", "ath",
+                    "all-time low", "atl", "liquidation", "long squeeze", "short squeeze",
+                    "10% drop", "10% surge", "20% drop", "20% surge",
+                    "trump crypto", "trump bitcoin", "powell crypto",
+                    "gensler", "sec chair", "yellen crypto",
+                    "saylor", "vitalik", "cz", "binance ceo",
+                    "elon musk bitcoin", "elon musk crypto", "elon musk doge",
+                ]
+                has_critical_event = any(kw in news_text for kw in critical_event_keywords)
+
+                # (3) حدث ماكرو كبير (يُعفى من شرط سياق الكريبتو)
+                macro_critical_keywords = [
+                    "rate cut", "rate hike", "rate decision", "rate pause",
+                    "emergency cut", "fomc", "powell", "federal reserve",
+                    "cpi", "core cpi", "ppi", "nonfarm payrolls",
+                    "interest rate decision", "fed cuts", "fed hikes",
+                    "fed signals", "powell signals", "powell says",
+                ]
+                has_macro_critical = any(kw in news_text for kw in macro_critical_keywords)
+
+                # القبول: (سياق كريبتو + حدث جوهري) أو (حدث ماكرو كبير)
+                if not ((has_crypto_context and has_critical_event) or has_macro_critical):
+                    continue
+
+                # (4) كلمات ترفض الخبر تلقائياً
+                rejection_keywords = [
+                    "price prediction", "price target", "forecast",
+                    "analyst says", "analyst predicts", "analyst expects",
+                    "could reach", "might reach", "may hit",
+                    "top 10", "top 5", "best coins", "best crypto",
+                    "how to buy", "how to trade", "tutorial",
+                    "watch these", "watch list", "watchlist",
+                    "newsletter", "weekly recap", "daily recap",
+                    "interview", "podcast", "review",
+                    "guide", "explained", "what is",
+                    "5 coins", "10 coins", "3 coins",
+                ]
+                has_rejection = any(kw in news_text for kw in rejection_keywords)
+                if has_rejection:
                     continue
 
                 important_news += 1

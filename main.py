@@ -1610,6 +1610,29 @@ def scan_news_loop():
                 matched_cats = [c for c in categories if c in important_cats]
                 if not matched_cats:
                     continue
+                # 🆕 فلتر سياق الكريبتو: الخبر يجب أن يذكر الكريبتو صراحة
+                # ما عدا فئتي hack/etf (لأنهما كريبتو بطبيعتها)
+                crypto_context_keywords = [
+                    "bitcoin", "btc", "ethereum", "eth", "ether", "crypto", "cryptocurrency",
+                    "blockchain", "altcoin", "stablecoin", "defi", "nft", "token", "coin",
+                    "binance", "coinbase", "tether", "usdt", "usdc", "xrp", "ripple",
+                    "solana", "sol", "cardano", "ada", "dogecoin", "doge", "polygon", "matic",
+                    "polkadot", "dot", "avalanche", "avax", "chainlink", "link",
+                    "web3", "wallet", "staking", "mining", "halving", "smart contract",
+                    "decentralized", "dex", "cex", "ledger", "satoshi",
+                    "sec", "gensler", "spot etf", "blackrock bitcoin", "fidelity crypto",
+                    "grayscale", "microstrategy", "saylor", "cz", "vitalik",
+                    "بيتكوين", "إيثيريوم", "كريبتو", "عملة رقمية", "عملة مشفرة", "بلوكتشين",
+                    "بايننس", "كوين بيس", "توكين", "تعدين", "محفظة",
+                ]
+                news_text = (item.get("title", "") + " " + item.get("summary", "")).lower()
+                has_crypto_context = any(kw in news_text for kw in crypto_context_keywords)
+                # الفئات التي تعتبر كريبتو بطبيعتها (لا تحتاج سياق إضافي)
+                pure_crypto_cats = {"hack", "etf", "tech"}
+                has_pure_crypto_cat = any(c in pure_crypto_cats for c in matched_cats)
+                # لو الخبر ليس فيه سياق كريبتو وليس hack/etf/tech → تخطّي
+                if not has_crypto_context and not has_pure_crypto_cat:
+                    continue
                 important_news += 1
                 # 🔧 إصلاح: احترام alert_categories - إن كانت كل الفئات المطابقة معطّلة، تخطّي
                 allowed_cats = [c for c in matched_cats if is_category_allowed(c)]
@@ -2420,6 +2443,29 @@ if __name__ == "__main__":
                                   "fed", "trump", "geopolitics", "stocks"]
                 matched_cats = [c for c in categories if c in important_cats]
                 if not matched_cats:
+                    continue
+
+                # 🆕 فلتر سياق الكريبتو: الخبر يجب أن يذكر الكريبتو صراحة
+                # ما عدا فئات hack/etf/tech (لأنها كريبتو بطبيعتها)
+                crypto_context_keywords = [
+                    "bitcoin", "btc", "ethereum", "eth", "ether", "crypto", "cryptocurrency",
+                    "blockchain", "altcoin", "stablecoin", "defi", "nft", "token", "coin",
+                    "binance", "coinbase", "tether", "usdt", "usdc", "xrp", "ripple",
+                    "solana", "sol", "cardano", "ada", "dogecoin", "doge", "polygon", "matic",
+                    "polkadot", "dot", "avalanche", "avax", "chainlink", "link",
+                    "web3", "wallet", "staking", "mining", "halving", "smart contract",
+                    "decentralized", "dex", "cex", "ledger", "satoshi",
+                    "sec", "gensler", "spot etf", "blackrock bitcoin", "fidelity crypto",
+                    "grayscale", "microstrategy", "saylor", "cz", "vitalik",
+                    "بيتكوين", "إيثيريوم", "كريبتو", "عملة رقمية", "عملة مشفرة", "بلوكتشين",
+                    "بايننس", "كوين بيس", "توكين", "تعدين", "محفظة",
+                ]
+                news_text = (item.get("title", "") + " " + item.get("summary", "")).lower()
+                has_crypto_context = any(kw in news_text for kw in crypto_context_keywords)
+                pure_crypto_cats = {"hack", "etf", "tech"}
+                has_pure_crypto_cat = any(c in pure_crypto_cats for c in matched_cats)
+                # لو الخبر ليس فيه سياق كريبتو وليس hack/etf/tech → تخطّي
+                if not has_crypto_context and not has_pure_crypto_cat:
                     continue
 
                 important_news += 1

@@ -706,6 +706,74 @@ ECONOMIC_TERMS = {
     "dollar": "الدولار",
     "oil": "النفط",
     "gold": "الذهب",
+    # 🆕 إضافات لتحسين جودة الترجمة
+    "coinbase": "كوين بيس",
+    "binance": "بايننس",
+    "tether": "تيثر",
+    "usdt": "USDT",
+    "usdc": "USDC",
+    "ripple": "ريبل",
+    "xrp": "XRP",
+    "solana": "سولانا",
+    "cardano": "كاردانو",
+    "avalanche": "أفالانش",
+    "polygon": "بوليجون",
+    "polkadot": "بولكادوت",
+    "chainlink": "تشين لينك",
+    "microstrategy": "مايكروستراتيجي",
+    "blackrock": "بلاك روك",
+    "grayscale": "جرايسكيل",
+    "fidelity": "فيديليتي",
+    "smart wallet": "المحفظة الذكية",
+    "smart contract": "العقد الذكي",
+    "upgrade": "تحديث",
+    "rollout": "إطلاق",
+    "launch": "إطلاق",
+    "release": "إصدار",
+    "target": "يستهدف",
+    "targets": "يستهدف",
+    "ux": "تجربة المستخدم",
+    "ui": "واجهة المستخدم",
+    "multi-chain": "متعدد السلاسل",
+    "cross-chain": "عبر السلاسل",
+    "layer 2": "الطبقة الثانية",
+    "l2": "الطبقة الثانية",
+    "scaling": "التوسع",
+    "verification": "التحقق",
+    "verify": "التحقق",
+    "user experience": "تجربة المستخدم",
+    "mainnet": "الشبكة الرئيسية",
+    "testnet": "شبكة الاختبار",
+    "protocol": "البروتوكول",
+    "decentralized": "لامركزي",
+    "decentralization": "اللامركزية",
+    "institutional": "مؤسسي",
+    "inflows": "تدفقات داخلة",
+    "outflows": "تدفقات خارجة",
+    "fund flow": "تدفق الأموال",
+    "halving": "النصفية",
+    "bull market": "السوق الصاعد",
+    "bear market": "السوق الهابط",
+    "correction": "تصحيح",
+    "crash": "انهيار",
+    "all-time high": "أعلى مستوى تاريخي",
+    "ath": "أعلى مستوى تاريخي",
+    "support": "الدعم",
+    "resistance": "المقاومة",
+    "volume": "حجم التداول",
+    "volatility": "التقلب",
+    "sentiment": "التوجه",
+    "fomc": "اللجنة الفيدرالية للسوق المفتوحة",
+    "cpi": "مؤشر أسعار المستهلك",
+    "ppi": "مؤشر أسعار المنتج",
+    "nonfarm payrolls": "الوظائف غير الزراعية",
+    "jobless claims": "طلبات إعانة البطالة",
+    "quantitative easing": "التيسير الكمي",
+    "balance sheet": "الميزانية العمومية",
+    "monetary policy": "السياسة النقدية",
+    "sanction": "عقوبة",
+    "sanctions": "عقوبات",
+    "embargo": "حظر",
 }
 
 # 🆕🆕 قاموس الاستثناءات: أسماء مشاريع وتوكنات لا تُترجم (تبقى بالإنجليزية)
@@ -761,15 +829,15 @@ def _protect_terms(text):
     """🆕 يستبدل المصطلحات المحمية بـ placeholders قبل الترجمة
     يعيد tuple: (النص مع placeholders, قاموس الاستعادة)
     🔧 إصلاح: حفظ النص الأصلي (بأحرفه الأصلية) للاستعادة
+    🔧 إصلاح: استخدام placeholders بالأرقام فقط بين [[ ]] لتجنب ترجمتها بواسطة NLLB
     """
     restore_map = {}
     protected_text = text
     for i, term in enumerate(TRANSLATION_EXCEPTIONS):
         if term in protected_text.lower():
-            placeholder = f"XCRYPTO{i}X"
-            # استبدال preserve case
+            # استخدام [[رقم]] بدلاً من XCRYPTO (NLLB لا يترجم الأرقام بين أقواس)
+            placeholder = f"[[{i}]]"
             pattern = re.compile(re.escape(term), re.IGNORECASE)
-            # ابحث عن أول match واحفظه بأحرفه الأصلية
             match = pattern.search(protected_text)
             if match:
                 original_match = match.group()
@@ -781,22 +849,46 @@ def _protect_terms(text):
 def _restore_terms(translated_text, restore_map):
     """🆕 يعيد المصطلحات الأصلية مكان الـ placeholders بعد الترجمة
     🔧 إصلاح: الحفاظ على الأحرف الأصلية (USDT بدل usdt)
+    🔧 إصلاح: التعامل مع الترجمات التي قد تضيف مسافات حول الأرقام
     """
     if not restore_map:
         return translated_text
     result = translated_text
-    # ابحث عن كل الـ placeholders في النص المترجم
-    pattern = re.compile(r"XCRYPTO\d+X", re.IGNORECASE)
     # رتّب الـ placeholders للاستبدال (الأطول أولاً لتجنب التداخل)
     sorted_placeholders = sorted(restore_map.keys(), key=len, reverse=True)
 
     for placeholder in sorted_placeholders:
         original = restore_map[placeholder]
-        # استبدل الـ placeholder بالقيمة الأصلية (بدون تطبيع الأحرف)
-        result = re.sub(re.escape(placeholder), original, result, flags=re.IGNORECASE)
+        # استبدل الـ placeholder بالقيمة الأصلية
+        # البحث المرن: قد يضيف NLLB مسافات أو يحول الأقواس
+        # مثلاً [[0]] قد تصبح [[ 0 ]] أو [[0]] أو حتى [[٠]] (أرقام عربية)
+        # نبحث عن النمط [[رقم]] مع容忍 للمسافات
+        placeholder_num = placeholder.replace("[[", "").replace("]]", "")
+        # تحويل الرقم ل阿拉伯数字 أيضًا (في حال ترجمها NLLB)
+        try:
+            num = int(placeholder_num)
+            arabic_num = "".join("٠١٢٣٤٥٦٧٨٩"[int(d)] for d in str(num))
+            patterns_to_try = [
+                re.escape(placeholder),
+                re.escape(f"[[{placeholder_num}]]"),
+                re.escape(f"[[ {placeholder_num} ]]"),
+                re.escape(f"[[{arabic_num}]]"),
+                re.escape(f"[[ {arabic_num} ]]"),
+                r"\[\[\s*" + re.escape(placeholder_num) + r"\s*\]\]",
+                r"\[\[\s*" + re.escape(arabic_num) + r"\s*\]\]",
+            ]
+            for pat in patterns_to_try:
+                new_result = re.sub(pat, original, result, flags=re.IGNORECASE)
+                if new_result != result:
+                    result = new_result
+                    break
+        except Exception:
+            # fallback: استبدال مباشر
+            result = re.sub(re.escape(placeholder), original, result, flags=re.IGNORECASE)
 
-    # تنظيف أي placeholders متبقية (في حال فاتنا شيء)
-    result = pattern.sub("", result)
+    # تنظيف أي placeholders متبقية
+    result = re.sub(r"\[\[\s*\d+\s*\]\]", "", result)
+    result = re.sub(r"\[\[\s*[٠-٩]+\s*\]\]", "", result)
     return result
 
 

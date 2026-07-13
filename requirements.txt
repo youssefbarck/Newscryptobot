@@ -2,7 +2,4 @@ pytz==2024.1
 requests==2.32.3
 Flask==3.0.3
 feedparser==6.0.11
-transformers==4.44.0
-torch==2.4.0
-sentencepiece==0.2.0
-protobuf==5.27.2
+deep-translator==1.11.4

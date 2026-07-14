@@ -994,6 +994,36 @@ GLOSSARY_AR = {
     "nasdaq": "ناسداك",
     "s&p": "مؤشر S&P",
     "dow jones": "داو جونز",
+    # 🆕 مصطلحات فك وحرق التوكنات
+    "token unlock": "فك توكن",
+    "token unlocking": "فك التوكنات",
+    "tokens unlocked": "تم فك التوكنات",
+    "vesting unlock": "فك الاستحقاق",
+    "cliff unlock": "فك التوكنات المتراكمة",
+    "unlock schedule": "جدول فك التوكنات",
+    "token release": "إطلاق التوكنات",
+    "release schedule": "جدول الإطلاق",
+    "token burn": "حرق توكن",
+    "coin burn": "حرق عملة",
+    "burn event": "حدث حرق",
+    "buyback and burn": "إعادة الشراء والحرق",
+    "deflationary burn": "حرق انكماشي",
+    "burn mechanism": "آلية الحرق",
+    # 🆕 سيولة مؤسسية
+    "institutional inflows": "تدفقات مؤسسية داخلة",
+    "institutional outflows": "تدفقات مؤسسية خارجة",
+    "record inflows": "تدفقات قياسية",
+    "record outflows": "تدفقات خارجة قياسية",
+    "treasury allocation": "تخصيص الخزانة",
+    "bitcoin treasury": "خزانة البيتكوين",
+    # 🆕 انهيار وتصحيح
+    "flash crash": "انهيار مفاجئ",
+    "massive sell-off": "بيع جماعي",
+    "capitulation": "استسلام",
+    "bloodbath": "مذبحة",
+    "meltdown": "انهيار",
+    "long squeeze": "ضغط المراكز الطويلة",
+    "short squeeze": "ضغط المراكز القصيرة",
 }
 
 
@@ -1705,9 +1735,7 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
                 if clean_summary:
                     msg += f"\n{clean_summary}\n"
 
-    # إضافة الرابط إن وُجد
-    if link:
-        msg += f"\n🔗 {link}\n"
+    # 🚫 تم حذف رابط المصدر بناءً على طلب المستخدم
 
     # ✉️ في النهاية
     msg += "\n✉️\n"
@@ -1977,12 +2005,12 @@ def scan_news_loop():
                 matched_cats = [c for c in categories if c in important_cats]
                 if not matched_cats:
                     continue
-                # 🚨 فلتر صارم جداً: فقط الأخبار الحرجة التي تتحرك بها الأسواق
-                # المنطق: (كريبتو + حدث جوهري) أو (حدث ماكرو كبير مثل قرار الفائدة)
-                # الأخبار الجانبية (تحليلات، توقعات، إعلانات صغيرة) تُرفض
+                # 🚨 فلتر صارم جداً: فقط الأحداث المحددة
+                # 1) اختراق/سرقة  2) انهيار/تصحيح حاد  3) سيولة مؤسسية كبيرة
+                # 4) تحديث برمجي  5) فك توكن  6) حرق توكن  7) قرارات الفائدة
                 news_text = (item.get("title", "") + " " + item.get("summary", "")).lower()
 
-                # (1) سياق الكريبتو
+                # (1) سياق الكريبتو إجباري
                 crypto_context_keywords = [
                     "bitcoin", "btc", "ethereum", "eth", "ether", "crypto", "cryptocurrency",
                     "blockchain", "altcoin", "stablecoin", "defi", "nft", "token", "coin",
@@ -1998,53 +2026,77 @@ def scan_news_loop():
                 ]
                 has_crypto_context = any(kw in news_text for kw in crypto_context_keywords)
 
-                # (2) حدث جوهري (اختراق/موافقة/تحرك مؤسسي/تنظيم)
+                # (2) حدث جوهري صارم - فقط 7 فئات محددة
                 critical_event_keywords = [
+                    # 1️⃣ اختراق/سرقة (Hacks & Exploits)
                     "hack", "hacked", "exploit", "stolen", "drained", "drain",
                     "vulnerability", "flash loan", "rug pull", "breach", "cyberattack",
                     "security breach", "rekt", "compromised", "attacker", "hacker",
                     "phishing", "empty", "lost funds", "$10m", "$50m", "$100m", "$500m",
-                    "million stolen", "billion stolen",
-                    "approval", "approved", "reject", "rejected", "etf", "spot etf",
-                    "sec approves", "sec rejects", "sec sues", "sec charges",
-                    "19b-4", "s-1", "lawsuit", "sues", "sued", "crackdown",
-                    "ban", "banned", "prohibit", "sanction", "penalty", "fraud",
-                    "charges", "arrest", "indictment", "settlement", "fined", "fine",
-                    "mica", "mica regulation", "clarity act", "genius act",
-                    "stablecoin act", "fit21", "market structure",
-                    "fed", "federal reserve", "interest rate", "rate cut", "rate hike",
-                    "rate decision", "powell", "fomc", "monetary policy",
-                    "cpi", "core cpi", "ppi", "nonfarm payrolls", "inflation data",
-                    "quantitative easing", "balance sheet", "rate pause", "emergency cut",
-                    "ecb", "bank of england", "bank of japan", "pboc",
-                    "blackrock", "microstrategy", "saylor", " grayscale",
+                    "million stolen", "billion stolen", "funds drained",
+
+                    # 2️⃣ انهيار/تصحيح حاد (Crash & Plunge)
+                    "crash", "plunge", "dump", "collapse", "liquidation",
+                    "long squeeze", "short squeeze", "flash crash",
+                    "10% drop", "15% drop", "20% drop", "30% drop",
+                    "10% plunge", "15% plunge", "20% plunge",
+                    "sharp decline", "steep decline", "massive sell-off",
+                    "capitulation", "bloodbath", "meltdown",
+
+                    # 3️⃣ سيولة مؤسسية كبيرة (Institutional Flows)
                     "institutional inflows", "institutional outflows",
-                    "record inflows", "record outflows", "fund flow",
-                    "accumulation", "buy $", "purchases bitcoin", "adds bitcoin",
-                    "halving", "hard fork", "the merge", "ethereum 2.0",
-                    "mainnet launch", "upgrade",
-                    "crash", "surge", "plunge", "pump", "dump", "all-time high", "ath",
-                    "all-time low", "atl", "liquidation", "long squeeze", "short squeeze",
-                    "10% drop", "10% surge", "20% drop", "20% surge",
-                    "trump crypto", "trump bitcoin", "powell crypto",
-                    "gensler", "sec chair", "yellen crypto",
-                    "saylor", "vitalik", "cz", "binance ceo",
-                    "elon musk bitcoin", "elon musk crypto", "elon musk doge",
+                    "record inflows", "record outflows",
+                    "blackrock buys", "microstrategy buys", "saylor buys",
+                    "purchases bitcoin", "adds bitcoin", "buying bitcoin",
+                    "$100m bitcoin", "$500m bitcoin", "$1b bitcoin", "$1 billion bitcoin",
+                    "treasury allocation", "bitcoin treasury",
+                    "etf inflows", "etf outflows", "fund flow",
+                    "accumulation", "whale accumulat",
+
+                    # 4️⃣ تحديث برمجي (Protocol Upgrades)
+                    "halving", "hard fork", "soft fork", "the merge",
+                    "ethereum 2.0", "mainnet launch", "mainnet upgrade",
+                    "network upgrade", "protocol upgrade",
+                    "shapella", "dencun", "pectra", "purge", "verge",
+                    "smart contract upgrade", "consensus upgrade",
+
+                    # 5️⃣ فك توكن (Token Unlock)
+                    "token unlock", "unlocking", "unlocked",
+                    "vesting unlock", "cliff unlock",
+                    "$unlock", "tokens unlocked", "unlock schedule",
+                    "linear unlock", "token release", "release schedule",
+
+                    # 6️⃣ حرق توكن (Token Burn)
+                    "burn", "burned", "burning",
+                    "token burn", "coin burn", "buyback and burn",
+                    "deflationary burn", "burn mechanism",
+                    "burned tokens", "burn event",
+
+                    # 7️⃣ قرارات تنظيمية كبرى (تكميلي)
+                    "approval", "approved", "reject", "rejected",
+                    "sec approves", "sec rejects", "sec sues", "sec charges",
+                    "spot etf", "19b-4", "s-1",
+                    "lawsuit", "crackdown", "ban", "banned",
+                    "mica", "clarity act", "genius act", "fit21",
                 ]
                 has_critical_event = any(kw in news_text for kw in critical_event_keywords)
 
-                # (3) حدث ماكرو كبير (يُعفى من شرط سياق الكريبتو)
-                # أخبار الفيدرالي/الفائدة/CPI تتحرك بها كل الأسواق بما فيها الكريبتو
+                # (3) قرارات الفيدرالي والفائدة (يُعفى من شرط سياق الكريبتو)
+                # لأنها تتحرك بها كل الأسواق بما فيها الكريبتو
                 macro_critical_keywords = [
                     "rate cut", "rate hike", "rate decision", "rate pause",
                     "emergency cut", "fomc", "powell", "federal reserve",
-                    "cpi", "core cpi", "ppi", "nonfarm payrolls",
-                    "interest rate decision", "fed cuts", "fed hikes",
+                    "interest rate", "fed cuts", "fed hikes",
                     "fed signals", "powell signals", "powell says",
+                    "rate hold", "hold rates", "pause rates",
+                    "rate increase", "rate reduction",
+                    "fed meeting", "fomc meeting", "fed chair",
+                    "raises rates", "lowers rates", "cuts rates",
+                    "50 basis points", "25 basis points", "bps cut", "bps hike",
                 ]
                 has_macro_critical = any(kw in news_text for kw in macro_critical_keywords)
 
-                # القبول: (سياق كريبتو + حدث جوهري) أو (حدث ماكرو كبير)
+                # القبول: (سياق كريبتو + حدث جوهري) أو (حدث ماكرو للفائدة)
                 if not ((has_crypto_context and has_critical_event) or has_macro_critical):
                     continue
 
@@ -2060,6 +2112,9 @@ def scan_news_loop():
                     "interview", "podcast", "review",
                     "guide", "explained", "what is",
                     "5 coins", "10 coins", "3 coins",
+                    # 🆕 رفض إضافي للأخبار الجانبية
+                    "minor upgrade", "minor update", "minor bug",
+                    "small purchase", "minor hack",
                 ]
                 has_rejection = any(kw in news_text for kw in rejection_keywords)
                 if has_rejection:
@@ -2877,11 +2932,12 @@ if __name__ == "__main__":
                 if not matched_cats:
                     continue
 
-                # 🚨 فلتر صارم جداً: فقط الأخبار الحرجة التي تتحرك بها الأسواق
-                # المنطق: (كريبتو + حدث جوهري) أو (حدث ماكرو كبير مثل قرار الفائدة)
+                # 🚨 فلتر صارم جداً: فقط الأحداث المحددة
+                # 1) اختراق/سرقة  2) انهيار/تصحيح حاد  3) سيولة مؤسسية كبيرة
+                # 4) تحديث برمجي  5) فك توكن  6) حرق توكن  7) قرارات الفائدة
                 news_text = (item.get("title", "") + " " + item.get("summary", "")).lower()
 
-                # (1) سياق الكريبتو
+                # (1) سياق الكريبتو إجباري
                 crypto_context_keywords = [
                     "bitcoin", "btc", "ethereum", "eth", "ether", "crypto", "cryptocurrency",
                     "blockchain", "altcoin", "stablecoin", "defi", "nft", "token", "coin",
@@ -2897,52 +2953,76 @@ if __name__ == "__main__":
                 ]
                 has_crypto_context = any(kw in news_text for kw in crypto_context_keywords)
 
-                # (2) حدث جوهري (اختراق/موافقة/تحرك مؤسسي/تنظيم)
+                # (2) حدث جوهري صارم - فقط 7 فئات محددة
                 critical_event_keywords = [
+                    # 1️⃣ اختراق/سرقة (Hacks & Exploits)
                     "hack", "hacked", "exploit", "stolen", "drained", "drain",
                     "vulnerability", "flash loan", "rug pull", "breach", "cyberattack",
                     "security breach", "rekt", "compromised", "attacker", "hacker",
                     "phishing", "empty", "lost funds", "$10m", "$50m", "$100m", "$500m",
-                    "million stolen", "billion stolen",
-                    "approval", "approved", "reject", "rejected", "etf", "spot etf",
-                    "sec approves", "sec rejects", "sec sues", "sec charges",
-                    "19b-4", "s-1", "lawsuit", "sues", "sued", "crackdown",
-                    "ban", "banned", "prohibit", "sanction", "penalty", "fraud",
-                    "charges", "arrest", "indictment", "settlement", "fined", "fine",
-                    "mica", "mica regulation", "clarity act", "genius act",
-                    "stablecoin act", "fit21", "market structure",
-                    "fed", "federal reserve", "interest rate", "rate cut", "rate hike",
-                    "rate decision", "powell", "fomc", "monetary policy",
-                    "cpi", "core cpi", "ppi", "nonfarm payrolls", "inflation data",
-                    "quantitative easing", "balance sheet", "rate pause", "emergency cut",
-                    "ecb", "bank of england", "bank of japan", "pboc",
-                    "blackrock", "microstrategy", "saylor", " grayscale",
+                    "million stolen", "billion stolen", "funds drained",
+
+                    # 2️⃣ انهيار/تصحيح حاد (Crash & Plunge)
+                    "crash", "plunge", "dump", "collapse", "liquidation",
+                    "long squeeze", "short squeeze", "flash crash",
+                    "10% drop", "15% drop", "20% drop", "30% drop",
+                    "10% plunge", "15% plunge", "20% plunge",
+                    "sharp decline", "steep decline", "massive sell-off",
+                    "capitulation", "bloodbath", "meltdown",
+
+                    # 3️⃣ سيولة مؤسسية كبيرة (Institutional Flows)
                     "institutional inflows", "institutional outflows",
-                    "record inflows", "record outflows", "fund flow",
-                    "accumulation", "buy $", "purchases bitcoin", "adds bitcoin",
-                    "halving", "hard fork", "the merge", "ethereum 2.0",
-                    "mainnet launch", "upgrade",
-                    "crash", "surge", "plunge", "pump", "dump", "all-time high", "ath",
-                    "all-time low", "atl", "liquidation", "long squeeze", "short squeeze",
-                    "10% drop", "10% surge", "20% drop", "20% surge",
-                    "trump crypto", "trump bitcoin", "powell crypto",
-                    "gensler", "sec chair", "yellen crypto",
-                    "saylor", "vitalik", "cz", "binance ceo",
-                    "elon musk bitcoin", "elon musk crypto", "elon musk doge",
+                    "record inflows", "record outflows",
+                    "blackrock buys", "microstrategy buys", "saylor buys",
+                    "purchases bitcoin", "adds bitcoin", "buying bitcoin",
+                    "$100m bitcoin", "$500m bitcoin", "$1b bitcoin", "$1 billion bitcoin",
+                    "treasury allocation", "bitcoin treasury",
+                    "etf inflows", "etf outflows", "fund flow",
+                    "accumulation", "whale accumulat",
+
+                    # 4️⃣ تحديث برمجي (Protocol Upgrades)
+                    "halving", "hard fork", "soft fork", "the merge",
+                    "ethereum 2.0", "mainnet launch", "mainnet upgrade",
+                    "network upgrade", "protocol upgrade",
+                    "shapella", "dencun", "pectra", "purge", "verge",
+                    "smart contract upgrade", "consensus upgrade",
+
+                    # 5️⃣ فك توكن (Token Unlock)
+                    "token unlock", "unlocking", "unlocked",
+                    "vesting unlock", "cliff unlock",
+                    "$unlock", "tokens unlocked", "unlock schedule",
+                    "linear unlock", "token release", "release schedule",
+
+                    # 6️⃣ حرق توكن (Token Burn)
+                    "burn", "burned", "burning",
+                    "token burn", "coin burn", "buyback and burn",
+                    "deflationary burn", "burn mechanism",
+                    "burned tokens", "burn event",
+
+                    # 7️⃣ قرارات تنظيمية كبرى (تكميلي)
+                    "approval", "approved", "reject", "rejected",
+                    "sec approves", "sec rejects", "sec sues", "sec charges",
+                    "spot etf", "19b-4", "s-1",
+                    "lawsuit", "crackdown", "ban", "banned",
+                    "mica", "clarity act", "genius act", "fit21",
                 ]
                 has_critical_event = any(kw in news_text for kw in critical_event_keywords)
 
-                # (3) حدث ماكرو كبير (يُعفى من شرط سياق الكريبتو)
+                # (3) قرارات الفيدرالي والفائدة (يُعفى من شرط سياق الكريبتو)
                 macro_critical_keywords = [
                     "rate cut", "rate hike", "rate decision", "rate pause",
                     "emergency cut", "fomc", "powell", "federal reserve",
-                    "cpi", "core cpi", "ppi", "nonfarm payrolls",
-                    "interest rate decision", "fed cuts", "fed hikes",
+                    "interest rate", "fed cuts", "fed hikes",
                     "fed signals", "powell signals", "powell says",
+                    "rate hold", "hold rates", "pause rates",
+                    "rate increase", "rate reduction",
+                    "fed meeting", "fomc meeting", "fed chair",
+                    "raises rates", "lowers rates", "cuts rates",
+                    "50 basis points", "25 basis points", "bps cut", "bps hike",
                 ]
                 has_macro_critical = any(kw in news_text for kw in macro_critical_keywords)
 
-                # القبول: (سياق كريبتو + حدث جوهري) أو (حدث ماكرو كبير)
+                # القبول: (سياق كريبتو + حدث جوهري) أو (حدث ماكرو للفائدة)
                 if not ((has_crypto_context and has_critical_event) or has_macro_critical):
                     continue
 
@@ -2958,6 +3038,8 @@ if __name__ == "__main__":
                     "interview", "podcast", "review",
                     "guide", "explained", "what is",
                     "5 coins", "10 coins", "3 coins",
+                    "minor upgrade", "minor update", "minor bug",
+                    "small purchase", "minor hack",
                 ]
                 has_rejection = any(kw in news_text for kw in rejection_keywords)
                 if has_rejection:

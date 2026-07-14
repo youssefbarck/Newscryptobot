@@ -1722,16 +1722,33 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
     if show_summary:
         if summary_ar and translate:
             clean_summary = summary_ar.strip()
-            if len(clean_summary) > 300:
-                clean_summary = clean_summary[:297] + "..."
+            # 🆕 إزالة أي نقاط معلقة في النهاية (من قص الكلمات)
+            clean_summary = clean_summary.rstrip(".")
+            clean_summary = clean_summary.rstrip("…")
+            clean_summary = clean_summary.rstrip(" ")
+            # 🆕 بدون قص - نعرض الملخص كاملاً (لأننا حذفنا الرابط)
+            if len(clean_summary) > 400:
+                # فقط لو كان طويلاً جداً، نقص عند آخر نقطة كاملة
+                cut_at = clean_summary[:400].rfind(".")
+                if cut_at > 100:
+                    clean_summary = clean_summary[:cut_at + 1]
+                else:
+                    clean_summary = clean_summary[:400]
             if clean_summary:
                 msg += f"\n{clean_summary}\n"
         elif summary:
-            translated_summary = translate_to_arabic(summary[:400])
+            translated_summary = translate_to_arabic(summary[:500])
             if translated_summary and translated_summary != summary:
                 clean_summary = translated_summary.strip()
-                if len(clean_summary) > 300:
-                    clean_summary = clean_summary[:297] + "..."
+                clean_summary = clean_summary.rstrip(".")
+                clean_summary = clean_summary.rstrip("…")
+                clean_summary = clean_summary.rstrip(" ")
+                if len(clean_summary) > 400:
+                    cut_at = clean_summary[:400].rfind(".")
+                    if cut_at > 100:
+                        clean_summary = clean_summary[:cut_at + 1]
+                    else:
+                        clean_summary = clean_summary[:400]
                 if clean_summary:
                     msg += f"\n{clean_summary}\n"
 

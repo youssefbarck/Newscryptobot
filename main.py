@@ -82,13 +82,14 @@ NEWS_SOURCES = {
         "lang": "en"
     },
     # 🔍 مجتمعي
-    # 🔧 إصلاح: Reddit JSON يُحظر → استخدم RSS من old.reddit.com
-    "Reddit r/CryptoCurrency": {
-        "url": "https://old.reddit.com/r/CryptoCurrency/.rss",
-        "category": "crypto",
-        "lang": "en",
-        "is_reddit_rss": True  # marker لاستخدام REDDIT_HEADERS
-    },
+    # 🚫 تم حذف Reddit - ينتج محتوى هواة مع metadata غريبة (مثل [link] [تعليقات] /u/username)
+    # وليس أخباراً مهنية. البوت يحتاج مصادر إخبارية احترافية فقط.
+    # "Reddit r/CryptoCurrency": {
+    #     "url": "https://old.reddit.com/r/CryptoCurrency/.rss",
+    #     "category": "crypto",
+    #     "lang": "en",
+    #     "is_reddit_rss": True
+    # },
     # 🆕 مصدر إضافي: NewsBTC
     "NewsBTC": {
         "url": "https://www.newsbtc.com/feed/",
@@ -1234,18 +1235,23 @@ def _translate_with_llm(text):
         # الـ prompt: إعادة صياغة احترافية بالعربية
         system_prompt = (
             "مهمتك: إعادة صياغة الأخبار المالية والكريبتو بالعربية.\n\n"
-            "قواعد صارمة:\n"
-            "1. اكتب بالعربية الفصحى فقط، بدون خلط مع الإنجليزية\n"
-            "2. حافظ على أسماء العملات والشركات بالإنجليزية كما هي: "
-            "Bitcoin, Ethereum, Binance, USDT, USDC, SEC, ETF, MicroStrategy, "
-            "BlackRock, Coinbase, Solana, Cardano, XRP, Tether, Ripple\n"
-            "3. ترجم المصطلحات التقنية: hack=اختراق, exploit=ثغرة, "
-            "flash loan=قرض فوري, drained=تم تصريفها, stolen=مُسروقة, "
-            "crash=انهيار, surge=قفزة, plunge=انهيار, halving=التنصيف\n"
-            "4. تجاهل اسم المصدر إن وُجد في نهاية الخبر (CoinDesk, Reuters, etc.)\n"
-            "5. كن موجزاً (1-2 جملة)\n"
-            "6. لا تشرح ولا تضف معلومات من عندك\n\n"
-            "أعد فقط النص العربي المترجم."
+            "قواعد صارمة جداً:\n"
+            "1. اكتب بالعربية الفصحى فقط، بدون خلط مع الإنجليزية في الكلمات العامة\n"
+            "2. 🚫 ممنوع ترجمة أسماء العملات والشركات والبروتوكولات - اتركها بالإنجليزية كما هي:\n"
+            "   Bitcoin, Ethereum, Binance, USDT, USDC, SEC, ETF, MicroStrategy, "
+            "BlackRock, Coinbase, Solana, Cardano, XRP, Tether, Ripple, Litecoin, "
+            "Dogecoin, Polkadot, Chainlink, Avalanche, Polygon, Arbitrum, Optimism, "
+            "Uniswap, Aave, Curve, Grayscale, Fidelity, Kraken\n"
+            "3. ترجم فقط المصطلحات التقنية العامة:\n"
+            "   hack=اختراق, exploit=ثغرة, flash loan=قرض فوري, drained=تم تصريفها,\n"
+            "   stolen=مُسروقة, crash=انهيار, surge=قفزة, plunge=انهيار, halving=التنصيف,\n"
+            "   token unlock=فك توكن, token burn=حرق توكن, hard fork=انقسام صلب\n"
+            "4. 🚫 تجاهل تماماً اسم المصدر إن وُجد في نهاية الخبر (CoinDesk, Reuters, etc.)\n"
+            "5. 🚫 تجاهل ميتاداتا Reddit إن وُجدت ([link], [تعليقات], /u/username, مقدم بواسطة)\n"
+            "6. كن موجزاً (1-2 جملة)\n"
+            "7. لا تشرح ولا تضف معلومات من عندك\n"
+            "8. لا تضف رموزاً أو إيموجي عشوائية\n\n"
+            "أعد فقط النص العربي المترجم، بدون أي مقدمات."
         )
         # استدعاء z-ai CLI
         result = subprocess.run(
@@ -2287,9 +2293,16 @@ def scan_news_loop():
                     # 🆕 رفض إضافي للأخبار الجانبية
                     "minor upgrade", "minor update", "minor bug",
                     "small purchase", "minor hack",
+                    # 🚫 رفض ميتاداتا Reddit ومنصات المجتمع
+                    "[link]", "[تعليقات]", "[comments]", "/u/",
+                    "submitted by", "مقدم بواسطة",
+                    "crossposted from", "xposted from",
                 ]
                 has_rejection = any(kw in news_text for kw in rejection_keywords)
                 if has_rejection:
+                    continue
+                # 🚫 رفض إضافي: أي مصدر Reddit (احتياط)
+                if "reddit" in (item.get("source", "") or "").lower():
                     continue
 
                 important_news += 1
@@ -3212,9 +3225,16 @@ if __name__ == "__main__":
                     "5 coins", "10 coins", "3 coins",
                     "minor upgrade", "minor update", "minor bug",
                     "small purchase", "minor hack",
+                    # 🚫 رفض ميتاداتا Reddit ومنصات المجتمع
+                    "[link]", "[تعليقات]", "[comments]", "/u/",
+                    "submitted by", "مقدم بواسطة",
+                    "crossposted from", "xposted from",
                 ]
                 has_rejection = any(kw in news_text for kw in rejection_keywords)
                 if has_rejection:
+                    continue
+                # 🚫 رفض إضافي: أي مصدر Reddit (احتياط)
+                if "reddit" in (item.get("source", "") or "").lower():
                     continue
 
                 important_news += 1

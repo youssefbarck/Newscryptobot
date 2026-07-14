@@ -26,6 +26,7 @@ jobs:
       CHANNEL_NAME: ${{ secrets.CHANNEL_NAME }}
       SEND_TO_CHANNEL: ${{ secrets.SEND_TO_CHANNEL }}
       TIMEZONE: ${{ secrets.TIMEZONE }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -36,21 +37,11 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-
-      - name: Install Z.AI SDK CLI
-        run: npm install -g z-ai-web-dev-sdk
-
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Run news bot
         run: python main.py
-        env:
-          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
 
       - name: Save state
         run: |

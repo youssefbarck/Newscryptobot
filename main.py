@@ -1334,17 +1334,18 @@ def _translate_with_gemini(text):
             f"حافظ على جميع المعلومات والحقائق والأرقام كما هي، "
             f"ولا تضف أي معلومات أو آراء من عندك. "
             f"اللغة الهدف: العربية الفصحى فقط. "
-            f"اكتب 1 إلى 3 جمل بحد أقصى.\n\n"
+            f"اكتب 1 إلى 4 جمل كاملة (لا تقطع الجمل في المنتصف). "
+            f"أكمل كل جملة حتى نهايتها الطبيعية.\n\n"
             f"النص الأصلي:\n{text}\n\n"
-            f"النص العربي المعاد صياغته:"
+            f"النص العربي المعاد صياغته (مكتمل بدون قطع):"
         )
 
-        # إعدادات التوليد - إجابات دقيقة ومتسقة
+        # 🆕🆕 إعدادات التوليد - زيادة الحد ليكون كافياً للأخبار الطويلة
         generation_config = {
             "temperature": 0.3,        # منخفض = إجابات دقيقة ومتسقة
             "top_p": 0.8,
             "top_k": 40,
-            "max_output_tokens": 500,  # كافية لخبر مختصر
+            "max_output_tokens": 2048,  # 🆕 زيادة من 500 إلى 2048 (يكفي لأي خبر)
         }
         response = _gemini_model.generate_content(
             prompt,
@@ -1374,9 +1375,9 @@ def translate_to_arabic(text, force=False):
     """
     if not text or len(text) < 3:
         return text
-    # اختصار النص الطويل جداً قبل الترجمة
-    if len(text) > 1000:
-        text = text[:1000]
+    # 🆕🆕 زيادة حد النص الأصلي (كان 500 - صغير جداً ويقطع الأخبار)
+    if len(text) > 2000:
+        text = text[:2000]
     # تحقق من الكاش
     cache_key = hashlib.md5(text.encode()).hexdigest()[:12]
     if not force and cache_key in _translation_cache:
@@ -1949,32 +1950,39 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
         if summary_ar and translate:
             clean_summary = summary_ar.strip()
             # 🆕 إزالة أي نقاط معلقة في النهاية (من قص الكلمات)
-            clean_summary = clean_summary.rstrip(".")
             clean_summary = clean_summary.rstrip("…")
             clean_summary = clean_summary.rstrip(" ")
-            # 🆕 بدون قص - نعرض الملخص كاملاً (لأننا حذفنا الرابط)
-            if len(clean_summary) > 400:
-                # فقط لو كان طويلاً جداً، نقص عند آخر نقطة كاملة
-                cut_at = clean_summary[:400].rfind(".")
-                if cut_at > 100:
+            # 🆕🆕 لا نقص - نعرض الملخص كاملاً (Gemini يكتبه مختصراً)
+            # فقط لو كان طويلاً جداً (> 800 حرف)، نقص عند آخر نقطة كاملة
+            if len(clean_summary) > 800:
+                cut_at = clean_summary[:800].rfind(".")
+                if cut_at > 200:
                     clean_summary = clean_summary[:cut_at + 1]
                 else:
-                    clean_summary = clean_summary[:400]
+                    # لو ما فيش نقطة، نقص عند آخر مسافة
+                    cut_at = clean_summary[:800].rfind(" ")
+                    if cut_at > 200:
+                        clean_summary = clean_summary[:cut_at] + "..."
+                    else:
+                        clean_summary = clean_summary[:800] + "..."
             if clean_summary:
                 msg += f"\n{clean_summary}\n"
         elif summary:
-            translated_summary = translate_to_arabic(summary[:500])
+            translated_summary = translate_to_arabic(summary[:1500])
             if translated_summary and translated_summary != summary:
                 clean_summary = translated_summary.strip()
-                clean_summary = clean_summary.rstrip(".")
                 clean_summary = clean_summary.rstrip("…")
                 clean_summary = clean_summary.rstrip(" ")
-                if len(clean_summary) > 400:
-                    cut_at = clean_summary[:400].rfind(".")
-                    if cut_at > 100:
+                if len(clean_summary) > 800:
+                    cut_at = clean_summary[:800].rfind(".")
+                    if cut_at > 200:
                         clean_summary = clean_summary[:cut_at + 1]
                     else:
-                        clean_summary = clean_summary[:400]
+                        cut_at = clean_summary[:800].rfind(" ")
+                        if cut_at > 200:
+                            clean_summary = clean_summary[:cut_at] + "..."
+                        else:
+                            clean_summary = clean_summary[:800] + "..."
                 if clean_summary:
                     msg += f"\n{clean_summary}\n"
 

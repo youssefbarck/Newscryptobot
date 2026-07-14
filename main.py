@@ -1211,42 +1211,104 @@ def _init_gemini():
         return
     try:
         import google.generativeai as genai
-        api_key = _os.environ.get("GEMINI_API_KEY", "")
+        # 🆕 دعم عدة أسماء للمتغير (GitHub يرفض بعض الأسماء)
+        api_key = (
+            _os.environ.get("GEMINI_API_KEY") or
+            _os.environ.get("gemini_api_key") or
+            _os.environ.get("Gemini_Api_Key") or
+            _os.environ.get("GEMINI_KEY") or
+            _os.environ.get("gemini_key") or
+            _os.environ.get("GOOGLE_API_KEY") or
+            _os.environ.get("google_api_key") or
+            ""
+        )
         if not api_key:
-            log.warning("⚠️ GEMINI_API_KEY not set - Gemini disabled")
+            log.warning("⚠️ No Gemini API key found in env vars")
             _gemini_init_failed = True
             return
         genai.configure(api_key=api_key)
-        # نموذج Gemini Flash - سريع ومجاني
-        _gemini_model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            system_instruction=(
-                "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والعملات الرقمية والأسواق المالية.\n\n"
-                "مهمتك: تحويل الأخبار الإنجليزية إلى أخبار صحفية عربية احترافية.\n\n"
-                "قواعد صارمة جداً:\n"
-                "1. حوّل الخبر إلى خبر صحفي عربي احترافي، واضح ومختصر.\n"
-                "2. حافظ على جميع المعلومات الأصلية دون إضافة أي معلومات جديدة.\n"
-                "3. لا تخترع تفاصيل أو أرقاماً غير موجودة في النص الأصلي.\n"
-                "4. اكتب بالعربية الفصحى فقط، بأسلوب صحفي إخباري مباشر.\n"
-                "5. 🚫 ممنوع ترجمة أسماء العملات والشركات والبروتوكولات - اتركها بالإنجليزية كما هي:\n"
-                "   Bitcoin, Ethereum, Binance, USDT, USDC, SEC, ETF, MicroStrategy,\n"
-                "   BlackRock, Coinbase, Solana, Cardano, XRP, Tether, Ripple, Litecoin,\n"
-                "   Dogecoin, Polkadot, Chainlink, Avalanche, Polygon, Arbitrum, Optimism,\n"
-                "   Uniswap, Aave, Curve, Grayscale, Fidelity, Kraken, Kevin Warsh, Powell.\n"
-                "6. ترجم فقط المصطلحات التقنية العامة:\n"
-                "   hack=اختراق, exploit=ثغرة, flash loan=قرض فوري, drained=تم تصريفها,\n"
-                "   stolen=مُسروقة, crash=انهيار, surge=قفزة, plunge=انهيار,\n"
-                "   token unlock=فك توكن, token burn=حرق توكن, hard fork=انقسام صلب,\n"
-                "   institutional inflows=تدفقات مؤسسية داخلة.\n"
-                "7. 🚫 تجاهل تماماً اسم المصدر إن وُجد في نهاية الخبر (CoinDesk, Reuters, CNBC, etc.).\n"
-                "8. 🚫 تجاهل ميتاداتا Reddit و HTML: [link], [تعليقات], /u/username, مقدم بواسطة.\n"
-                "9. 🚫 لا تضف رموزاً أو إيموجي عشوائية.\n"
-                "10. 🚫 لا تضف مقدمة مثل 'إليك الخبر' أو 'في خبر新发展'.\n"
-                "11. كن موجزاً (1-3 جمل كحد أقصى).\n"
-                "12. أعد فقط النص العربي المترجم، بدون أي مقدمات أو تعليقات.\n"
-            )
+
+        # 🆕🆕 اكتشاف أفضل نموذج متاح (أسماء النماذج تتغير)
+        # نحاول عدة نماذج من الأحدث للأقدم
+        candidate_models = [
+            "gemini-2.5-flash",          # الأحدث (2025+)
+            "gemini-2.0-flash",          # 2024-2025
+            "gemini-2.0-flash-exp",      # experimental
+            "gemini-1.5-flash-latest",   # alias للأحدث 1.5
+            "gemini-1.5-flash",          # قد يكون محذوفاً
+            "gemini-flash-latest",       # alias عام
+        ]
+
+        system_prompt = (
+            "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والعملات الرقمية والأسواق المالية.\n\n"
+            "مهمتك: تحويل الأخبار الإنجليزية إلى أخبار صحفية عربية احترافية.\n\n"
+            "قواعد صارمة جداً:\n"
+            "1. حوّل الخبر إلى خبر صحفي عربي احترافي، واضح ومختصر.\n"
+            "2. حافظ على جميع المعلومات الأصلية دون إضافة أي معلومات جديدة.\n"
+            "3. لا تخترع تفاصيل أو أرقاماً غير موجودة في النص الأصلي.\n"
+            "4. اكتب بالعربية الفصحى فقط، بأسلوب صحفي إخباري مباشر.\n"
+            "5. 🚫 ممنوع ترجمة أسماء العملات والشركات والبروتوكولات - اتركها بالإنجليزية كما هي:\n"
+            "   Bitcoin, Ethereum, Binance, USDT, USDC, SEC, ETF, MicroStrategy,\n"
+            "   BlackRock, Coinbase, Solana, Cardano, XRP, Tether, Ripple, Litecoin,\n"
+            "   Dogecoin, Polkadot, Chainlink, Avalanche, Polygon, Arbitrum, Optimism,\n"
+            "   Uniswap, Aave, Curve, Grayscale, Fidelity, Kraken, Kevin Warsh, Powell.\n"
+            "6. ترجم فقط المصطلحات التقنية العامة:\n"
+            "   hack=اختراق, exploit=ثغرة, flash loan=قرض فوري, drained=تم تصريفها,\n"
+            "   stolen=مُسروقة, crash=انهيار, surge=قفزة, plunge=انهيار,\n"
+            "   token unlock=فك توكن, token burn=حرق توكن, hard fork=انقسام صلب,\n"
+            "   institutional inflows=تدفقات مؤسسية داخلة.\n"
+            "7. 🚫 تجاهل تماماً اسم المصدر إن وُجد في نهاية الخبر (CoinDesk, Reuters, CNBC, etc.).\n"
+            "8. 🚫 تجاهل ميتاداتا Reddit و HTML: [link], [تعليقات], /u/username, مقدم بواسطة.\n"
+            "9. 🚫 لا تضف رموزاً أو إيموجي عشوائية.\n"
+            "10. 🚫 لا تضف مقدمة مثل 'إليك الخبر' أو 'في خبر新发展'.\n"
+            "11. كن موجزاً (1-3 جمل كحد أقصى).\n"
+            "12. أعد فقط النص العربي المترجم، بدون أي مقدمات أو تعليقات.\n"
         )
-        log.info("✅ Gemini API initialized successfully")
+
+        # محاولة كل نموذج حتى نجد واحداً يعمل
+        for model_name in candidate_models:
+            try:
+                _gemini_model = genai.GenerativeModel(
+                    model_name=model_name,
+                    system_instruction=system_prompt
+                )
+                # اختبار سريع: توليد استجابة قصيرة للتأكد أن النموذج يعمل
+                test_resp = _gemini_model.generate_content(
+                    "test",
+                    generation_config={"max_output_tokens": 5}
+                )
+                if test_resp and test_resp.text:
+                    log.info(f"✅ Gemini API initialized with model: {model_name}")
+                    return
+            except Exception as e:
+                log.info(f"   ⏭️ Model {model_name} not available: {str(e)[:100]}")
+                _gemini_model = None
+                continue
+
+        # لو فشلت كل النماذج، نحاول اكتشاف النماذج المتاحة
+        try:
+            log.info("🔍 Trying to list available models...")
+            available = []
+            for m in genai.list_models():
+                if "generateContent" in [method.name for method in m.supported_generation_methods]:
+                    if "flash" in m.name.lower():
+                        available.append(m.name)
+            if available:
+                log.info(f"📋 Available flash models: {available}")
+                # استخدم أول نموذج flash متاح
+                first_model = available[0]
+                _gemini_model = genai.GenerativeModel(
+                    model_name=first_model,
+                    system_instruction=system_prompt
+                )
+                log.info(f"✅ Gemini API initialized with discovered model: {first_model}")
+                return
+        except Exception as e:
+            log.warning(f"Model listing failed: {e}")
+
+        log.warning("⚠️ No working Gemini model found")
+        _gemini_init_failed = True
+
     except Exception as e:
         log.warning(f"⚠️ Gemini init failed: {e}")
         _gemini_init_failed = True
@@ -1264,13 +1326,20 @@ def _translate_with_gemini(text):
     if _gemini_model is None:
         return None
     try:
-        # صياغة الطلب - تركيز على إعادة الصياغة الصحفية
+        # 🆕🆕 صياغة الطلب واضحة جداً - إعادة صياغة بالعربية الفصحى
         prompt = (
-            f"حوّل هذا الخبر الإنجليزي إلى خبر صحفي عربي احترافي، واضح ومختصر، "
-            f"مع الحفاظ على جميع المعلومات وعدم إضافة أي معلومات جديدة:\n\n"
-            f"{text}"
+            f"أعد صياغة النص الإخباري التالي باللغة العربية الفصحى، "
+            f"بأسلوب صحفي احترافي واضح ومختصر. "
+            f"هذه إعادة صياغة وليست ترجمة حرفية. "
+            f"حافظ على جميع المعلومات والحقائق والأرقام كما هي، "
+            f"ولا تضف أي معلومات أو آراء من عندك. "
+            f"اللغة الهدف: العربية الفصحى فقط. "
+            f"اكتب 1 إلى 3 جمل بحد أقصى.\n\n"
+            f"النص الأصلي:\n{text}\n\n"
+            f"النص العربي المعاد صياغته:"
         )
-        # إعدادات التوليد - إجابات مختصرة ومحددة
+
+        # إعدادات التوليد - إجابات دقيقة ومتسقة
         generation_config = {
             "temperature": 0.3,        # منخفض = إجابات دقيقة ومتسقة
             "top_p": 0.8,
@@ -1285,6 +1354,10 @@ def _translate_with_gemini(text):
             result = response.text.strip()
             # إزالة أي علامات اقتباس زائدة
             result = result.strip('"\'`')
+            # إزالة مقدمات محتملة
+            for prefix in ["النص العربي:", "النص العربي المعاد صياغته:", "الترجمة:", "الصياغة:"]:
+                if result.startswith(prefix):
+                    result = result[len(prefix):].strip()
             if len(result) > 5:
                 return result
         return None

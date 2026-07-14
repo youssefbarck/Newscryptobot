@@ -1205,17 +1205,16 @@ _gemini_init_failed = False
 
 
 def _init_gemini():
-    """تهيئة Gemini API مرة واحدة"""
+    """تهيئة Gemini API - اكتشاف تلقائي للنموذج المتاح"""
     global _gemini_model, _gemini_init_failed
     if _gemini_model is not None or _gemini_init_failed:
         return
     try:
         import google.generativeai as genai
-        # 🆕 دعم عدة أسماء للمتغير (GitHub يرفض بعض الأسماء)
+        # دعم عدة أسماء للمتغير
         api_key = (
             _os.environ.get("GEMINI_API_KEY") or
             _os.environ.get("gemini_api_key") or
-            _os.environ.get("Gemini_Api_Key") or
             _os.environ.get("GEMINI_KEY") or
             _os.environ.get("gemini_key") or
             _os.environ.get("GOOGLE_API_KEY") or
@@ -1223,110 +1222,80 @@ def _init_gemini():
             ""
         )
         if not api_key:
-            log.warning("⚠️ No Gemini API key found in env vars")
+            log.warning("⚠️ No Gemini API key found")
             _gemini_init_failed = True
             return
         genai.configure(api_key=api_key)
 
-        # 🆕🆕 اكتشاف أفضل نموذج متاح (أسماء النماذج تتغير)
-        # نحاول عدة نماذج من الأحدث للأقدم
-        candidate_models = [
-            "gemini-2.5-flash",          # الأحدث (2025+)
-            "gemini-2.0-flash",          # 2024-2025
-            "gemini-2.0-flash-exp",      # experimental
-            "gemini-1.5-flash-latest",   # alias للأحدث 1.5
-            "gemini-1.5-flash",          # قد يكون محذوفاً
-            "gemini-flash-latest",       # alias عام
-        ]
-
         system_prompt = (
-            "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والعملات الرقمية والأسواق المالية.\n\n"
-            "مهمتك: تحويل الأخبار الإنجليزية إلى أخبار صحفية عربية احترافية.\n\n"
-            "قواعد صارمة جداً:\n"
-            "1. حوّل الخبر إلى خبر صحفي عربي احترافي، واضح ومختصر.\n"
-            "2. حافظ على جميع المعلومات الأصلية دون إضافة أي معلومات جديدة.\n"
-            "3. لا تخترع تفاصيل أو أرقاماً غير موجودة في النص الأصلي.\n"
-            "4. اكتب بالعربية الفصحى فقط، بأسلوب صحفي إخباري مباشر.\n"
-            "5. 🚫 ممنوع ترجمة أسماء العملات والشركات والبروتوكولات - اتركها بالإنجليزية كما هي:\n"
-            "   Bitcoin, Ethereum, Binance, USDT, USDC, SEC, ETF, MicroStrategy,\n"
-            "   BlackRock, Coinbase, Solana, Cardano, XRP, Tether, Ripple, Litecoin,\n"
-            "   Dogecoin, Polkadot, Chainlink, Avalanche, Polygon, Arbitrum, Optimism,\n"
-            "   Uniswap, Aave, Curve, Grayscale, Fidelity, Kraken, Kevin Warsh, Powell.\n"
-            "6. ترجم فقط المصطلحات التقنية العامة:\n"
-            "   hack=اختراق, exploit=ثغرة, flash loan=قرض فوري, drained=تم تصريفها,\n"
-            "   stolen=مُسروقة, crash=انهيار, surge=قفزة, plunge=انهيار,\n"
-            "   token unlock=فك توكن, token burn=حرق توكن, hard fork=انقسام صلب,\n"
-            "   institutional inflows=تدفقات مؤسسية داخلة.\n"
-            "7. 🚫 تجاهل تماماً اسم المصدر إن وُجد في نهاية الخبر (CoinDesk, Reuters, CNBC, etc.).\n"
-            "8. 🚫 تجاهل ميتاداتا Reddit و HTML: [link], [تعليقات], /u/username, مقدم بواسطة.\n"
-            "9. 🚫 لا تضف رموزاً أو إيموجي عشوائية.\n"
-            "10. 🚫 لا تضف مقدمة مثل 'إليك الخبر' أو 'في خبر新发展'.\n"
-            "11. كن موجزاً (1-3 جمل كحد أقصى).\n"
-            "12. أعد فقط النص العربي المترجم، بدون أي مقدمات أو تعليقات.\n"
+            "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والأسواق المالية. "
+            "مهمتك: إعادة صياغة الأخبار الإنجليزية بالعربية الفصحى بأسلوب صحفي احترافي. "
+            "قواعد صارمة: (1) اكتب بالعربية الفصحى فقط. "
+            "(2) أعد الصياغة وليس ترجمة حرفية. "
+            "(3) حافظ على جميع المعلومات والحقائق والأرقام دون إضافة. "
+            "(4) اترك أسماء العملات والشركات والبروتوكولات بالإنجليزية: "
+            "Bitcoin, Ethereum, Binance, USDT, USDC, SEC, ETF, MicroStrategy, "
+            "BlackRock, Coinbase, Solana, Cardano, XRP, Tether, Ripple, Litecoin, "
+            "Dogecoin, Polkadot, Chainlink, Avalanche, Polygon, Arbitrum, Uniswap, "
+            "Aave, Curve, Grayscale, Fidelity, Kraken, Kevin Warsh, Powell. "
+            "(5) ترجم المصطلحات: hack=اختراق, exploit=ثغرة, crash=انهيار, "
+            "surge=قفزة, plunge=انهيار, stolen=مُسروقة, drained=تم تصريفها, "
+            "token unlock=فك توكن, token burn=حرق توكن, hard fork=انقسام صلب. "
+            "(6) تجاهل اسم المصدر في النهاية (CoinDesk, Reuters, CNBC). "
+            "(7) تجاهل ميتاداتا Reddit: [link], [تعليقات], /u/username. "
+            "(8) لا تضف إيموجي أو مقدمات. (9) أكمل كل جملة ولا تقطعها. "
+            "(10) أعد فقط النص العربي المُعاد صياغته."
         )
 
-        # محاولة كل نموذج حتى نجد واحداً يعمل
+        # اكتشاف النموذج المتاح
+        candidate_models = [
+            "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-exp",
+            "gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-flash-latest",
+        ]
         for model_name in candidate_models:
             try:
                 _gemini_model = genai.GenerativeModel(
                     model_name=model_name,
                     system_instruction=system_prompt
                 )
-                # اختبار سريع: توليد استجابة قصيرة للتأكد أن النموذج يعمل
                 test_resp = _gemini_model.generate_content(
-                    "test",
-                    generation_config={"max_output_tokens": 5}
+                    "test", generation_config={"max_output_tokens": 5}
                 )
                 if test_resp and test_resp.text:
-                    log.info(f"✅ Gemini API initialized with model: {model_name}")
+                    log.info(f"✅ Gemini ready: {model_name}")
                     return
             except Exception as e:
-                log.info(f"   ⏭️ Model {model_name} not available: {str(e)[:100]}")
                 _gemini_model = None
                 continue
 
-        # لو فشلت كل النماذج، نحاول اكتشاف النماذج المتاحة
+        # اكتشاف تلقائي عبر list_models
         try:
-            log.info("🔍 Trying to list available models...")
-            available = []
             for m in genai.list_models():
-                if "generateContent" in [method.name for method in m.supported_generation_methods]:
-                    if "flash" in m.name.lower():
-                        available.append(m.name)
-            if available:
-                log.info(f"📋 Available flash models: {available}")
-                # استخدم أول نموذج flash متاح
-                first_model = available[0]
-                _gemini_model = genai.GenerativeModel(
-                    model_name=first_model,
-                    system_instruction=system_prompt
-                )
-                log.info(f"✅ Gemini API initialized with discovered model: {first_model}")
-                return
+                if ("generateContent" in [meth.name for meth in m.supported_generation_methods]
+                        and "flash" in m.name.lower()):
+                    _gemini_model = genai.GenerativeModel(
+                        model_name=m.name, system_instruction=system_prompt
+                    )
+                    log.info(f"✅ Gemini ready (discovered): {m.name}")
+                    return
         except Exception as e:
             log.warning(f"Model listing failed: {e}")
 
         log.warning("⚠️ No working Gemini model found")
         _gemini_init_failed = True
-
     except Exception as e:
         log.warning(f"⚠️ Gemini init failed: {e}")
         _gemini_init_failed = True
 
 
 def _translate_with_gemini(text):
-    """ترجمة وإعادة صياغة عبر Gemini API
-    🎯 يحوّل الخبر الإنجليزي إلى خبر صحفي عربي احترافي ومختصر
-    Returns:
-        str | None: النص العربي المُعاد صياغته، أو None عند الفشل
-    """
+    """إعادة صياغة الخبر بالعربية الفصحى عبر Gemini API"""
     if _gemini_init_failed:
         return None
     _init_gemini()
     if _gemini_model is None:
         return None
     try:
-        # 🆕🆕 صياغة الطلب واضحة جداً - إعادة صياغة بالعربية الفصحى
         prompt = (
             f"أعد صياغة النص الإخباري التالي باللغة العربية الفصحى، "
             f"بأسلوب صحفي احترافي واضح ومختصر. "
@@ -1334,33 +1303,23 @@ def _translate_with_gemini(text):
             f"حافظ على جميع المعلومات والحقائق والأرقام كما هي، "
             f"ولا تضف أي معلومات أو آراء من عندك. "
             f"اللغة الهدف: العربية الفصحى فقط. "
-            f"اكتب 1 إلى 4 جمل كاملة (لا تقطع الجمل في المنتصف). "
-            f"أكمل كل جملة حتى نهايتها الطبيعية.\n\n"
+            f"اكتب 1 إلى 4 جمل كاملة (لا تقطع الجمل).\n\n"
             f"النص الأصلي:\n{text}\n\n"
-            f"النص العربي المعاد صياغته (مكتمل بدون قطع):"
+            f"النص العربي المعاد صياغته:"
         )
-
-        # 🆕🆕 إعدادات التوليد - زيادة الحد ليكون كافياً للأخبار الطويلة
-        generation_config = {
-            "temperature": 0.3,        # منخفض = إجابات دقيقة ومتسقة
-            "top_p": 0.8,
-            "top_k": 40,
-            "max_output_tokens": 2048,  # 🆕 زيادة من 500 إلى 2048 (يكفي لأي خبر)
-        }
         response = _gemini_model.generate_content(
             prompt,
-            generation_config=generation_config
+            generation_config={
+                "temperature": 0.3, "top_p": 0.8, "top_k": 40,
+                "max_output_tokens": 2048,
+            }
         )
         if response and response.text:
-            result = response.text.strip()
-            # إزالة أي علامات اقتباس زائدة
-            result = result.strip('"\'`')
-            # إزالة مقدمات محتملة
+            result = response.text.strip().strip('"\'`')
             for prefix in ["النص العربي:", "النص العربي المعاد صياغته:", "الترجمة:", "الصياغة:"]:
                 if result.startswith(prefix):
                     result = result[len(prefix):].strip()
-            if len(result) > 5:
-                return result
+            return result if len(result) > 5 else None
         return None
     except Exception as e:
         log.warning(f"Gemini translate err: {e}")
@@ -1368,34 +1327,25 @@ def _translate_with_gemini(text):
 
 
 def translate_to_arabic(text, force=False):
-    """ترجمة النص للعربية بجودة احترافية
-    🌟 محرك وحيد: Gemini API - إعادة صياغة صحفية احترافية
-    🎯 يحوّل الخبر الإنجليزي إلى خبر صحفي عربي واضح ومختصر
-    🚫 تم إزالة: Z.AI, deep-translator, Google REST, NLLB
-    """
+    """ترجمة النص للعربية - محرك وحيد: Gemini API (إعادة صياغة صحفية)"""
     if not text or len(text) < 3:
         return text
-    # 🆕🆕 زيادة حد النص الأصلي (كان 500 - صغير جداً ويقطع الأخبار)
     if len(text) > 2000:
         text = text[:2000]
-    # تحقق من الكاش
     cache_key = hashlib.md5(text.encode()).hexdigest()[:12]
     if not force and cache_key in _translation_cache:
         return _translation_cache[cache_key]
 
-    # 🌟 المحرك الوحيد: Gemini API
     translated = _translate_with_gemini(text)
-
-    # 🔄 Fallback: لو فشل Gemini، نعيد النص الأصلي (بدون ترجمة)
-    # (لا نستخدم Google/NLLB - المستخدم طالب Gemini فقط)
     if translated:
-        # 🆕 تنظيف بسيط للنص المترجم
         translated = _cleanup_translation(translated)
         _translation_cache[cache_key] = translated
         return translated
 
-    # في حالة فشل Gemini، أعد النص الأصلي (لا تخترع ترجمة)
-    log.warning("Gemini failed - returning original text (no translation)")
+    log.warning("Gemini failed - returning placeholder")
+    return None  # 🆕 نرجع None بدل النص الإنجليزي
+
+
     return text
 
 
@@ -1935,8 +1885,11 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
     if translate and summary and not summary_ar:
         summary_ar = translate_to_arabic(summary)
         item["summary_ar"] = summary_ar
-    # العنوان النهائي (عربي فقط)
-    final_title = title_ar if title_ar and translate else title
+    # العنوان النهائي - 🆕🆕 إجبار الترجمة بالعربية (لا نستخدم النص الإنجليزي أبداً)
+    # لو فشل Gemini، نحاول مرة ثانية، ولو فشل نضع علامة واضحة
+    if (not title_ar or title_ar == title) and translate and title:
+        title_ar = translate_to_arabic(title, force=True)
+    final_title = title_ar if title_ar and title_ar != title else "⚠️ تعذرت ترجمة هذا الخبر"
 
     # 🚫 تم حذف نظام إيموجي العملات - كان يسبب أخطاء كارثية
     # (يطابق "sol" في "Solomon"، "tron" في "Patron"، "link" في "LinkedIn")
@@ -3172,8 +3125,8 @@ def build_daily_summary():
                     title = item.get("title", "")
                     title_ar = item.get("title_ar", "")
                     if not title_ar:
-                        title_ar = translate_to_arabic(title)
-                    final_title = title_ar if title_ar and title_ar != title else title
+                        title_ar = translate_to_arabic(title, force=True)
+                    final_title = title_ar if title_ar else "⚠️ تعذرت الترجمة"
                     if len(final_title) > 80:
                         final_title = final_title[:77] + "..."
                     source = translate_source_name(item.get("source", ""))

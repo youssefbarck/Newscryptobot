@@ -1298,14 +1298,15 @@ def _translate_with_gemini(text):
         return None
     prompt = (
         f"أعد صياغة النص الإخباري التالي باللغة العربية الفصحى، "
-        f"بأسلوب صحفي احترافي واضح ومختصر. "
+        f"بأسلوب صحفي احترافي واضح ومختصر جداً. "
         f"هذه إعادة صياغة وليست ترجمة حرفية. "
-        f"حافظ على جميع المعلومات والحقائق والأرقام كما هي، "
-        f"ولا تضف أي معلومات أو آراء من عندك. "
+        f"حافظ على المعلومات الأساسية والأرقام الرئيسية فقط. "
         f"اللغة الهدف: العربية الفصحى فقط. "
-        f"اكتب 1 إلى 4 جمل كاملة (لا تقطع الجمل).\n\n"
+        f"🚫 مهم جداً: اكتب جملتين (2 جمل) فقط كحد أقصى. "
+        f"لا تكرر المعلومات ولا تفصّل كثيراً. "
+        f"كن موجزاً ومباشراً.\n\n"
         f"النص الأصلي:\n{text}\n\n"
-        f"النص العربي المعاد صياغته:"
+        f"النص العربي المعاد صياغته (جملتين فقط):"
     )
     # 🆕🆕 تجربة كل النماذج المتاحة حتى ينجح واحد
     for i, model in enumerate(_gemini_models):
@@ -1314,7 +1315,7 @@ def _translate_with_gemini(text):
                 prompt,
                 generation_config={
                     "temperature": 0.3, "top_p": 0.8, "top_k": 40,
-                    "max_output_tokens": 2048,
+                    "max_output_tokens": 300,  # 🆕 مختصر جداً (سطرين)
                 }
             )
             if response and response.text:
@@ -1358,8 +1359,9 @@ def _translate_with_groq(text):
             "(8) أكمل كل جملة. (9) أعد النص العربي فقط."
         )
         user_prompt = (
-            f"أعد صياغة هذا الخبر بالعربية الفصحى بأسلوب صحفي احترافي ومختصر "
-            f"(1-4 جمل كاملة). حافظ على جميع المعلومات والأرقام:\n\n{text}"
+            f"أعد صياغة هذا الخبر بالعربية الفصحى بأسلوب صحفي احترافي ومختصر جداً. "
+            f"🚫 اكتب جملتين (2 جمل) فقط كحد أقصى. "
+            f"حافظ على المعلومات الأساسية والأرقام الرئيسية فقط:\n\n{text}"
         )
         payload = {
             "model": "llama-3.3-70b-versatile",
@@ -1368,7 +1370,7 @@ def _translate_with_groq(text):
                 {"role": "user", "content": user_prompt}
             ],
             "temperature": 0.3,
-            "max_tokens": 2048,
+            "max_tokens": 300,  # 🆕 مختصر جداً (سطرين)
         }
         r = requests.post(
             url, json=payload,
@@ -1417,8 +1419,9 @@ def _translate_with_openrouter(text):
             "(7) أكمل كل جملة. (8) أعد النص العربي فقط."
         )
         user_prompt = (
-            f"أعد صياغة هذا الخبر بالعربية الفصحى بأسلوب صحفي احترافي ومختصر "
-            f"(1-4 جمل كاملة). حافظ على جميع المعلومات والأرقام:\n\n{text}"
+            f"أعد صياغة هذا الخبر بالعربية الفصحى بأسلوب صحفي احترافي ومختصر جداً. "
+            f"🚫 اكتب جملتين (2 جمل) فقط كحد أقصى. "
+            f"حافظ على المعلومات الأساسية والأرقام الرئيسية فقط:\n\n{text}"
         )
         payload = {
             "model": "qwen/qwen-2.5-72b-instruct",
@@ -1427,7 +1430,7 @@ def _translate_with_openrouter(text):
                 {"role": "user", "content": user_prompt}
             ],
             "temperature": 0.3,
-            "max_tokens": 2048,
+            "max_tokens": 300,  # 🆕 مختصر جداً (سطرين)
         }
         r = requests.post(
             url, json=payload,
@@ -1462,8 +1465,9 @@ def translate_to_arabic(text, force=False):
     """
     if not text or len(text) < 3:
         return text
-    if len(text) > 2000:
-        text = text[:2000]
+    # 🆕🆕 قص النص الطويل جداً (نحتاج فقط المهم لـ 2 جملة)
+    if len(text) > 800:
+        text = text[:800]
     cache_key = hashlib.md5(text.encode()).hexdigest()[:12]
     if not force and cache_key in _translation_cache:
         return _translation_cache[cache_key]

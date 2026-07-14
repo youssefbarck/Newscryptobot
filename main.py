@@ -1220,12 +1220,67 @@ def _translate_google_fallback(text):
         log.warning(f"Google translate err: {e}")
     return None
 
+def _translate_with_llm(text):
+    """🆕🆕 محرك الترجمة الأساسي: Z.AI LLM (إعادة صياغة احترافية)
+    ✅ يفهم السياق المالي والكريبتو
+    ✅ يحافظ على أسماء العملات والشركات بالإنجليزية
+    ✅ يتجاهل اسم المصدر تلقائياً
+    ✅ ينتج صياغة عربية طبيعية (وليس ترجمة حرفية)
+    ✅ لا يحتاج placeholders (يحل المشكلة جذرياً)
+    """
+    import subprocess
+    import json as _json
+    try:
+        # الـ prompt: إعادة صياغة احترافية بالعربية
+        system_prompt = (
+            "مهمتك: إعادة صياغة الأخبار المالية والكريبتو بالعربية.\n\n"
+            "قواعد صارمة:\n"
+            "1. اكتب بالعربية الفصحى فقط، بدون خلط مع الإنجليزية\n"
+            "2. حافظ على أسماء العملات والشركات بالإنجليزية كما هي: "
+            "Bitcoin, Ethereum, Binance, USDT, USDC, SEC, ETF, MicroStrategy, "
+            "BlackRock, Coinbase, Solana, Cardano, XRP, Tether, Ripple\n"
+            "3. ترجم المصطلحات التقنية: hack=اختراق, exploit=ثغرة, "
+            "flash loan=قرض فوري, drained=تم تصريفها, stolen=مُسروقة, "
+            "crash=انهيار, surge=قفزة, plunge=انهيار, halving=التنصيف\n"
+            "4. تجاهل اسم المصدر إن وُجد في نهاية الخبر (CoinDesk, Reuters, etc.)\n"
+            "5. كن موجزاً (1-2 جملة)\n"
+            "6. لا تشرح ولا تضف معلومات من عندك\n\n"
+            "أعد فقط النص العربي المترجم."
+        )
+        # استدعاء z-ai CLI
+        result = subprocess.run(
+            ["z-ai", "chat", "--prompt", text, "--system", system_prompt],
+            capture_output=True, text=True, timeout=30, encoding='utf-8'
+        )
+        if result.returncode == 0 and result.stdout:
+            # استخراج المحتوى من JSON
+            try:
+                data = _json.loads(result.stdout)
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content and len(content) > 5:
+                    return content.strip()
+            except Exception as e:
+                log.warning(f"LLM JSON parse err: {e}")
+                # محاولة استخراج المحتوى بنمط نصي
+                import re as _re
+                match = _re.search(r'"content"\s*:\s*"([^"]+)"', result.stdout)
+                if match:
+                    return match.group(1).strip()
+        else:
+            log.warning(f"z-ai CLI failed: {result.stderr[:200]}")
+    except subprocess.TimeoutExpired:
+        log.warning("z-ai CLI timeout (30s)")
+    except FileNotFoundError:
+        log.warning("z-ai CLI not found - falling back to deep-translator")
+    except Exception as e:
+        log.warning(f"LLM translate err: {e}")
+    return None
+
 def translate_to_arabic(text, force=False):
     """ترجمة النص للعربية بجودة احترافية
-    🆕🆕 محرك أساسي: NLLB-200 (Meta) - جودة عالية للأخبار المالية
-    🆕🆕 محرك احتياطي: deep-translator (Google) - سريع عند فشل NLLB
-    🆕🆕 حماية ذكية: المختصرات تبقى إنجليزية، الأسماء تُستبدل بالعربية
-    🔄 Fallback متعدد: NLLB → deep-translator → Google REST → النص الأصلي
+    🆕🆕 محرك أساسي: Z.AI LLM (إعادة صياغة احترافية) - الحل الجذري
+    🆕🆕 محرك احتياطي: deep-translator → Google REST → النص الأصلي
+    🎯 يحل كل المشاكل: لا placeholders، لا اسم مصدر، صياغة طبيعية
     """
     if not text or len(text) < 3:
         return text
@@ -1237,26 +1292,31 @@ def translate_to_arabic(text, force=False):
     if not force and cache_key in _translation_cache:
         return _translation_cache[cache_key]
 
-    # 🆕🆕 خطوة 1: حماية المصطلحات (استبدالها بـ placeholders)
-    protected_text, restore_map = _protect_terms(text)
     translated = None
 
-    # 🌟 محاولة 1: NLLB-200 (الأفضل جودة للأخبار المالية)
-    translated = _translate_nllb(protected_text)
+    # 🌟 محاولة 1: Z.AI LLM (الحل الجذري - إعادة صياغة احترافية)
+    translated = _translate_with_llm(text)
 
-    # 🔄 محاولة 2: deep-translator (Fallback سريع)
+    # 🔄 محاولة 2: deep-translator (Google Translate - fallback)
     if not translated:
+        # نطبّق الحماية فقط للـ fallback
+        protected_text, restore_map = _protect_terms(text)
         translated = _translate_deep_translator(protected_text)
+        if translated:
+            translated = _restore_terms(translated, restore_map)
+            translated = _cleanup_translation(translated)
 
-    # 🔄 محاولة 3: Google Translate REST API (Fallback نهائي)
+    # 🔄 محاولة 3: Google REST API (fallback نهائي)
     if not translated:
+        protected_text, restore_map = _protect_terms(text)
         translated = _translate_google_fallback(protected_text)
+        if translated:
+            translated = _restore_terms(translated, restore_map)
+            translated = _cleanup_translation(translated)
 
     # معالجة النتيجة النهائية
     if translated:
-        # 🆕🆕 خطوة 2: استعادة المصطلحات الأصلية (إزالة الـ placeholders)
-        translated = _restore_terms(translated, restore_map)
-        # 🔧 تطبيق قاموس المصطلحات الاقتصادية
+        # 🔧 تطبيق قاموس المصطلحات الاقتصادية (تحسينات إضافية)
         translated_lower = translated.lower()
         for en_term, ar_term in ECONOMIC_TERMS.items():
             if en_term in translated_lower:
@@ -1270,6 +1330,89 @@ def translate_to_arabic(text, force=False):
         return translated
 
     return text  # في حالة الفشل التام، ارجع النص الأصلي
+
+
+def _cleanup_translation(text):
+    """🆕 تنظيف شامل للنص المترجم من المخلفات والأخطاء الشائعة
+    يزيل:
+    - بقايا الـ placeholders (ar, ZZ, Uni, أرقام مفردة بين قوسين)
+    - الكلمات الإنجليزية المعلقة التي تسربت
+    - المسافات الزائدة
+    - علامات الترقيم المكررة
+    """
+    if not text:
+        return text
+
+    result = text
+
+    # 1️⃣ إزالة بقايا الـ placeholders
+    # أي تسلسل يحتوي على ZZ متبوع بأرقام
+    result = re.sub(r"«\s*ZZ\s*\d+\s*ZZ\s*»", "", result)
+    result = re.sub(r"ZZ\s*\d+\s*ZZ", "", result)
+    result = re.sub(r"\[\[\s*\d+\s*\]\]", "", result)
+    result = re.sub(r"\[\s*\d+\s*\]", "", result)
+    # كلمة "ar" أو "arb" معلقة (من رمز اللغة العربية arb_Arab)
+    result = re.sub(r"\barb\b", "", result, flags=re.IGNORECASE)
+    result = re.sub(r"\barb_Arab\b", "", result, flags=re.IGNORECASE)
+    # 2️⃣ إزالة الكلمات الإنجليزية المعلقة (كلمات قصيرة بلا معنى)
+    # مثل "Uni" أو "ZZ" أو "XX" المنفردة
+    suspicious_words = ["uni", "zzz", "zz", "xx", "yy", "arb", "latn", "arab", "eng", "eng_latn"]
+    for word in suspicious_words:
+        # فقط لو ظهرت ككلمة منفصلة (وليست جزءاً من كلمة أكبر)
+        result = re.sub(r"\b" + word + r"\b", "", result, flags=re.IGNORECASE)
+
+    # 🆕 2.5️⃣ إزالة الكلمات الإنجليزية القصيرة المعلقة (1-3 حروف)
+    # التي تظهر بين نص عربي (placeholder leaks من NLLB)
+    # نمط: نص عربي + مسافة + كلمة إنجليزية قصيرة + مسافة + نص عربي
+    # مثال: "قرر ar في" ← "قرر في"
+    result = re.sub(
+        r"([\u0600-\u06FF])\s+[a-zA-Z]{1,3}\s+([\u0600-\u06FF])",
+        r"\1 \2",
+        result
+    )
+    # نمط: بداية النص + كلمة إنجليزية قصيرة + مسافة + نص عربي
+    result = re.sub(
+        r"^[a-zA-Z]{1,3}\s+([\u0600-\u06FF])",
+        r"\1",
+        result
+    )
+    # نمط: نص عربي + مسافة + كلمة إنجليزية قصيرة في النهاية
+    result = re.sub(
+        r"([\u0600-\u06FF])\s+[a-zA-Z]{1,3}$",
+        r"\1",
+        result
+    )
+
+    # 3️⃣ إزالة الأقواس الفارغة
+    result = re.sub(r"\(\s*\)", "", result)
+    result = re.sub(r"\[\s*\]", "", result)
+    result = re.sub(r"«\s*»", "", result)
+    result = re.sub(r"\{\s*\}", "", result)
+
+    # 4️⃣ إزالة المسافات الزائدة
+    result = re.sub(r"\s+", " ", result)
+    result = re.sub(r"\s+\.", ".", result)
+    result = re.sub(r"\s+,", ",", result)
+    result = re.sub(r"\.\s*\.\s*\.", ".", result)
+
+    # 5️⃣ إزالة علامات الاقتباس الفارغة
+    result = re.sub(r"'\s*'", "", result)
+    result = re.sub(r'"\s*"', "", result)
+    result = re.sub(r"''", "", result)
+
+    # 6️⃣ تنظيف البداية والنهاية
+    result = result.strip()
+    result = result.strip(" .,،")
+    result = result.strip()
+
+    # 7️⃣ عودة المسافات الطبيعية بعد الفاصلة
+    result = re.sub(r",\s*", "، ", result)
+    result = re.sub(r"\s+،", "،", result)
+
+    # 8️⃣ إزالة الكلمات المكررة المتجاورة (مثل "الالولايات المتحدة")
+    result = re.sub(r"\b(\w+)\s+\1\b", r"\1", result)
+
+    return result
 
 def translate_news_item(item):
     """ترجمة عنوان وملخص الخبر للعربية"""
@@ -1299,6 +1442,36 @@ def extract_image_from_html(html_text):
         return match.group(1)
     # البحث عن enclosure (مستخدم في بعض RSS)
     return ""
+
+def _strip_source_from_title(title, source_name=""):
+    """🆕 يزيل اسم المصدر من نهاية العنوان
+    بعض مصادر RSS تضيف اسم المصدر في نهاية العنوان مثل:
+    "Senate CLARITY Act... - Dow Jones" أو "Bitcoin crashes | CoinDesk"
+    """
+    if not title or not source_name:
+        return title
+    cleaned = title
+    # أنماط شائعة: " - Dow Jones" أو " | CoinDesk" أو " — InvestingLive"
+    # نبحث عن اسم المصدر في النهاية مع فاصل
+    source_lower = source_name.lower()
+    cleaned_lower = cleaned.lower()
+    # أنماط الفواصل الشائعة
+    separators = [" - ", " | ", " — ", " – ", " :: "]
+    for sep in separators:
+        if sep in cleaned_lower:
+            parts = cleaned_lower.rsplit(sep, 1)
+            if len(parts) == 2:
+                last_part = parts[1].strip()
+                # لو الجزء الأخير يحتوي على اسم المصدر (أو العكس)
+                if (source_lower in last_part or last_part in source_lower
+                    or len(last_part) < 30):  # جزء قصير = على الأغلب اسم المصدر
+                    # أعد النص الأصلي بدون الجزء الأخير
+                    idx = cleaned_lower.rfind(sep)
+                    if idx > 10:  # تأكد أن العنوان ليس قصيراً جداً
+                        cleaned = cleaned[:idx].strip()
+                        break
+    return cleaned
+
 
 def parse_rss_source(source_name, source_info):
     """يجلب ويحلل RSS source واحد"""
@@ -1363,7 +1536,7 @@ def parse_rss_source(source_name, source_info):
                         if enclosure is not None and enclosure.get('type', '').startswith('image'):
                             image = enclosure.get('url')
                     items.append({
-                        "title": clean_html(title),
+                        "title": _strip_source_from_title(clean_html(title), source_name),
                         "link": link,
                         "summary": extract_summary(desc),
                         "image": image,
@@ -1384,7 +1557,7 @@ def parse_rss_source(source_name, source_info):
                         # 🆕 استخراج الصورة من Atom
                         image = extract_image_from_html(summary)
                         items.append({
-                            "title": clean_html(title),
+                            "title": _strip_source_from_title(clean_html(title), source_name),
                             "link": link,
                             "summary": extract_summary(summary),
                             "image": image,

@@ -1,0 +1,65 @@
+name: News Bot
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: news-bot
+  cancel-in-progress: false
+
+jobs:
+  send-news:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITHUB_ACTIONS: "true"
+      RUN_MODE: "oneshot"
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+      CHANNEL_LINK: ${{ secrets.CHANNEL_LINK }}
+      CHANNEL_NAME: ${{ secrets.CHANNEL_NAME }}
+      SEND_TO_CHANNEL: ${{ secrets.SEND_TO_CHANNEL }}
+      TIMEZONE: ${{ secrets.TIMEZONE }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Z.AI SDK CLI
+        run: npm install -g z-ai-web-dev-sdk
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run news bot
+        run: python main.py
+        env:
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+
+      - name: Save state
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sent_news.json 2>/dev/null || true
+          git add news_settings.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update state [skip ci]"
+            git pull --rebase origin main || true
+            git push || true
+          fi

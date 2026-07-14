@@ -1191,219 +1191,139 @@ def _restore_terms(translated_text, restore_map):
 
 _deepl_disabled_until = 0  # 🆕 تعطيل DeepL مؤقتاً عند فشل الاتصال لتقليل التحذيرات
 
-# 🆕🆕 محرك الترجمة الأساسي: NLLB-200 (Meta) - أفضل جودة للأخبار المالية
-# ✅ يفهم السياق المالي بشكل أفضل من Google
-# ✅ لا يخلط بين الكلمات ("US-Iran escalation" يترجمها بشكل صحيح)
-# ✅ ينتج ترجمات طبيعية (وليس حرفية مثل Google)
-# deep-translator (Google) متاح كـ fallback سريع
-_nllb_tokenizer = None
-_nllb_model = None
-_nllb_init_failed = False
+# ════════════════════════════════════════════════════════════════════
+# 🌟 محرك الترجمة الوحيد: Gemini API (إعادة صياغة صحفية احترافية)
+# ════════════════════════════════════════════════════════════════════
+# ✅ يحوّل الخبر الإنجليزي إلى خبر صحفي عربي احترافي ومختصر
+# ✅ يحافظ على جميع المعلومات دون إضافة أي معلومات جديدة
+# ✅ يحافظ على أسماء العملات والشركات بالإنجليزية (Bitcoin, Binance, SEC)
+# ✅ يتجاهل اسم المصدر إن وُجد في النهاية
+# ✅ يتجاهل ميتاداتا Reddit ووسوم HTML
+# 🚫 تم إزالة: Z.AI, deep-translator, Google REST, NLLB
+_gemini_model = None
+_gemini_init_failed = False
 
-def _init_nllb():
-    """تحميل نموذج NLLB-200-distilled-600M مرة واحدة"""
-    global _nllb_tokenizer, _nllb_model, _nllb_init_failed
-    if _nllb_model is not None or _nllb_init_failed:
+
+def _init_gemini():
+    """تهيئة Gemini API مرة واحدة"""
+    global _gemini_model, _gemini_init_failed
+    if _gemini_model is not None or _gemini_init_failed:
         return
     try:
-        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-        import torch
-        model_name = "facebook/nllb-200-distilled-600M"
-        log.info("🤖 Loading NLLB-200 model (first run downloads ~1.2GB)...")
-        _nllb_tokenizer = AutoTokenizer.from_pretrained(model_name)
-        # 🆕 تحميل على CPU مع تحسينات السرعة
-        _nllb_model = AutoModelForSeq2SeqLM.from_pretrained(
-            model_name,
-            torch_dtype=torch.float32,  # CPU يعمل أفضل مع float32
-            low_cpu_mem_usage=True
-        )
-        _nllb_model.eval()  # وضع الاستدلال (أسرع)
-        log.info("✅ NLLB-200 model loaded successfully")
-    except Exception as e:
-        log.warning(f"⚠️ NLLB init failed: {e} — will use deep-translator fallback")
-        _nllb_init_failed = True
-
-def _translate_nllb(text):
-    """ترجمة عبر NLLB-200 (offline، جودة عالية للأخبار المالية)
-    🔧 تحسين: استخدام greedy decoding (أسرع) بدل beam search
-    """
-    if _nllb_init_failed:
-        return None
-    _init_nllb()
-    if _nllb_model is None:
-        return None
-    try:
-        import torch
-        inputs = _nllb_tokenizer(text, return_tensors="pt", max_length=512, truncation=True)
-        with torch.no_grad():  # 🆕 وضع الاستدلال (أسرع)
-            output = _nllb_model.generate(
-                **inputs,
-                forced_bos_token_id=_nllb_tokenizer.convert_tokens_to_ids("arb_Arab"),
-                max_length=400,
-                num_beams=1,  # 🆕 greedy decoding (أسرع 4x من beam search)
-                length_penalty=1.0,
-                do_sample=False
+        import google.generativeai as genai
+        api_key = _os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            log.warning("⚠️ GEMINI_API_KEY not set - Gemini disabled")
+            _gemini_init_failed = True
+            return
+        genai.configure(api_key=api_key)
+        # نموذج Gemini Flash - سريع ومجاني
+        _gemini_model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction=(
+                "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والعملات الرقمية والأسواق المالية.\n\n"
+                "مهمتك: تحويل الأخبار الإنجليزية إلى أخبار صحفية عربية احترافية.\n\n"
+                "قواعد صارمة جداً:\n"
+                "1. حوّل الخبر إلى خبر صحفي عربي احترافي، واضح ومختصر.\n"
+                "2. حافظ على جميع المعلومات الأصلية دون إضافة أي معلومات جديدة.\n"
+                "3. لا تخترع تفاصيل أو أرقاماً غير موجودة في النص الأصلي.\n"
+                "4. اكتب بالعربية الفصحى فقط، بأسلوب صحفي إخباري مباشر.\n"
+                "5. 🚫 ممنوع ترجمة أسماء العملات والشركات والبروتوكولات - اتركها بالإنجليزية كما هي:\n"
+                "   Bitcoin, Ethereum, Binance, USDT, USDC, SEC, ETF, MicroStrategy,\n"
+                "   BlackRock, Coinbase, Solana, Cardano, XRP, Tether, Ripple, Litecoin,\n"
+                "   Dogecoin, Polkadot, Chainlink, Avalanche, Polygon, Arbitrum, Optimism,\n"
+                "   Uniswap, Aave, Curve, Grayscale, Fidelity, Kraken, Kevin Warsh, Powell.\n"
+                "6. ترجم فقط المصطلحات التقنية العامة:\n"
+                "   hack=اختراق, exploit=ثغرة, flash loan=قرض فوري, drained=تم تصريفها,\n"
+                "   stolen=مُسروقة, crash=انهيار, surge=قفزة, plunge=انهيار,\n"
+                "   token unlock=فك توكن, token burn=حرق توكن, hard fork=انقسام صلب,\n"
+                "   institutional inflows=تدفقات مؤسسية داخلة.\n"
+                "7. 🚫 تجاهل تماماً اسم المصدر إن وُجد في نهاية الخبر (CoinDesk, Reuters, CNBC, etc.).\n"
+                "8. 🚫 تجاهل ميتاداتا Reddit و HTML: [link], [تعليقات], /u/username, مقدم بواسطة.\n"
+                "9. 🚫 لا تضف رموزاً أو إيموجي عشوائية.\n"
+                "10. 🚫 لا تضف مقدمة مثل 'إليك الخبر' أو 'في خبر新发展'.\n"
+                "11. كن موجزاً (1-3 جمل كحد أقصى).\n"
+                "12. أعد فقط النص العربي المترجم، بدون أي مقدمات أو تعليقات.\n"
             )
-        return _nllb_tokenizer.batch_decode(output, skip_special_tokens=True)[0]
+        )
+        log.info("✅ Gemini API initialized successfully")
     except Exception as e:
-        log.warning(f"NLLB translate err: {e}")
-        return None
+        log.warning(f"⚠️ Gemini init failed: {e}")
+        _gemini_init_failed = True
 
-def _translate_deep_translator(text):
-    """🆕 محرك الترجمة الاحتياطي: deep-translator (Google Translate)
-    يُستخدم عند فشل NLLB أو كـ fallback سريع
+
+def _translate_with_gemini(text):
+    """ترجمة وإعادة صياغة عبر Gemini API
+    🎯 يحوّل الخبر الإنجليزي إلى خبر صحفي عربي احترافي ومختصر
+    Returns:
+        str | None: النص العربي المُعاد صياغته، أو None عند الفشل
     """
-    try:
-        from deep_translator import GoogleTranslator
-        if len(text) > 4500:
-            chunks = [text[i:i+4500] for i in range(0, len(text), 4500)]
-            translated_chunks = GoogleTranslator(source='en', target='ar').translate_batch(chunks)
-            return " ".join(translated_chunks)
-        return GoogleTranslator(source='en', target='ar').translate(text)
-    except Exception as e:
-        log.warning(f"deep-translator err: {e}")
+    if _gemini_init_failed:
         return None
-
-def _translate_google_fallback(text):
-    """ترجمة عبر Google Translate REST API (fallback نهائي)"""
+    _init_gemini()
+    if _gemini_model is None:
+        return None
     try:
-        url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            "client": "gtx",
-            "sl": "en",
-            "tl": "ar",
-            "dt": "t",
-            "q": text
+        # صياغة الطلب - تركيز على إعادة الصياغة الصحفية
+        prompt = (
+            f"حوّل هذا الخبر الإنجليزي إلى خبر صحفي عربي احترافي، واضح ومختصر، "
+            f"مع الحفاظ على جميع المعلومات وعدم إضافة أي معلومات جديدة:\n\n"
+            f"{text}"
+        )
+        # إعدادات التوليد - إجابات مختصرة ومحددة
+        generation_config = {
+            "temperature": 0.3,        # منخفض = إجابات دقيقة ومتسقة
+            "top_p": 0.8,
+            "top_k": 40,
+            "max_output_tokens": 500,  # كافية لخبر مختصر
         }
-        r = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            translated_parts = []
-            for sentence in data[0]:
-                if sentence and sentence[0]:
-                    translated_parts.append(sentence[0])
-            return "".join(translated_parts).strip()
+        response = _gemini_model.generate_content(
+            prompt,
+            generation_config=generation_config
+        )
+        if response and response.text:
+            result = response.text.strip()
+            # إزالة أي علامات اقتباس زائدة
+            result = result.strip('"\'`')
+            if len(result) > 5:
+                return result
+        return None
     except Exception as e:
-        log.warning(f"Google translate err: {e}")
-    return None
+        log.warning(f"Gemini translate err: {e}")
+        return None
 
-def _translate_with_llm(text):
-    """🆕🆕 محرك الترجمة الأساسي: Z.AI LLM (إعادة صياغة احترافية)
-    ✅ يفهم السياق المالي والكريبتو
-    ✅ يحافظ على أسماء العملات والشركات بالإنجليزية
-    ✅ يتجاهل اسم المصدر تلقائياً
-    ✅ ينتج صياغة عربية طبيعية (وليس ترجمة حرفية)
-    ✅ لا يحتاج placeholders (يحل المشكلة جذرياً)
-    """
-    import subprocess
-    import json as _json
-    try:
-        # الـ prompt: إعادة صياغة احترافية بالعربية
-        system_prompt = (
-            "مهمتك: إعادة صياغة الأخبار المالية والكريبتو بالعربية.\n\n"
-            "قواعد صارمة جداً:\n"
-            "1. اكتب بالعربية الفصحى فقط، بدون خلط مع الإنجليزية في الكلمات العامة\n"
-            "2. 🚫 ممنوع ترجمة أسماء العملات والشركات والبروتوكولات - اتركها بالإنجليزية كما هي:\n"
-            "   Bitcoin, Ethereum, Binance, USDT, USDC, SEC, ETF, MicroStrategy, "
-            "BlackRock, Coinbase, Solana, Cardano, XRP, Tether, Ripple, Litecoin, "
-            "Dogecoin, Polkadot, Chainlink, Avalanche, Polygon, Arbitrum, Optimism, "
-            "Uniswap, Aave, Curve, Grayscale, Fidelity, Kraken\n"
-            "3. ترجم فقط المصطلحات التقنية العامة:\n"
-            "   hack=اختراق, exploit=ثغرة, flash loan=قرض فوري, drained=تم تصريفها,\n"
-            "   stolen=مُسروقة, crash=انهيار, surge=قفزة, plunge=انهيار, halving=التنصيف,\n"
-            "   token unlock=فك توكن, token burn=حرق توكن, hard fork=انقسام صلب\n"
-            "4. 🚫 تجاهل تماماً اسم المصدر إن وُجد في نهاية الخبر (CoinDesk, Reuters, etc.)\n"
-            "5. 🚫 تجاهل ميتاداتا Reddit إن وُجدت ([link], [تعليقات], /u/username, مقدم بواسطة)\n"
-            "6. كن موجزاً (1-2 جملة)\n"
-            "7. لا تشرح ولا تضف معلومات من عندك\n"
-            "8. لا تضف رموزاً أو إيموجي عشوائية\n\n"
-            "أعد فقط النص العربي المترجم، بدون أي مقدمات."
-        )
-        # استدعاء z-ai CLI
-        result = subprocess.run(
-            ["z-ai", "chat", "--prompt", text, "--system", system_prompt],
-            capture_output=True, text=True, timeout=30, encoding='utf-8'
-        )
-        if result.returncode == 0 and result.stdout:
-            # استخراج المحتوى من JSON
-            try:
-                data = _json.loads(result.stdout)
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                if content and len(content) > 5:
-                    return content.strip()
-            except Exception as e:
-                log.warning(f"LLM JSON parse err: {e}")
-                # محاولة استخراج المحتوى بنمط نصي
-                import re as _re
-                match = _re.search(r'"content"\s*:\s*"([^"]+)"', result.stdout)
-                if match:
-                    return match.group(1).strip()
-        else:
-            log.warning(f"z-ai CLI failed: {result.stderr[:200]}")
-    except subprocess.TimeoutExpired:
-        log.warning("z-ai CLI timeout (30s)")
-    except FileNotFoundError:
-        log.warning("z-ai CLI not found - falling back to deep-translator")
-    except Exception as e:
-        log.warning(f"LLM translate err: {e}")
-    return None
 
 def translate_to_arabic(text, force=False):
     """ترجمة النص للعربية بجودة احترافية
-    🆕🆕 محرك أساسي: Z.AI LLM (إعادة صياغة احترافية) - الحل الجذري
-    🆕🆕 محرك احتياطي: deep-translator → Google REST → النص الأصلي
-    🎯 يحل كل المشاكل: لا placeholders، لا اسم مصدر، صياغة طبيعية
+    🌟 محرك وحيد: Gemini API - إعادة صياغة صحفية احترافية
+    🎯 يحوّل الخبر الإنجليزي إلى خبر صحفي عربي واضح ومختصر
+    🚫 تم إزالة: Z.AI, deep-translator, Google REST, NLLB
     """
     if not text or len(text) < 3:
         return text
     # اختصار النص الطويل جداً قبل الترجمة
-    if len(text) > 500:
-        text = text[:500]
+    if len(text) > 1000:
+        text = text[:1000]
     # تحقق من الكاش
     cache_key = hashlib.md5(text.encode()).hexdigest()[:12]
     if not force and cache_key in _translation_cache:
         return _translation_cache[cache_key]
 
-    translated = None
+    # 🌟 المحرك الوحيد: Gemini API
+    translated = _translate_with_gemini(text)
 
-    # 🌟 محاولة 1: Z.AI LLM (الحل الجذري - إعادة صياغة احترافية)
-    translated = _translate_with_llm(text)
-
-    # 🔄 محاولة 2: deep-translator (Google Translate - fallback)
-    if not translated:
-        # نطبّق الحماية فقط للـ fallback
-        protected_text, restore_map = _protect_terms(text)
-        translated = _translate_deep_translator(protected_text)
-        if translated:
-            translated = _restore_terms(translated, restore_map)
-
-    # 🔄 محاولة 3: Google REST API (fallback نهائي)
-    if not translated:
-        protected_text, restore_map = _protect_terms(text)
-        translated = _translate_google_fallback(protected_text)
-        if translated:
-            translated = _restore_terms(translated, restore_map)
-
-    # معالجة النتيجة النهائية
+    # 🔄 Fallback: لو فشل Gemini، نعيد النص الأصلي (بدون ترجمة)
+    # (لا نستخدم Google/NLLB - المستخدم طالب Gemini فقط)
     if translated:
-        # 🆕🆕 تنظيف شامل دائماً (حتى لـ Z.AI LLM) لإزالة أي تسربات
-        translated = _cleanup_translation(translated)
-        # 🔧 تطبيق قاموس المصطلحات الاقتصادية (تحسينات إضافية)
-        translated_lower = translated.lower()
-        for en_term, ar_term in ECONOMIC_TERMS.items():
-            if en_term in translated_lower:
-                translated = re.sub(
-                    re.escape(en_term),
-                    ar_term,
-                    translated,
-                    flags=re.IGNORECASE
-                )
-        # 🆕 تنظيف مرة ثانية بعد تطبيق القاموس
+        # 🆕 تنظيف بسيط للنص المترجم
         translated = _cleanup_translation(translated)
         _translation_cache[cache_key] = translated
         return translated
 
-    return text  # في حالة الفشل التام، ارجع النص الأصلي
+    # في حالة فشل Gemini، أعد النص الأصلي (لا تخترع ترجمة)
+    log.warning("Gemini failed - returning original text (no translation)")
+    return text
+
 
 
 def _cleanup_translation(text):

@@ -127,6 +127,69 @@ NEWS_SOURCES = {
         "category": "crypto",
         "lang": "en"
     },
+    # ═══════════════════════════════════════════════════════════
+    # 🌐 مصادر عربية أصلية (لا تحتاج ترجمة - عربية فصحى)
+    # ═══════════════════════════════════════════════════════════
+    # 📺 Sky News Arabia - Business (اقتصاد + أسواق + نفط + ذهب)
+    "Sky News Arabia - Business": {
+        "url": "https://www.skynewsarabia.com/rss/business.xml",
+        "category": "macro",
+        "lang": "ar"
+    },
+    # ⚡ Sky News Arabia - Energy - محذوف (نفط/غاز ليس كريبتو)
+    # "Sky News Arabia - Energy": {
+    #     "url": "https://www.skynewsarabia.com/rss/energy.xml",
+    #     "category": "macro",
+    #     "lang": "ar"
+    # },
+    # 💻 Sky News Arabia - Technology (كريبتو + blockchain)
+    "Sky News Arabia - Technology": {
+        "url": "https://www.skynewsarabia.com/rss/technology.xml",
+        "category": "crypto",
+        "lang": "ar"
+    },
+    # 💰 Investing.com SA - السلع (ذهب + نفط)
+    "Investing.com SA - Commodities": {
+        "url": "https://sa.investing.com/rss/news_11.rss",
+        "category": "macro",
+        "lang": "ar"
+    },
+    # 🏛️ Investing.com SA - Economy - محذوف (فيدرالي/فائدة ليس كريبتو)
+    # "Investing.com SA - Economy": {
+    #     "url": "https://sa.investing.com/rss/news_14.rss",
+    #     "category": "fed",
+    #     "lang": "ar"
+    # },
+    # 📊 Investing.com SA - أسواق الأسهم
+    "Investing.com SA - Stocks": {
+        "url": "https://sa.investing.com/rss/news_25.rss",
+        "category": "stocks",
+        "lang": "ar"
+    },
+    # 🌍 RT Arabic - عام + اقتصاد
+    "RT Arabic": {
+        "url": "https://arabic.rt.com/rss",
+        "category": "macro",
+        "lang": "ar"
+    },
+    # 📰 BBC Arabic - عام + اقتصاد
+    "BBC Arabic": {
+        "url": "https://feeds.bbci.co.uk/arabic/rss.xml",
+        "category": "macro",
+        "lang": "ar"
+    },
+    # 🔍 Google News Arabic - بيتكوين (يجمع من كل المصادر)
+    "Google News AR - Bitcoin": {
+        "url": "https://news.google.com/rss/search?q=بيتكوين+OR+العملات+الرقمية&hl=ar&gl=EG&ceid=EG:ar",
+        "category": "crypto",
+        "lang": "ar"
+    },
+    # 🔍 Google News AR - Fed - محذوف (فيدرالي ليس كريبتو)
+    # "Google News AR - Fed": {
+    #     "url": "https://news.google.com/rss/search?q=الفيدرالي+OR+أسعار+الفائدة&hl=ar&gl=EG&ceid=EG:ar",
+    #     "category": "fed",
+    #     "lang": "ar"
+    # },
 }
 
 # 🆕 كلمات مفتاحية شاملة جداً للفلترة
@@ -835,6 +898,9 @@ TRANSLATION_EXCEPTIONS = [
     # 🏛️ بروتوكولات وشرائع
     "mica", "fit21", "genius act", "clarity act",
     "19b-4", "s-1",
+    # 👤 شخصيات (تبقى بالإنجليزية)
+    "kevin warsh", "warsh", "powell", "saylor", "gensler", "vitalik", "satoshi",
+    "yellen", "lagarde",
 ]
 
 # تحويل القائمة إلى set للبحث السريع
@@ -1310,7 +1376,6 @@ def translate_to_arabic(text, force=False):
         translated = _translate_deep_translator(protected_text)
         if translated:
             translated = _restore_terms(translated, restore_map)
-            translated = _cleanup_translation(translated)
 
     # 🔄 محاولة 3: Google REST API (fallback نهائي)
     if not translated:
@@ -1318,10 +1383,11 @@ def translate_to_arabic(text, force=False):
         translated = _translate_google_fallback(protected_text)
         if translated:
             translated = _restore_terms(translated, restore_map)
-            translated = _cleanup_translation(translated)
 
     # معالجة النتيجة النهائية
     if translated:
+        # 🆕🆕 تنظيف شامل دائماً (حتى لـ Z.AI LLM) لإزالة أي تسربات
+        translated = _cleanup_translation(translated)
         # 🔧 تطبيق قاموس المصطلحات الاقتصادية (تحسينات إضافية)
         translated_lower = translated.lower()
         for en_term, ar_term in ECONOMIC_TERMS.items():
@@ -1332,6 +1398,8 @@ def translate_to_arabic(text, force=False):
                     translated,
                     flags=re.IGNORECASE
                 )
+        # 🆕 تنظيف مرة ثانية بعد تطبيق القاموس
+        translated = _cleanup_translation(translated)
         _translation_cache[cache_key] = translated
         return translated
 
@@ -1345,6 +1413,7 @@ def _cleanup_translation(text):
     - الكلمات الإنجليزية المعلقة التي تسربت
     - المسافات الزائدة
     - علامات الترقيم المكررة
+    🆕🆕 قائمة موسعة جداً من الكلمات المتسربة المعروفة
     """
     if not text:
         return text
@@ -1352,71 +1421,95 @@ def _cleanup_translation(text):
     result = text
 
     # 1️⃣ إزالة بقايا الـ placeholders
-    # أي تسلسل يحتوي على ZZ متبوع بأرقام
     result = re.sub(r"«\s*ZZ\s*\d+\s*ZZ\s*»", "", result)
     result = re.sub(r"ZZ\s*\d+\s*ZZ", "", result)
     result = re.sub(r"\[\[\s*\d+\s*\]\]", "", result)
     result = re.sub(r"\[\s*\d+\s*\]", "", result)
-    # كلمة "ar" أو "arb" معلقة (من رمز اللغة العربية arb_Arab)
-    result = re.sub(r"\barb\b", "", result, flags=re.IGNORECASE)
-    result = re.sub(r"\barb_Arab\b", "", result, flags=re.IGNORECASE)
-    # 2️⃣ إزالة الكلمات الإنجليزية المعلقة (كلمات قصيرة بلا معنى)
-    # مثل "Uni" أو "ZZ" أو "XX" المنفردة
-    suspicious_words = ["uni", "zzz", "zz", "xx", "yy", "arb", "latn", "arab", "eng", "eng_latn"]
-    for word in suspicious_words:
-        # فقط لو ظهرت ككلمة منفصلة (وليست جزءاً من كلمة أكبر)
-        result = re.sub(r"\b" + word + r"\b", "", result, flags=re.IGNORECASE)
+    result = re.sub(r"\(\s*\d+\s*\)", "", result)
 
-    # 🆕 2.5️⃣ إزالة الكلمات الإنجليزية القصيرة المعلقة (1-3 حروف)
+    # 2️⃣ قائمة موسعة جداً من الكلمات الإنجليزية المتسربة المعروفة
+    # هذه كلمات تظهر بسبب أخطاء الترجمة الآلية
+    suspicious_words = [
+        # رموز لغات (من NLLB/Google)
+        "uni", "zzz", "zz", "xx", "yy", "arb", "latn", "arab", "eng",
+        "eng_latn", "ar", "en", "fr", "de", "es", "zh", "ja", "ko", "ru",
+        # رموز تقنية متسربة
+        "tron", "sol", "link", "dot", "ada", "atom", "near", "sui", "apt",
+        "rss", "xml", "html", "json", "http", "https", "url", "api",
+        # كلمات meta
+        "content", "title", "description", "summary", "image", "thumbnail",
+        # كلمات قصيرة متسربة
+        "tar", "raw", "src", "alt", "tag", "div", "span", "class",
+    ]
+    for word in suspicious_words:
+        # فقط لو ظهرت ككلمة منفصلة (3 حروف أو أقل)
+        if len(word) <= 4:
+            result = re.sub(r"\b" + word + r"\b", "", result, flags=re.IGNORECASE)
+
+    # 🆕 2.5️⃣ إزالة الكلمات الإنجليزية القصيرة المعلقة (1-4 حروف)
     # التي تظهر بين نص عربي (placeholder leaks من NLLB)
     # نمط: نص عربي + مسافة + كلمة إنجليزية قصيرة + مسافة + نص عربي
-    # مثال: "قرر ar في" ← "قرر في"
     result = re.sub(
-        r"([\u0600-\u06FF])\s+[a-zA-Z]{1,3}\s+([\u0600-\u06FF])",
+        r"([\u0600-\u06FF])\s+[a-zA-Z]{1,4}\s+([\u0600-\u06FF])",
         r"\1 \2",
         result
     )
     # نمط: بداية النص + كلمة إنجليزية قصيرة + مسافة + نص عربي
     result = re.sub(
-        r"^[a-zA-Z]{1,3}\s+([\u0600-\u06FF])",
+        r"^[a-zA-Z]{1,4}\s+([\u0600-\u06FF])",
         r"\1",
         result
     )
     # نمط: نص عربي + مسافة + كلمة إنجليزية قصيرة في النهاية
     result = re.sub(
-        r"([\u0600-\u06FF])\s+[a-zA-Z]{1,3}$",
+        r"([\u0600-\u06FF])\s+[a-zA-Z]{1,4}$",
         r"\1",
         result
     )
 
-    # 3️⃣ إزالة الأقواس الفارغة
+    # 3️⃣ إزالة الأقواس الفارغة والعلامات الفارغة
     result = re.sub(r"\(\s*\)", "", result)
     result = re.sub(r"\[\s*\]", "", result)
     result = re.sub(r"«\s*»", "", result)
     result = re.sub(r"\{\s*\}", "", result)
+    result = re.sub(r"'\s*'", "", result)
+    result = re.sub(r'"\s*"', "", result)
+    result = re.sub(r"''", "", result)
+    result = re.sub(r'""', "", result)
 
     # 4️⃣ إزالة المسافات الزائدة
     result = re.sub(r"\s+", " ", result)
     result = re.sub(r"\s+\.", ".", result)
     result = re.sub(r"\s+,", ",", result)
     result = re.sub(r"\.\s*\.\s*\.", ".", result)
+    result = re.sub(r"\.\s*\.\s*", ". ", result)
+    result = re.sub(r"\s*,\s*", "، ", result)
+    result = re.sub(r"\s+،", "،", result)
 
-    # 5️⃣ إزالة علامات الاقتباس الفارغة
-    result = re.sub(r"'\s*'", "", result)
-    result = re.sub(r'"\s*"', "", result)
-    result = re.sub(r"''", "", result)
+    # 5️⃣ إزالة علامات الاقتباس الفردية الغريبة
+    result = re.sub(r"''+", "", result)
+    result = re.sub(r"'(?:\s*'')+", "", result)
 
     # 6️⃣ تنظيف البداية والنهاية
     result = result.strip()
-    result = result.strip(" .,،")
+    result = result.strip(" .,،:؛")
     result = result.strip()
 
-    # 7️⃣ عودة المسافات الطبيعية بعد الفاصلة
-    result = re.sub(r",\s*", "، ", result)
-    result = re.sub(r"\s+،", "،", result)
-
-    # 8️⃣ إزالة الكلمات المكررة المتجاورة (مثل "الالولايات المتحدة")
+    # 7️⃣ إزالة الكلمات المكررة المتجاورة
     result = re.sub(r"\b(\w+)\s+\1\b", r"\1", result)
+
+    # 🆕 8️⃣ إزالة الكلمات الإنجليزية المعلقة المتبقية
+    # (التي لا معنى لها في سياق عربي)
+    # نمط: كلمة إنجليزية (1-4 حروف) محاطة بعلامات ترقيم عربية
+    result = re.sub(
+        r"([\u0600-\u06FF،؛.])\s+[a-zA-Z]{1,4}\s*([\u0600-\u06FF،؛.])",
+        r"\1 \2",
+        result
+    )
+
+    # 🆕 9️⃣ تنظيف نهائي للمسافات
+    result = re.sub(r"\s+", " ", result)
+    result = result.strip()
 
     return result
 
@@ -1851,33 +1944,12 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
     # العنوان النهائي (عربي فقط)
     final_title = title_ar if title_ar and translate else title
 
-    # 🆕 إضافة إيموجي 💰 بجانب كل ذكر لعملة كريبتو في العنوان
-    coin_emojis = {
-        "bitcoin": "₿", "btc": "₿",
-        "ethereum": "Ξ", "eth": "Ξ", "ether": "Ξ",
-        "usdt": "💰", "tether": "💰",
-        "usdc": "💰",
-        "binance": "🅱️", "bnb": "🅱️",
-        "xrp": "💰", "ripple": "💰",
-        "solana": "◎", "sol": "◎",
-        "cardano": "₳", "ada": "₳",
-        "dogecoin": "Ð", "doge": "Ð",
-        "avalanche": "💰", "avax": "▲",
-        "polygon": "⬡", "matic": "⬡",
-        "polkadot": "●", "dot": "●",
-        "chainlink": "⬡", "link": "⬡",
-    }
-    # إضافة 💰 بعد أي ذكر لعملة في العنوان (مع الحفاظ على حالة الأحرف الأصلية)
-    title_with_emojis = final_title
-    import re as _re
-    for coin, emoji in coin_emojis.items():
-        pattern = _re.compile(r'\b(' + _re.escape(coin) + r')\b', _re.IGNORECASE)
-        # استبدال مع الحفاظ على النص الأصلي (group 1) + إضافة الإيموجي
-        title_with_emojis = pattern.sub(lambda m: m.group(1) + f" {emoji}", title_with_emojis, count=1)
+    # 🚫 تم حذف نظام إيموجي العملات - كان يسبب أخطاء كارثية
+    # (يطابق "sol" في "Solomon"، "tron" في "Patron"، "link" في "LinkedIn")
 
     # البناء بالشكل الجديد المبسط
     msg = ""
-    msg += f"🔵 {title_with_emojis}\n"
+    msg += f"🔵 {final_title}\n"
 
     # إضافة الملخص إن وُجد (مترجم للعربية)
     if show_summary:
@@ -2188,6 +2260,72 @@ def scan_news_loop():
                 # 4) تحديث برمجي  5) فك توكن  6) حرق توكن  7) قرارات الفائدة
                 news_text = (item.get("title", "") + " " + item.get("summary", "")).lower()
 
+                # 🆕🆕 مسار خاص للأخبار العربية (تتخطى الفلترة الإنجليزية)
+                # الأخبار العربية أصلية ولا تحتاج ترجمة، فلترتها مختلفة
+                source_lang = ""
+                for src_name, src_info in NEWS_SOURCES.items():
+                    if src_name == item.get("source", ""):
+                        source_lang = src_info.get("lang", "en")
+                        break
+
+                if source_lang == "ar":
+                    # فلترة عربية صارمة - فقط الأحداث المهمة
+                    ar_critical_keywords = [
+                        # 1) اختراق وسرقة
+                        "اختراق", "اخترق", "سرقة", "سُرق", "تم اختراق", "ثغرة", "احتيال",
+                        "استغلال", "اختراقات", "سايبر", "هجوم إلكتروني",
+                        # 2) انهيار وتصحيح
+                        "انهيار", "انهار", "تدهور", "هبوط حاد", "سقوط", "تراجع حاد",
+                        "بيع جماعي", "تصحيح", "تصفية", "ضغط",
+                        # 3) سيولة مؤسسية
+                        "تدفقات", "تدفق", "استثمارات مؤسسية", "شراء كبير",
+                        "مايكروستراتيجي", "بلاك روك", "مؤسسي",
+                        # 4) تحديث برمجي
+                        "تحديث", "ترقية", "التنصيف", "انقسام", "تحديث الشبكة",
+                        "إطلاق الشبكة", "الشبكة الرئيسية",
+                        # 5) فك/حرق توكن
+                        "فك توكن", "إلغاء تأمين", "حرق توكن", "حرق عملة", "إتلاف",
+                        # 🆕 6) تصريحات كيفن وارش (المرشح لرئاسة الفيدرالي)
+                        "كيفن وارش", "وارش", "kevin warsh", "warsh",
+                        # 🚫 تم إلغاء أخبار الفائدة والفيدرالي - فقط كريبتو
+                        # 7) عملات وأسماء مهمة
+                        "بيتكوين", "إيثيريوم", "بايننس", "كريبتو", "عملات رقمية",
+                        "عملات مشفرة", "البلوكتشين", "USDT", "USDC",
+                        # 8) تنظيم
+                        "موافقة", "رفض", "قانون", "تنظيم", "حظر", "عقوبات",
+                    ]
+                    ar_rejection_keywords = [
+                        "تحليل", "توقعات", "متوقع", "قد يصل", "قد يصل إلى",
+                        "أفضل 10", "أفضل 5", "كيف تشتري", "شرح",
+                        "دليل", "ما هي", "تعرف على",
+                    ]
+                    has_ar_critical = any(kw in news_text for kw in ar_critical_keywords)
+                    has_ar_rejection = any(kw in news_text for kw in ar_rejection_keywords)
+                    if not has_ar_critical or has_ar_rejection:
+                        continue
+                    # ✅ خبر عربي مهم - تم القبول (بدون حاجة للترجمة)
+                    important_news += 1
+                    allowed_cats = [c for c in matched_cats if is_category_allowed(c)]
+                    if not allowed_cats:
+                        continue
+                    h = news_hash(item)
+                    if h in sent_news_hashes:
+                        already_sent += 1
+                        continue
+                    sent_news_hashes.add(h)
+                    save_sent_news()
+                    last_alerts_hashes[h] = now
+                    # ⚠️ تخطي الترجمة للخبر العربي (عربي أصلي)
+                    item["title_ar"] = item.get("title", "")
+                    item["summary_ar"] = item.get("summary", "")
+                    msg = fmt_news_item(item, show_summary=True, translate=False)
+                    image_url = item.get("image", "")
+                    broadcast_alert(msg, image_url)
+                    alerts_sent += 1
+                    print(f"  ✉️ [AR] {item.get('title', '')[:60]}...")
+                    time.sleep(1.5)
+                    continue
+
                 # (1) سياق الكريبتو إجباري
                 crypto_context_keywords = [
                     "bitcoin", "btc", "ethereum", "eth", "ether", "crypto", "cryptocurrency",
@@ -2256,26 +2394,29 @@ def scan_news_loop():
                     "spot etf", "19b-4", "s-1",
                     "lawsuit", "crackdown", "ban", "banned",
                     "mica", "clarity act", "genius act", "fit21",
+
+                    # 8️⃣ تصريحات كيفن وارش (Kevin Warsh) - المرشح لرئاسة الفيدرالي
+                    # تصريحاته عن الفائدة والكريبتو تتحرك بها الأسواق
+                    "kevin warsh", "warsh fed", "warsh crypto",
+                    "warsh bitcoin", "warsh says", "warsh signals",
+                    "warsh rate", "warsh interest",
+                    "fed chair nominee", "fed chair pick",
+                    "warsh nomination", "warsh nominated",
                 ]
                 has_critical_event = any(kw in news_text for kw in critical_event_keywords)
 
-                # (3) قرارات الفيدرالي والفائدة (يُعفى من شرط سياق الكريبتو)
-                # لأنها تتحرك بها كل الأسواق بما فيها الكريبتو
-                macro_critical_keywords = [
-                    "rate cut", "rate hike", "rate decision", "rate pause",
-                    "emergency cut", "fomc", "powell", "federal reserve",
-                    "interest rate", "fed cuts", "fed hikes",
-                    "fed signals", "powell signals", "powell says",
-                    "rate hold", "hold rates", "pause rates",
-                    "rate increase", "rate reduction",
-                    "fed meeting", "fomc meeting", "fed chair",
-                    "raises rates", "lowers rates", "cuts rates",
-                    "50 basis points", "25 basis points", "bps cut", "bps hike",
+                # 🆕 استثناء: تصريحات كيفن وارش عن الكريبتو تُقبل بدون شرط سياق الكريبتو
+                warsh_keywords = [
+                    "warsh crypto", "warsh bitcoin",
+                    "kevin warsh crypto", "kevin warsh bitcoin",
+                    "warsh fed", "warsh says", "warsh signals",
                 ]
-                has_macro_critical = any(kw in news_text for kw in macro_critical_keywords)
+                has_warsh_context = any(kw in news_text for kw in warsh_keywords)
 
-                # القبول: (سياق كريبتو + حدث جوهري) أو (حدث ماكرو للفائدة)
-                if not ((has_crypto_context and has_critical_event) or has_macro_critical):
+                # 🚫 تم إلغاء أخبار الفيدرالي/الفائدة بناءً على طلب المستخدم
+                # نلتزم بأخبار الكريبتو فقط
+                # القبول: (سياق كريبتو + حدث جوهري) أو تصريحات وارش
+                if not ((has_crypto_context and has_critical_event) or has_warsh_context):
                     continue
 
                 # (4) كلمات ترفض الخبر تلقائياً (حتى لو طابق الكلمات أعلاه)
@@ -2366,6 +2507,7 @@ def scan_news_loop():
 def send_telegram(chat_id, msg, image_url=None):
     """🆕 إرسال موحد: sendPhoto إذا توفرت صورة، sendMessage إذا لا
     🔧 إصلاح: معالجة أفضل لأخطاء sendPhoto + سجل سبب الفشل
+    🆕🆕 إضافة شعار القناة newscrypto1m@ على الصور
     """
     if not TOKEN or not chat_id:
         return False
@@ -2378,21 +2520,46 @@ def send_telegram(chat_id, msg, image_url=None):
             if " " in clean_url or len(clean_url) > 2000:
                 log.warning(f"sendPhoto skipped: invalid URL length or format")
             else:
-                p = {"chat_id": chat_id, "photo": clean_url, "caption": msg[:1024],
-                     "parse_mode": "HTML"}
-                r = requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
-                                  json=p, timeout=20)
-                if r.status_code == 200:
-                    try:
-                        if r.json().get("ok"):
-                            return True
-                        else:
-                            err_desc = r.json().get("description", "unknown")
-                            log.warning(f"sendPhoto API error: {err_desc}")
-                    except Exception:
-                        pass
+                # 🆕🆕 محاولة تحميل الصورة وإضافة الشعار عليها
+                watermarked_image = _add_watermark_to_image(clean_url)
+                if watermarked_image:
+                    # إرسال الصورة المعدّلة كملف (multipart/form-data)
+                    p_data = {
+                        "chat_id": chat_id,
+                        "caption": msg[:1024],
+                        "parse_mode": "HTML"
+                    }
+                    files = {"photo": ("image.jpg", watermarked_image, "image/jpeg")}
+                    r = requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+                                      data=p_data, files=files, timeout=30)
+                    if r.status_code == 200:
+                        try:
+                            if r.json().get("ok"):
+                                return True
+                            else:
+                                err_desc = r.json().get("description", "unknown")
+                                log.warning(f"sendPhoto API error: {err_desc}")
+                        except Exception:
+                            pass
+                    else:
+                        log.warning(f"sendPhoto HTTP {r.status_code}")
                 else:
-                    log.warning(f"sendPhoto HTTP {r.status_code}")
+                    # fallback: إرسال الرابط مباشرة (بدون شعار)
+                    p = {"chat_id": chat_id, "photo": clean_url, "caption": msg[:1024],
+                         "parse_mode": "HTML"}
+                    r = requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+                                      json=p, timeout=20)
+                    if r.status_code == 200:
+                        try:
+                            if r.json().get("ok"):
+                                return True
+                            else:
+                                err_desc = r.json().get("description", "unknown")
+                                log.warning(f"sendPhoto API error: {err_desc}")
+                        except Exception:
+                            pass
+                    else:
+                        log.warning(f"sendPhoto HTTP {r.status_code}")
         # لو فشل sendPhoto (مثلاً رابط غير صالح)، نرسل كنص
         # 🔧 إصلاح: تفعيل web preview ليعرض الصورة تلقائياً إن أمكن
         p = {"chat_id": chat_id, "text": msg, "parse_mode": "HTML",
@@ -2403,6 +2570,80 @@ def send_telegram(chat_id, msg, image_url=None):
     except Exception as e:
         log.warning(f"send_telegram err: {e}")
         return False
+
+
+def _add_watermark_to_image(image_url):
+    """🆕🆕 يحمل الصورة من URL ويضيف شعار القناة newscrypto1m@ عليها
+    يعيد الصورة كـ bytes (JPEG) جاهزة للإرسال
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        import io
+
+        # تحميل الصورة من URL
+        r = requests.get(image_url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None
+
+        img = Image.open(io.BytesIO(r.content)).convert("RGB")
+        width, height = img.size
+
+        # محاولة تحميل خط عربي (إن وُجد) أو خط افتراضي
+        try:
+            # ابحث عن خط في النظام
+            font_paths = [
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+            ]
+            font = None
+            for fp in font_paths:
+                try:
+                    font = ImageFont.truetype(fp, max(20, width // 25))
+                    break
+                except:
+                    continue
+            if not font:
+                font = ImageFont.load_default()
+        except:
+            font = ImageFont.load_default()
+
+        # إنشاء طبقة شفافة للشعار
+        draw = ImageDraw.Draw(img)
+        watermark_text = "@newscrypto1m"
+
+        # حساب حجم النص
+        try:
+            bbox = draw.textbbox((0, 0), watermark_text, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+        except:
+            text_width, text_height = 200, 30
+
+        # موقع الشعار: أسفل اليمين مع padding
+        padding = 15
+        x = width - text_width - padding - 10
+        y = height - text_height - padding - 10
+
+        # خلفية شبه شفافة خلف النص (للوضوح)
+        bg_padding = 8
+        draw.rectangle(
+            [x - bg_padding, y - bg_padding,
+             x + text_width + bg_padding, y + text_height + bg_padding],
+            fill=(0, 0, 0, 180)
+        )
+
+        # النص بالأبيض
+        draw.text((x, y), watermark_text, fill=(255, 255, 255), font=font)
+
+        # حفظ كـ bytes
+        output = io.BytesIO()
+        img.save(output, format="JPEG", quality=85)
+        return output.getvalue()
+
+    except Exception as e:
+        log.warning(f"watermark err: {e}")
+        return None
 
 def send_msg(msg, kb=None, cid=None):
     """إرسال رسالة عادية (للمالك أو مستخدم محدد)
@@ -3190,25 +3431,28 @@ if __name__ == "__main__":
                     "spot etf", "19b-4", "s-1",
                     "lawsuit", "crackdown", "ban", "banned",
                     "mica", "clarity act", "genius act", "fit21",
+
+                    # 8️⃣ تصريحات كيفن وارش (Kevin Warsh) - المرشح لرئاسة الفيدرالي
+                    "kevin warsh", "warsh fed", "warsh crypto",
+                    "warsh bitcoin", "warsh says", "warsh signals",
+                    "warsh rate", "warsh interest",
+                    "fed chair nominee", "fed chair pick",
+                    "warsh nomination", "warsh nominated",
                 ]
                 has_critical_event = any(kw in news_text for kw in critical_event_keywords)
 
-                # (3) قرارات الفيدرالي والفائدة (يُعفى من شرط سياق الكريبتو)
-                macro_critical_keywords = [
-                    "rate cut", "rate hike", "rate decision", "rate pause",
-                    "emergency cut", "fomc", "powell", "federal reserve",
-                    "interest rate", "fed cuts", "fed hikes",
-                    "fed signals", "powell signals", "powell says",
-                    "rate hold", "hold rates", "pause rates",
-                    "rate increase", "rate reduction",
-                    "fed meeting", "fomc meeting", "fed chair",
-                    "raises rates", "lowers rates", "cuts rates",
-                    "50 basis points", "25 basis points", "bps cut", "bps hike",
+                # 🆕 استثناء: تصريحات كيفن وارش عن الكريبتو تُقبل بدون شرط سياق الكريبتو
+                warsh_keywords = [
+                    "warsh crypto", "warsh bitcoin",
+                    "kevin warsh crypto", "kevin warsh bitcoin",
+                    "warsh fed", "warsh says", "warsh signals",
                 ]
-                has_macro_critical = any(kw in news_text for kw in macro_critical_keywords)
+                has_warsh_context = any(kw in news_text for kw in warsh_keywords)
 
-                # القبول: (سياق كريبتو + حدث جوهري) أو (حدث ماكرو للفائدة)
-                if not ((has_crypto_context and has_critical_event) or has_macro_critical):
+                # 🚫 تم إلغاء أخبار الفيدرالي/الفائدة بناءً على طلب المستخدم
+                # نلتزم بأخبار الكريبتو فقط
+                # القبول: (سياق كريبتو + حدث جوهري) أو تصريحات وارش
+                if not ((has_crypto_context and has_critical_event) or has_warsh_context):
                     continue
 
                 # (4) كلمات ترفض الخبر تلقائياً

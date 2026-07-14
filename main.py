@@ -776,104 +776,73 @@ ECONOMIC_TERMS = {
     "embargo": "حظر",
 }
 
-# 🆕🆕 قاموس الاستثناءات: أسماء مشاريع وتوكنات لا تُترجم (تبقى بالإنجليزية)
-# هذه المصطلحات نحميها من Google Translate بوضعها في placeholders أثناء الترجمة
+# 🆕🆕 قاموس الاستثناءات: أسماء لا تُترجم (تبقى بالإنجليزية)
+# يشمل: أسماء العملات، الشركات، البروتوكولات، الرموز، التوكنات
+# الهدف: الحفاظ على السياق المعروف للمستخدمين
 TRANSLATION_EXCEPTIONS = [
     # 🔥 أمثلة شائعة تُترجم خطأً
     "sauce", "saucer", "saucerswap",
     "shiba inu", "shib", "doge", "dogelon mars",
     "pepe", "wojak", "chad",
+    # 🪙 أسماء العملات الرقمية (تبقى بالإنجليزية)
+    "bitcoin", "btc", "ethereum", "eth", "ether",
+    "binance", "bnb", "tether", "ripple", "xrp",
+    "solana", "sol", "cardano", "ada", "dogecoin",
+    "avalanche", "avax", "polygon", "matic", "polkadot", "dot",
+    "chainlink", "link", "litecoin", "ltc",
+    "tron", "trx", "eos", "fantom", "ftm",
+    "near", "aptos", "apt", "sui", "arbitrum", "arb",
+    "optimism", "op", "starknet", "zksync",
+    "filecoin", "fil", "arweave", "ar",
+    "the graph", "grt", "render", "rndr",
+    "theta", "vechain", "vet", "tezos", "xtz",
+    "decentraland", "mana", "sandbox", "sand", "axie infinity", "axs",
+    "bitcoin cash", "bch", "ethereum classic", "etc",
+    # 🪙 عملات مستقرة (تبقى بالرموز المعروفة)
+    "usdt", "usdc", "tether", "busd", "dai", "tusd", "frax",
     # 🏛️ بروتوكولات DeFi ومنصات
-    "uniswap", "pancakeswap", "sushiswap", "curve", "aave", "compound",
-    "maker", "dai", "synthetix", "yearn", "yfi",
-    "lido", "rocket pool", "frax",
-    # 🔗 Layer 2 والشبكات
-    "polygon", "arbitrum", "optimism", "base", "zksync", "starknet",
-    "scroll", "linea", "mantle", "blast", "manta",
-    "aptos", "sui", "sei", "celestia",
-    "solana", "avalanche", "fantom", "near",
-    # 💰 عملات ومشاريع
-    "chainlink", "link", "polkadot", "cosmos", "atom",
-    "ripple", "xrp", "cardano", "ada",
-    "litecoin", "bitcoin cash", "ethereum classic",
-    "filecoin", "arweave", "the graph", "render",
-    "theta", "vechain", "eos", "tron", "tezos",
-    "decentraland", "sandbox", "axie infinity", "illuvium",
-    # 🏢 شركات وبورصات
-    "binance", "coinbase", "kraken", "okx", "bybit", "kucoin",
+    "uniswap", "uni", "pancakeswap", "cake", "sushiswap", "sushi",
+    "curve", "crv", "aave", "aave", "compound", "comp",
+    "maker", "mkr", "synthetix", "snx", "yearn", "yfi",
+    "lido", "ldo", "rocket pool", "rpl",
+    # 🏢 شركات وبورصات (تبقى بالإنجليزية)
+    "coinbase", "kraken", "okx", "bybit", "kucoin",
     "huobi", "gemini", "bitfinex", "crypto.com",
     "grayscale", "blackrock", "fidelity",
-    # 🪙 عملات مستقرة
-    "usdt", "usdc", "tether", "busd", "dai", "tusd", "frax",
+    "microstrategy", "mstr", "truth social", "truth media",
     # 📱 تطبيقات ومحافظ
     "metamask", "trust wallet", "phantom", "rabby",
     # 🤖 مشاريع AI
-    "fetch.ai", "ocean protocol", "render", "singularitynet",
-    "bittensor", "tao",
+    "fetch.ai", "fet", "ocean protocol", "ocean",
+    "singularitynet", "agi", "bittensor", "tao",
     # 🎮 Gaming والميم
     "floki", "bonk", "pepecoin", "memecoin",
-    # 🔧 أدوات
+    "illuvium", "ilv",
+    # 🔧 أدوات وخدمات
     "etherscan", "blockchain.com", "coingecko", "coinmarketcap",
-    # 📊 مؤشرات (تبقى كما هي)
-    "s&p 500", "nasdaq 100", "dow jones",
-    # 🌐 أخرى
+    # 📊 مؤشرات ورموز مالية
+    "s&p 500", "s&p", "nasdaq 100", "nasdaq", "dow jones", "dow",
+    "vix", "dxy",
+    # 🌐 اختصارات تقنية ومالية (تبقى بالإنجليزية)
     "web3", "dao", "ico", "ido", "ieo", "ipo",
     "erc20", "erc721", "bep20", "trc20",
+    "etf", "spot etf", "sec", "cftc", "fomc",
+    "cpi", "ppi", "gdp", "qe", "qt",
+    "defi", "nft", "tvl", "apy", "apr",
+    "kyc", "aml",
+    "btc.d", "altseason",
+    # 🏛️ بروتوكولات وشرائع
+    "mica", "fit21", "genius act", "clarity act",
+    "19b-4", "s-1",
 ]
 
 # تحويل القائمة إلى set للبحث السريع
 _EXC_SET = set(TRANSLATION_EXCEPTIONS)
 
-# 🆕🆕 قاموس المصطلحات التي تُترجم للعربية (تُحمى أثناء NLLB ثم تُستبدل بالعربية)
-# هذه المصطلحات NLLB قد يترجمها بشكل خاطئ، لذا نحميها ونستبدلها نحن بالعربية الصحيحة
+# 🆕🆕 قاموس المصطلحات العامة التي تُترجم للعربية
+# يشمل: مصطلحات مالية، أحداث، حركات سعرية (وليس أسماء عملات/شركات/بروتوكولات)
 GLOSSARY_AR = {
-    # 🪙 أسماء العملات والشبكات
-    "bitcoin": "بيتكوين",
-    "ethereum": "إيثيريوم",
-    "ether": "إيثر",
-    "binance": "بايننس",
-    "tether": "تيثر",
-    "ripple": "ريبل",
-    "solana": "سولانا",
-    "cardano": "كاردانو",
-    "avalanche": "أفالانش",
-    "polygon": "بوليجون",
-    "polkadot": "بولكادوت",
-    "chainlink": "تشين لينك",
-    "litecoin": "لايتكوين",
-    "dogecoin": "دوجكوين",
-    "tron": "ترون",
-    "eos": "إيوس",
-    "fantom": "فانتوم",
-    "near": "نير",
-    "aptos": "أبتوس",
-    "sui": "سوي",
-    "arbitrum": "أربيترام",
-    "optimism": "أوبتيزمزم",
-    "starknet": "ستاركنيت",
-    "zksync": "زي كا سينك",
-    # 🏢 شركات ومؤسسات
-    "coinbase": "كوين بيس",
-    "microstrategy": "مايكروستراتيجي",
-    "blackrock": "بلاك روك",
-    "grayscale": "جرايسكيل",
-    "fidelity": "فيديليتي",
-    "kraken": "كراكن",
-    "okx": "OKX",
-    "bybit": "بايبيت",
-    "kucoin": "كوكوين",
-    "huobi": "هووبي",
-    "gemini": "جيميني",
-    "bitfinex": "بيت فينكس",
-    # 👥 شخصيات
-    "satoshi": "ساتوشي",
-    "vitalik": "فيتاليك",
-    "saylor": "سيلور",
-    "gensler": "غنسلر",
-    "powell": "باول",
-    "yellen": "يلين",
-    "lagarde": "لاجارد",
-    # 💻 مصطلحات تقنية مركبة
+    # 💻 مصطلحات تقنية مركبة (أوصاف وليست أسماء)
     "smart wallet": "المحفظة الذكية",
     "smart contract": "العقد الذكي",
     "multi-chain": "متعدد السلاسل",
@@ -895,15 +864,16 @@ GLOSSARY_AR = {
     "market capitalization": "القيمة السوقية",
     "open interest": "المركزيات المفتوحة",
     "funding rate": "سعر التمويل",
-    "long squeeze": "ضغط طويل",
-    "short squeeze": "ضغط قصير",
+    "long squeeze": "ضغط المراكز الطويلة",
+    "short squeeze": "ضغط المراكز القصيرة",
     # 🏛️ مصطلحات مالية
-    "federal reserve": "الفيدرالي الأمريكي",
+    "federal reserve": "الاحتياطي الفيدرالي",
     "interest rate": "سعر الفائدة",
     "rate cut": "خفض الفائدة",
     "rate hike": "رفع الفائدة",
     "rate decision": "قرار الفائدة",
-    "rate pause": "إيقاف الفائدة",
+    "rate pause": "تثبيت الفائدة",
+    "rate hold": "تثبيت الفائدة",
     "monetary policy": "السياسة النقدية",
     "quantitative easing": "التيسير الكمي",
     "balance sheet": "الميزانية العمومية",
@@ -912,6 +882,8 @@ GLOSSARY_AR = {
     "inflation data": "بيانات التضخم",
     "nonfarm payrolls": "الوظائف غير الزراعية",
     "jobless claims": "طلبات إعانة البطالة",
+    "fed chair": "رئيس الفيدرالي",
+    "fed meeting": "اجتماع الفيدرالي",
     # 🌍 مصطلحات جيوسياسية
     "white house": "البيت الأبيض",
     "trade war": "الحرب التجارية",
@@ -930,9 +902,16 @@ GLOSSARY_AR = {
     "airdrop": "إيردروب",
     "staking": "التحصيص",
     "mining": "التعدين",
-    "halving": "النصفية",
+    "halving": "التنصيف",
     "hard fork": "الانقسام الصلب",
     "soft fork": "الانقسام الناعم",
+    "the merge": "الدمج",
+    "network upgrade": "تحديث الشبكة",
+    "protocol upgrade": "تحديث البروتوكول",
+    "mainnet launch": "إطلاق الشبكة الرئيسية",
+    "mainnet upgrade": "تحديث الشبكة الرئيسية",
+    "consensus upgrade": "تحديث الإجماع",
+    "smart contract upgrade": "تحديث العقود الذكية",
     "proof of stake": "إثبات الحصة",
     "proof of work": "إثبات العمل",
     "consensus": "الإجماع",
@@ -946,12 +925,10 @@ GLOSSARY_AR = {
     "fund flow": "تدفق الأموال",
     "accumulation": "التراكم",
     # 🆕 كلمات شائعة في الأخبار
-    "saylor": "سيلور",
-    "gensler": "غنسلر",
     "etf inflows": "تدفقات صندوق ETF",
     "etf outflows": "تدفقات خارجة من صندوق ETF",
-    "spot bitcoin etf": "صندوق بيتكوين الفوري ETF",
-    "spot ethereum etf": "صندوق إيثيريوم الفوري ETF",
+    "spot bitcoin etf": "صندوق Bitcoin الفوري ETF",
+    "spot ethereum etf": "صندوق Ethereum الفوري ETF",
     "hack": "اختراق",
     "hacked": "اختراق",
     "exploit": "ثغرة أمنية",
@@ -984,16 +961,12 @@ GLOSSARY_AR = {
     "sanctions": "عقوبات",
     "embargo": "حظر",
     "tariff": "تعريفة جمركية",
-    "trade war": "الحرب التجارية",
     "recession": "الركود",
     "inflation": "التضخم",
     "yuan": "اليوان",
     "dollar": "الدولار",
     "oil": "النفط",
     "gold": "الذهب",
-    "nasdaq": "ناسداك",
-    "s&p": "مؤشر S&P",
-    "dow jones": "داو جونز",
     # 🆕 مصطلحات فك وحرق التوكنات
     "token unlock": "فك توكن",
     "token unlocking": "فك التوكنات",
@@ -1009,21 +982,30 @@ GLOSSARY_AR = {
     "buyback and burn": "إعادة الشراء والحرق",
     "deflationary burn": "حرق انكماشي",
     "burn mechanism": "آلية الحرق",
+    "burned tokens": "توكنات محروقة",
     # 🆕 سيولة مؤسسية
     "institutional inflows": "تدفقات مؤسسية داخلة",
     "institutional outflows": "تدفقات مؤسسية خارجة",
     "record inflows": "تدفقات قياسية",
     "record outflows": "تدفقات خارجة قياسية",
     "treasury allocation": "تخصيص الخزانة",
-    "bitcoin treasury": "خزانة البيتكوين",
+    "bitcoin treasury": "خزانة Bitcoin",  # 🆕 Bitcoin تبقى بالإنجليزية
     # 🆕 انهيار وتصحيح
     "flash crash": "انهيار مفاجئ",
     "massive sell-off": "بيع جماعي",
     "capitulation": "استسلام",
     "bloodbath": "مذبحة",
     "meltdown": "انهيار",
-    "long squeeze": "ضغط المراكز الطويلة",
-    "short squeeze": "ضغط المراكز القصيرة",
+    "sharp decline": "انخفاض حاد",
+    "steep decline": "انخفاض حاد",
+    # 🆕 شخصيات (تُترجم للعربية)
+    "satoshi": "ساتوشي",
+    "vitalik": "فيتاليك",
+    "saylor": "سيلور",
+    "gensler": "غنسلر",
+    "powell": "باول",
+    "yellen": "يلين",
+    "lagarde": "لاجارد",
 }
 
 

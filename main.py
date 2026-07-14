@@ -1200,18 +1200,17 @@ _deepl_disabled_until = 0  # 🆕 تعطيل DeepL مؤقتاً عند فشل ا
 # ✅ يتجاهل اسم المصدر إن وُجد في النهاية
 # ✅ يتجاهل ميتاداتا Reddit ووسوم HTML
 # 🚫 تم إزالة: Z.AI, deep-translator, Google REST, NLLB
-_gemini_model = None
+_gemini_models = []  # 🆕 قائمة النماذج المتاحة (Flash + Pro)
 _gemini_init_failed = False
 
 
 def _init_gemini():
-    """تهيئة Gemini API - اكتشاف تلقائي للنموذج المتاح"""
-    global _gemini_model, _gemini_init_failed
-    if _gemini_model is not None or _gemini_init_failed:
+    """تهيئة Gemini API - اكتشاف كل النماذج المتاحة (Flash + Pro)"""
+    global _gemini_models, _gemini_init_failed
+    if _gemini_models or _gemini_init_failed:
         return
     try:
         import google.generativeai as genai
-        # دعم عدة أسماء للمتغير
         api_key = (
             _os.environ.get("GEMINI_API_KEY") or
             _os.environ.get("gemini_api_key") or
@@ -1230,104 +1229,237 @@ def _init_gemini():
         system_prompt = (
             "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والأسواق المالية. "
             "مهمتك: إعادة صياغة الأخبار الإنجليزية بالعربية الفصحى بأسلوب صحفي احترافي. "
-            "قواعد صارمة: (1) اكتب بالعربية الفصحى فقط. "
-            "(2) أعد الصياغة وليس ترجمة حرفية. "
-            "(3) حافظ على جميع المعلومات والحقائق والأرقام دون إضافة. "
-            "(4) اترك أسماء العملات والشركات والبروتوكولات بالإنجليزية: "
-            "Bitcoin, Ethereum, Binance, USDT, USDC, SEC, ETF, MicroStrategy, "
-            "BlackRock, Coinbase, Solana, Cardano, XRP, Tether, Ripple, Litecoin, "
-            "Dogecoin, Polkadot, Chainlink, Avalanche, Polygon, Arbitrum, Uniswap, "
-            "Aave, Curve, Grayscale, Fidelity, Kraken, Kevin Warsh, Powell. "
-            "(5) ترجم المصطلحات: hack=اختراق, exploit=ثغرة, crash=انهيار, "
-            "surge=قفزة, plunge=انهيار, stolen=مُسروقة, drained=تم تصريفها, "
-            "token unlock=فك توكن, token burn=حرق توكن, hard fork=انقسام صلب. "
-            "(6) تجاهل اسم المصدر في النهاية (CoinDesk, Reuters, CNBC). "
-            "(7) تجاهل ميتاداتا Reddit: [link], [تعليقات], /u/username. "
-            "(8) لا تضف إيموجي أو مقدمات. (9) أكمل كل جملة ولا تقطعها. "
-            "(10) أعد فقط النص العربي المُعاد صياغته."
+            "قواعد: (1) العربية الفصحى فقط. (2) أعد الصياغة وليس ترجمة حرفية. "
+            "(3) حافظ على جميع المعلومات والأرقام دون إضافة. "
+            "(4) اترك أسماء العملات والشركات بالإنجليزية: Bitcoin, Ethereum, Binance, "
+            "USDT, USDC, SEC, ETF, MicroStrategy, BlackRock, Coinbase, Solana, XRP, "
+            "Tether, Ripple, Dogecoin, Polkadot, Chainlink, Arbitrum, Uniswap, Aave. "
+            "(5) ترجم المصطلحات: hack=اختراق, exploit=ثغرة, crash=انهيار, surge=قفزة, "
+            "plunge=انهيار, stolen=مُسروقة, drained=تم تصريفها, token unlock=فك توكن, "
+            "token burn=حرق توكن, hard fork=انقسام صلب. "
+            "(6) تجاهل اسم المصدر في النهاية. (7) تجاهل ميتاداتا Reddit. "
+            "(8) لا إيموجي أو مقدمات. (9) أكمل كل جملة. (10) أعد النص العربي فقط."
         )
 
-        # اكتشاف النموذج المتاح
+        # قائمة كل النماذج المرشحة (Flash أولاً لأنه أسرع، ثم Pro)
         candidate_models = [
             "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-exp",
             "gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-flash-latest",
+            "gemini-2.5-pro", "gemini-2.0-pro", "gemini-1.5-pro-latest",
+            "gemini-1.5-pro", "gemini-pro-latest",
         ]
         for model_name in candidate_models:
             try:
-                _gemini_model = genai.GenerativeModel(
-                    model_name=model_name,
-                    system_instruction=system_prompt
+                model = genai.GenerativeModel(
+                    model_name=model_name, system_instruction=system_prompt
                 )
-                test_resp = _gemini_model.generate_content(
+                test_resp = model.generate_content(
                     "test", generation_config={"max_output_tokens": 5}
                 )
                 if test_resp and test_resp.text:
+                    _gemini_models.append(model)
                     log.info(f"✅ Gemini ready: {model_name}")
-                    return
-            except Exception as e:
-                _gemini_model = None
+            except Exception:
                 continue
 
         # اكتشاف تلقائي عبر list_models
-        try:
-            for m in genai.list_models():
-                if ("generateContent" in [meth.name for meth in m.supported_generation_methods]
-                        and "flash" in m.name.lower()):
-                    _gemini_model = genai.GenerativeModel(
-                        model_name=m.name, system_instruction=system_prompt
-                    )
-                    log.info(f"✅ Gemini ready (discovered): {m.name}")
-                    return
-        except Exception as e:
-            log.warning(f"Model listing failed: {e}")
+        if not _gemini_models:
+            try:
+                for m in genai.list_models():
+                    if ("generateContent" in [meth.name for meth in m.supported_generation_methods]
+                            and ("flash" in m.name.lower() or "pro" in m.name.lower())):
+                        try:
+                            model = genai.GenerativeModel(
+                                model_name=m.name, system_instruction=system_prompt
+                            )
+                            _gemini_models.append(model)
+                            log.info(f"✅ Gemini ready (discovered): {m.name}")
+                            if len(_gemini_models) >= 3:
+                                break
+                        except Exception:
+                            continue
+            except Exception as e:
+                log.warning(f"Model listing failed: {e}")
 
-        log.warning("⚠️ No working Gemini model found")
-        _gemini_init_failed = True
+        if not _gemini_models:
+            log.warning("⚠️ No working Gemini model found")
+            _gemini_init_failed = True
     except Exception as e:
         log.warning(f"⚠️ Gemini init failed: {e}")
         _gemini_init_failed = True
 
 
 def _translate_with_gemini(text):
-    """إعادة صياغة الخبر بالعربية الفصحى عبر Gemini API"""
+    """إعادة صياغة الخبر بالعربية - تجربة كل نماذج Gemini المتاحة"""
     if _gemini_init_failed:
         return None
     _init_gemini()
-    if _gemini_model is None:
+    if not _gemini_models:
         return None
+    prompt = (
+        f"أعد صياغة النص الإخباري التالي باللغة العربية الفصحى، "
+        f"بأسلوب صحفي احترافي واضح ومختصر. "
+        f"هذه إعادة صياغة وليست ترجمة حرفية. "
+        f"حافظ على جميع المعلومات والحقائق والأرقام كما هي، "
+        f"ولا تضف أي معلومات أو آراء من عندك. "
+        f"اللغة الهدف: العربية الفصحى فقط. "
+        f"اكتب 1 إلى 4 جمل كاملة (لا تقطع الجمل).\n\n"
+        f"النص الأصلي:\n{text}\n\n"
+        f"النص العربي المعاد صياغته:"
+    )
+    # 🆕🆕 تجربة كل النماذج المتاحة حتى ينجح واحد
+    for i, model in enumerate(_gemini_models):
+        try:
+            response = model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": 0.3, "top_p": 0.8, "top_k": 40,
+                    "max_output_tokens": 2048,
+                }
+            )
+            if response and response.text:
+                result = response.text.strip().strip('"\'`')
+                for prefix in ["النص العربي:", "النص العربي المعاد صياغته:", "الترجمة:", "الصياغة:"]:
+                    if result.startswith(prefix):
+                        result = result[len(prefix):].strip()
+                if len(result) > 5:
+                    log.info(f"   ✅ Gemini model #{i+1} succeeded")
+                    return result
+        except Exception as e:
+            log.info(f"   ⏭️ Gemini model #{i+1} failed: {str(e)[:80]}")
+            continue
+    return None
+
+
+def _translate_with_groq(text):
+    """🆕🆕 Fallback 1: Groq API (Llama 3.3 70B) - مجاني، سريع جداً
+    إعادة صياغة احترافية (وليس ترجمة حرفية)
+    يحتاج: GROQ_API_KEY في env vars
+    """
     try:
-        prompt = (
-            f"أعد صياغة النص الإخباري التالي باللغة العربية الفصحى، "
-            f"بأسلوب صحفي احترافي واضح ومختصر. "
-            f"هذه إعادة صياغة وليست ترجمة حرفية. "
-            f"حافظ على جميع المعلومات والحقائق والأرقام كما هي، "
-            f"ولا تضف أي معلومات أو آراء من عندك. "
-            f"اللغة الهدف: العربية الفصحى فقط. "
-            f"اكتب 1 إلى 4 جمل كاملة (لا تقطع الجمل).\n\n"
-            f"النص الأصلي:\n{text}\n\n"
-            f"النص العربي المعاد صياغته:"
+        api_key = (
+            _os.environ.get("GROQ_API_KEY") or
+            _os.environ.get("groq_api_key") or
+            ""
         )
-        response = _gemini_model.generate_content(
-            prompt,
-            generation_config={
-                "temperature": 0.3, "top_p": 0.8, "top_k": 40,
-                "max_output_tokens": 2048,
-            }
+        if not api_key:
+            return None
+        # Groq متوافق 100% مع OpenAI API
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        system_prompt = (
+            "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والأسواق المالية. "
+            "مهمتك: إعادة صياغة الأخبار الإنجليزية بالعربية الفصحى بأسلوب صحفي احترافي. "
+            "قواعد: (1) العربية الفصحى فقط. (2) أعد الصياغة وليس ترجمة حرفية. "
+            "(3) حافظ على جميع المعلومات دون إضافة. "
+            "(4) اترك أسماء العملات والشركات بالإنجليزية: Bitcoin, Ethereum, Binance, "
+            "USDT, SEC, ETF, MicroStrategy, BlackRock, Coinbase, Solana, XRP. "
+            "(5) ترجم: hack=اختراق, exploit=ثغرة, crash=انهيار, surge=قفزة. "
+            "(6) تجاهل اسم المصدر وميتاداتا Reddit. (7) لا إيموجي أو مقدمات. "
+            "(8) أكمل كل جملة. (9) أعد النص العربي فقط."
         )
-        if response and response.text:
-            result = response.text.strip().strip('"\'`')
-            for prefix in ["النص العربي:", "النص العربي المعاد صياغته:", "الترجمة:", "الصياغة:"]:
-                if result.startswith(prefix):
-                    result = result[len(prefix):].strip()
-            return result if len(result) > 5 else None
-        return None
+        user_prompt = (
+            f"أعد صياغة هذا الخبر بالعربية الفصحى بأسلوب صحفي احترافي ومختصر "
+            f"(1-4 جمل كاملة). حافظ على جميع المعلومات والأرقام:\n\n{text}"
+        )
+        payload = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.3,
+            "max_tokens": 2048,
+        }
+        r = requests.post(
+            url, json=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            timeout=30
+        )
+        if r.status_code == 200:
+            data = r.json()
+            result = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            if result and len(result) > 5:
+                # إزالة علامات اقتباس
+                result = result.strip('"\'`')
+                log.info("   ✅ Groq (Llama 3.3 70B) succeeded")
+                return result
+        else:
+            log.info(f"   ⏭️ Groq failed: HTTP {r.status_code}")
     except Exception as e:
-        log.warning(f"Gemini translate err: {e}")
-        return None
+        log.warning(f"Groq err: {e}")
+    return None
+
+
+def _translate_with_openrouter(text):
+    """🆕🆕 Fallback 2: OpenRouter (Qwen 2.5 72B) - مجاني
+    إعادة صياغة احترافية
+    يحتاج: OPENROUTER_API_KEY في env vars
+    """
+    try:
+        api_key = (
+            _os.environ.get("OPENROUTER_API_KEY") or
+            _os.environ.get("openrouter_api_key") or
+            ""
+        )
+        if not api_key:
+            return None
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        system_prompt = (
+            "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والأسواق المالية. "
+            "مهمتك: إعادة صياغة الأخبار الإنجليزية بالعربية الفصحى بأسلوب صحفي احترافي. "
+            "قواعد: (1) العربية الفصحى فقط. (2) أعد الصياغة وليس ترجمة حرفية. "
+            "(3) حافظ على جميع المعلومات دون إضافة. "
+            "(4) اترك أسماء العملات والشركات بالإنجليزية. "
+            "(5) تجاهل اسم المصدر وميتاداتا Reddit. (6) لا إيموجي أو مقدمات. "
+            "(7) أكمل كل جملة. (8) أعد النص العربي فقط."
+        )
+        user_prompt = (
+            f"أعد صياغة هذا الخبر بالعربية الفصحى بأسلوب صحفي احترافي ومختصر "
+            f"(1-4 جمل كاملة). حافظ على جميع المعلومات والأرقام:\n\n{text}"
+        )
+        payload = {
+            "model": "qwen/qwen-2.5-72b-instruct",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.3,
+            "max_tokens": 2048,
+        }
+        r = requests.post(
+            url, json=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/news-bot",
+                "X-Title": "News Bot"
+            },
+            timeout=30
+        )
+        if r.status_code == 200:
+            data = r.json()
+            result = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            if result and len(result) > 5:
+                result = result.strip('"\'`')
+                log.info("   ✅ OpenRouter (Qwen 2.5 72B) succeeded")
+                return result
+        else:
+            log.info(f"   ⏭️ OpenRouter failed: HTTP {r.status_code}")
+    except Exception as e:
+        log.warning(f"OpenRouter err: {e}")
+    return None
 
 
 def translate_to_arabic(text, force=False):
-    """ترجمة النص للعربية - محرك وحيد: Gemini API (إعادة صياغة صحفية)"""
+    """ترجمة النص للعربية - نظام 4 طبقات LLM احترافية:
+    1️⃣ Gemini (Flash + Pro) - إعادة صياغة
+    2️⃣ Groq (Llama 3.3 70B) - إعادة صياغة ⭐
+    3️⃣ OpenRouter (Qwen 2.5 72B) - إعادة صياغة ⭐
+    4️⃣ تخطي الخبر (لا إرسال - لا Google Translate!)
+    """
     if not text or len(text) < 3:
         return text
     if len(text) > 2000:
@@ -1336,17 +1468,37 @@ def translate_to_arabic(text, force=False):
     if not force and cache_key in _translation_cache:
         return _translation_cache[cache_key]
 
+    # 1️⃣ الطبقة 1: Gemini (كل النماذج المتاحة)
     translated = _translate_with_gemini(text)
     if translated:
         translated = _cleanup_translation(translated)
-        _translation_cache[cache_key] = translated
-        return translated
+        if translated and len(translated) > 3:
+            _translation_cache[cache_key] = translated
+            return translated
 
-    log.warning("Gemini failed - returning placeholder")
-    return None  # 🆕 نرجع None بدل النص الإنجليزي
+    # 2️⃣ الطبقة 2: Groq (Llama 3.3 70B) - مجاني وسريع
+    log.info("   🔄 Trying Groq (Llama 3.3 70B)...")
+    translated = _translate_with_groq(text)
+    if translated:
+        translated = _cleanup_translation(translated)
+        if translated and len(translated) > 3:
+            _translation_cache[cache_key] = translated
+            return translated
+
+    # 3️⃣ الطبقة 3: OpenRouter (Qwen 2.5 72B) - مجاني
+    log.info("   🔄 Trying OpenRouter (Qwen 2.5 72B)...")
+    translated = _translate_with_openrouter(text)
+    if translated:
+        translated = _cleanup_translation(translated)
+        if translated and len(translated) > 3:
+            _translation_cache[cache_key] = translated
+            return translated
+
+    # 4️⃣ الطبقة 4: تخطي الخبر (لا إرسال - لا Google Translate)
+    log.warning("   ❌ All LLM translation methods failed - skipping news")
+    return None
 
 
-    return text
 
 
 
@@ -1886,10 +2038,13 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
         summary_ar = translate_to_arabic(summary)
         item["summary_ar"] = summary_ar
     # العنوان النهائي - 🆕🆕 إجبار الترجمة بالعربية (لا نستخدم النص الإنجليزي أبداً)
-    # لو فشل Gemini، نحاول مرة ثانية، ولو فشل نضع علامة واضحة
+    # لو فشلت كل الطرق (Gemini + Google) → نُرجع None → البوت يتخطى الخبر
     if (not title_ar or title_ar == title) and translate and title:
         title_ar = translate_to_arabic(title, force=True)
-    final_title = title_ar if title_ar and title_ar != title else "⚠️ تعذرت ترجمة هذا الخبر"
+    # 🆕 لو الترجمة فشلت تماماً، نرجع None للبوت فيتخطى الخبر
+    if not title_ar or title_ar == title:
+        return None  # 🚫 تخطي الخبر (لا إرسال رسالة خطأ)
+    final_title = title_ar
 
     # 🚫 تم حذف نظام إيموجي العملات - كان يسبب أخطاء كارثية
     # (يطابق "sol" في "Solomon"، "tron" في "Patron"، "link" في "LinkedIn")
@@ -2423,6 +2578,10 @@ def scan_news_loop():
                 translate_news_item(item)
                 # إرسال للجميع - التنسيق المبسط
                 msg = fmt_news_item(item, show_summary=True, translate=True)
+                # 🆕🆕 لو fmt_news_item رجع None، معناه الترجمة فشلت → تخطي الخبر
+                if not msg:
+                    log.info(f"   ⏭️ Skipping news (translation failed): {item.get('title', '')[:60]}")
+                    continue
                 image_url = item.get("image", "")
                 broadcast_alert(msg, image_url)
                 alerts_sent += 1
@@ -3454,6 +3613,10 @@ if __name__ == "__main__":
 
                 # إرسال للقناة والمستخدمين
                 msg = fmt_news_item(item, show_summary=True, translate=True)
+                # 🆕🆕 لو fmt_news_item رجع None، معناه الترجمة فشلت → تخطي الخبر
+                if not msg:
+                    print(f"  ⏭️ Skipping (translation failed): {item.get('title', '')[:60]}...")
+                    continue
                 image_url = item.get("image", "")
                 broadcast_alert(msg, image_url)
                 alerts_sent += 1

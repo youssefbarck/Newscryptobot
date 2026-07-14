@@ -1,5 +1,8 @@
 name: Keepalive
 
+# يمنع GitHub من إيقاف الـ scheduled workflows على الريوهات الخاملة 60 يوم
+# يعمل تلقائياً كل أحد
+
 on:
   schedule:
     - cron: '0 0 * * 0'
@@ -13,7 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: |
+      - name: Update keepalive timestamp
+        run: |
           echo "keepalive: $(date -u)" > .keepalive
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

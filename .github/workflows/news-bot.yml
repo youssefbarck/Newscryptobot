@@ -2,7 +2,7 @@ name: News Bot
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   send-news:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
       GITHUB_ACTIONS: "true"
       RUN_MODE: "oneshot"
@@ -29,15 +29,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Z.AI SDK CLI
+        run: npm install -g z-ai-web-dev-sdk
+
       - name: Install dependencies
         run: pip install -r requirements.txt
+
       - name: Run news bot
         run: python main.py
+        env:
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+
       - name: Save state
         run: |
           git config user.name  "github-actions[bot]"

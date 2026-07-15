@@ -3527,15 +3527,12 @@ if __name__ == "__main__":
                 important_cats = ["breaking", "hack", "etf", "tech", "market", "whale",
                                   "fed", "trump", "geopolitics", "stocks"]
                 matched_cats = [c for c in categories if c in important_cats]
-                if not matched_cats:
-                    continue
 
-                # 🚨 فلتر صارم جداً: فقط الأحداث المحددة
-                # 1) اختراق/سرقة  2) انهيار/تصحيح حاد  3) سيولة مؤسسية كبيرة
-                # 4) تحديث برمجي  5) فك توكن  6) حرق توكن  7) قرارات الفائدة
+                # 🆕🆕 تخفيف الفلتر: لو الخبر يذكر كريبتو + حدث مهم → اقبله
+                # (بدل شرط classify_news الصارم الذي يرفض كل شيء)
                 news_text = (item.get("title", "") + " " + item.get("summary", "")).lower()
 
-                # (1) سياق الكريبتو إجباري
+                # (1) سياق الكريبتو
                 crypto_context_keywords = [
                     "bitcoin", "btc", "ethereum", "eth", "ether", "crypto", "cryptocurrency",
                     "blockchain", "altcoin", "stablecoin", "defi", "nft", "token", "coin",
@@ -3551,24 +3548,22 @@ if __name__ == "__main__":
                 ]
                 has_crypto_context = any(kw in news_text for kw in crypto_context_keywords)
 
-                # (2) حدث جوهري صارم - فقط 7 فئات محددة
+                # (2) حدث جوهري صارم
                 critical_event_keywords = [
-                    # 1️⃣ اختراق/سرقة (Hacks & Exploits)
+                    # اختراق/سرقة
                     "hack", "hacked", "exploit", "stolen", "drained", "drain",
                     "vulnerability", "flash loan", "rug pull", "breach", "cyberattack",
                     "security breach", "rekt", "compromised", "attacker", "hacker",
                     "phishing", "empty", "lost funds", "$10m", "$50m", "$100m", "$500m",
                     "million stolen", "billion stolen", "funds drained",
-
-                    # 2️⃣ انهيار/تصحيح حاد (Crash & Plunge)
+                    # انهيار/تصحيح
                     "crash", "plunge", "dump", "collapse", "liquidation",
                     "long squeeze", "short squeeze", "flash crash",
                     "10% drop", "15% drop", "20% drop", "30% drop",
                     "10% plunge", "15% plunge", "20% plunge",
                     "sharp decline", "steep decline", "massive sell-off",
                     "capitulation", "bloodbath", "meltdown",
-
-                    # 3️⃣ سيولة مؤسسية كبيرة (Institutional Flows)
+                    # سيولة مؤسسية
                     "institutional inflows", "institutional outflows",
                     "record inflows", "record outflows",
                     "blackrock buys", "microstrategy buys", "saylor buys",
@@ -3577,54 +3572,49 @@ if __name__ == "__main__":
                     "treasury allocation", "bitcoin treasury",
                     "etf inflows", "etf outflows", "fund flow",
                     "accumulation", "whale accumulat",
-
-                    # 4️⃣ تحديث برمجي (Protocol Upgrades)
+                    # تحديث برمجي
                     "halving", "hard fork", "soft fork", "the merge",
                     "ethereum 2.0", "mainnet launch", "mainnet upgrade",
                     "network upgrade", "protocol upgrade",
                     "shapella", "dencun", "pectra", "purge", "verge",
                     "smart contract upgrade", "consensus upgrade",
-
-                    # 5️⃣ فك توكن (Token Unlock)
+                    # فك توكن
                     "token unlock", "unlocking", "unlocked",
                     "vesting unlock", "cliff unlock",
                     "$unlock", "tokens unlocked", "unlock schedule",
                     "linear unlock", "token release", "release schedule",
-
-                    # 6️⃣ حرق توكن (Token Burn)
+                    # حرق توكن
                     "burn", "burned", "burning",
                     "token burn", "coin burn", "buyback and burn",
                     "deflationary burn", "burn mechanism",
                     "burned tokens", "burn event",
-
-                    # 7️⃣ قرارات تنظيمية كبرى (تكميلي)
+                    # تنظيم
                     "approval", "approved", "reject", "rejected",
                     "sec approves", "sec rejects", "sec sues", "sec charges",
                     "spot etf", "19b-4", "s-1",
                     "lawsuit", "crackdown", "ban", "banned",
                     "mica", "clarity act", "genius act", "fit21",
-
-                    # 8️⃣ تصريحات كيفن وارش (Kevin Warsh) - المرشح لرئاسة الفيدرالي
+                    # تصريحات كيفن وارش
                     "kevin warsh", "warsh fed", "warsh crypto",
                     "warsh bitcoin", "warsh says", "warsh signals",
                     "warsh rate", "warsh interest",
                     "fed chair nominee", "fed chair pick",
                     "warsh nomination", "warsh nominated",
+                    # 🆕 كلمات إضافية لتخفيف الفلتر
+                    "surge", "rally", "all-time high", "ath", "record high",
+                    "soars", "spikes", "jumps", "soars",
+                    "tumble", "slides", "drops", "falls",
+                    "sec", "etf", "defi", "nft", "web3",
+                    "binance", "coinbase", "kraken", "okx",
+                    "blackrock", "microstrategy", "grayscale", "fidelity",
+                    "regulation", "regulatory", "compliance",
+                    "partnership", "launches", "unveils", "announces",
                 ]
                 has_critical_event = any(kw in news_text for kw in critical_event_keywords)
 
-                # 🆕 استثناء: تصريحات كيفن وارش عن الكريبتو تُقبل بدون شرط سياق الكريبتو
-                warsh_keywords = [
-                    "warsh crypto", "warsh bitcoin",
-                    "kevin warsh crypto", "kevin warsh bitcoin",
-                    "warsh fed", "warsh says", "warsh signals",
-                ]
-                has_warsh_context = any(kw in news_text for kw in warsh_keywords)
-
-                # 🚫 تم إلغاء أخبار الفيدرالي/الفائدة بناءً على طلب المستخدم
-                # نلتزم بأخبار الكريبتو فقط
-                # القبول: (سياق كريبتو + حدث جوهري) أو تصريحات وارش
-                if not ((has_crypto_context and has_critical_event) or has_warsh_context):
+                # 🆕🆕 تخفيف: اقبل لو (matched_cats) OR (crypto + critical)
+                # بدل شرط matched_cats الصارم فقط
+                if not matched_cats and not (has_crypto_context and has_critical_event):
                     continue
 
                 # (4) كلمات ترفض الخبر تلقائياً

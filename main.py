@@ -1456,12 +1456,56 @@ def _translate_with_openrouter(text):
     return None
 
 
+def _is_arabic_quality_good(text):
+    """🆕🆕 التحقق من جودة النص العربي
+    يرفض النصوص التي تحتوي على كلمات إنجليزية كثيرة (مكسورة)
+    Returns: True لو النص عربي جيد، False لو مكسور
+    """
+    if not text or len(text) < 5:
+        return False
+    # الكلمات العربية المتوقعة (الأحرف العربية)
+    arabic_chars = sum(1 for c in text if '\u0600' <= c <= '\u06FF')
+    # الكلمات الإنجليزية (تسلسلات حروف لاتينية 4+ حروف)
+    english_words = re.findall(r'[a-zA-Z]{4,}', text)
+    # 🆕 القائمة المسموح بها - أسماء محددة فقط (مختصرة)
+    allowed_english = {
+        # عملات
+        "Bitcoin", "Ethereum", "Binance", "Coinbase", "USDT", "USDC", "Tether",
+        "Solana", "Cardano", "Ripple", "Litecoin", "Dogecoin", "Polkadot",
+        "Chainlink", "Avalanche", "Polygon", "Arbitrum", "Optimism", "Uniswap",
+        # شركات
+        "BlackRock", "MicroStrategy", "Grayscale", "Fidelity", "Kraken",
+        "Bybit", "Huobi", "Gemini", "Bitfinex", "SpaceX", "JPMorgan",
+        # اختصارات
+        "SEC", "ETF", "DeFi", "NFT", "Web3", "DAO", "MiCA", "FIT21",
+        # شخصيات
+        "Kevin", "Warsh", "Powell", "Saylor", "Gensler", "Vitalik", "Satoshi",
+    }
+    # 🚫 فحص صارم: أي كلمة إنجليزية غير مسموح بها = مكسور
+    suspicious_english = [w for w in english_words if w not in allowed_english]
+    if len(suspicious_english) > 0:
+        log.warning(f"   ⚠️ Translation has suspicious English: {suspicious_english[:5]}")
+        return False
+    # لو نسبة الأحرف العربية أقل من 40% → مكسور
+    if len(text) > 20 and arabic_chars / len(text) < 0.4:
+        log.warning(f"   ⚠️ Translation has low Arabic ratio: {arabic_chars/len(text)*100:.0f}%")
+        return False
+    # 🆕 فحص علامات غريبة (شيفرة/أخطاء)
+    weird_patterns = [r'\*.*\*', r'\.\.\."', r'" *\*', r'```', r'\.\.\. *Key']
+    for pattern in weird_patterns:
+        if re.search(pattern, text):
+            log.warning(f"   ⚠️ Translation has weird pattern: {pattern}")
+            return False
+    return True
+
+
 def translate_to_arabic(text, force=False):
     """ترجمة النص للعربية - نظام 4 طبقات LLM احترافية:
     1️⃣ Gemini (Flash + Pro) - إعادة صياغة
     2️⃣ Groq (Llama 3.3 70B) - إعادة صياغة ⭐
     3️⃣ OpenRouter (Qwen 2.5 72B) - إعادة صياغة ⭐
     4️⃣ تخطي الخبر (لا إرسال - لا Google Translate!)
+    🆕🆕 تحقق ذكي من جودة الناتج العربي - يرفض النصوص المكسورة
     """
     if not text or len(text) < 3:
         return text
@@ -1476,30 +1520,36 @@ def translate_to_arabic(text, force=False):
     translated = _translate_with_gemini(text)
     if translated:
         translated = _cleanup_translation(translated)
-        if translated and len(translated) > 3:
+        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
             _translation_cache[cache_key] = translated
             return translated
+        else:
+            log.info("   ⏭️ Gemini output quality too low - trying next layer")
 
     # 2️⃣ الطبقة 2: Groq (Llama 3.3 70B) - مجاني وسريع
     log.info("   🔄 Trying Groq (Llama 3.3 70B)...")
     translated = _translate_with_groq(text)
     if translated:
         translated = _cleanup_translation(translated)
-        if translated and len(translated) > 3:
+        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
             _translation_cache[cache_key] = translated
             return translated
+        else:
+            log.info("   ⏭️ Groq output quality too low - trying next layer")
 
     # 3️⃣ الطبقة 3: OpenRouter (Qwen 2.5 72B) - مجاني
     log.info("   🔄 Trying OpenRouter (Qwen 2.5 72B)...")
     translated = _translate_with_openrouter(text)
     if translated:
         translated = _cleanup_translation(translated)
-        if translated and len(translated) > 3:
+        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
             _translation_cache[cache_key] = translated
             return translated
+        else:
+            log.info("   ⏭️ OpenRouter output quality too low")
 
     # 4️⃣ الطبقة 4: تخطي الخبر (لا إرسال - لا Google Translate)
-    log.warning("   ❌ All LLM translation methods failed - skipping news")
+    log.warning("   ❌ All LLM translation methods failed or low quality - skipping news")
     return None
 
 

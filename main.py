@@ -1315,7 +1315,7 @@ def _translate_with_gemini(text):
                 prompt,
                 generation_config={
                     "temperature": 0.3, "top_p": 0.8, "top_k": 40,
-                    "max_output_tokens": 300,  # 🆕 مختصر جداً (سطرين)
+                    "max_output_tokens": 600,  # 🆕 يكفي لجملتين عربيتين
                 }
             )
             if response and response.text:
@@ -1370,7 +1370,7 @@ def _translate_with_groq(text):
                 {"role": "user", "content": user_prompt}
             ],
             "temperature": 0.3,
-            "max_tokens": 300,  # 🆕 مختصر جداً (سطرين)
+            "max_tokens": 600,  # 🆕 يكفي لجملتين عربيتين
         }
         r = requests.post(
             url, json=payload,
@@ -1430,7 +1430,7 @@ def _translate_with_openrouter(text):
                 {"role": "user", "content": user_prompt}
             ],
             "temperature": 0.3,
-            "max_tokens": 300,  # 🆕 مختصر جداً (سطرين)
+            "max_tokens": 600,  # 🆕 يكفي لجملتين عربيتين
         }
         r = requests.post(
             url, json=payload,
@@ -1467,27 +1467,32 @@ def _is_arabic_quality_good(text):
     arabic_chars = sum(1 for c in text if '\u0600' <= c <= '\u06FF')
     # الكلمات الإنجليزية (تسلسلات حروف لاتينية 4+ حروف)
     english_words = re.findall(r'[a-zA-Z]{4,}', text)
-    # 🆕 القائمة المسموح بها - أسماء محددة فقط (مختصرة)
+    # 🆕 القائمة المسموح بها - أسماء محددة فقط
     allowed_english = {
         # عملات
         "Bitcoin", "Ethereum", "Binance", "Coinbase", "USDT", "USDC", "Tether",
         "Solana", "Cardano", "Ripple", "Litecoin", "Dogecoin", "Polkadot",
         "Chainlink", "Avalanche", "Polygon", "Arbitrum", "Optimism", "Uniswap",
-        # شركات
+        # شركات وبنوك
         "BlackRock", "MicroStrategy", "Grayscale", "Fidelity", "Kraken",
         "Bybit", "Huobi", "Gemini", "Bitfinex", "SpaceX", "JPMorgan",
+        "Morgan", "Stanley", "Goldman", "Sachs", "Bank", "America",
+        "Apple", "Tesla", "Nvidia", "Amazon", "Microsoft", "Google", "Netflix",
+        "Anchorage", "Digital",
         # اختصارات
         "SEC", "ETF", "DeFi", "NFT", "Web3", "DAO", "MiCA", "FIT21",
+        "CPI", "PPI", "GDP", "FOMC", "Fed", "FED", "API", "USD",
         # شخصيات
         "Kevin", "Warsh", "Powell", "Saylor", "Gensler", "Vitalik", "Satoshi",
+        "Yellen", "Lagarde", "Trump", "Biden", "Dimon",
     }
     # 🚫 فحص صارم: أي كلمة إنجليزية غير مسموح بها = مكسور
     suspicious_english = [w for w in english_words if w not in allowed_english]
     if len(suspicious_english) > 0:
         log.warning(f"   ⚠️ Translation has suspicious English: {suspicious_english[:5]}")
         return False
-    # لو نسبة الأحرف العربية أقل من 40% → مكسور
-    if len(text) > 20 and arabic_chars / len(text) < 0.4:
+    # لو نسبة الأحرف العربية أقل من 25% → مكسور
+    if len(text) > 20 and arabic_chars / len(text) < 0.25:
         log.warning(f"   ⚠️ Translation has low Arabic ratio: {arabic_chars/len(text)*100:.0f}%")
         return False
     # 🆕 فحص علامات غريبة (شيفرة/أخطاء)

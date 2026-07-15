@@ -33,78 +33,53 @@ REDDIT_HEADERS = {"User-Agent": "WhaleNewsBot/1.0 by u/whale_news_bot"}
 # ═══════════════════════════════════════════════════════════
 NEWS_SOURCES = {
     # ═══════════════════════════════════════════════════════════
-    # 🪙 مصادر كريبتو (إنجليزية)
+    # 🪙 مصادر كريبتو فقط (إنجليزية)
     # ═══════════════════════════════════════════════════════════
     "CoinDesk": {
         "url": "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml",
-        "category": "crypto",
-        "lang": "en"
+        "category": "crypto", "lang": "en"
     },
     "Cointelegraph": {
         "url": "https://cointelegraph.com/rss",
-        "category": "crypto",
-        "lang": "en"
+        "category": "crypto", "lang": "en"
     },
     "Decrypt": {
         "url": "https://decrypt.co/feed",
-        "category": "crypto",
-        "lang": "en"
+        "category": "crypto", "lang": "en"
     },
     "Bitcoin.com": {
         "url": "https://news.bitcoin.com/feed/",
-        "category": "crypto",
-        "lang": "en"
+        "category": "crypto", "lang": "en"
     },
     "Crypto.News": {
         "url": "https://crypto.news/feed/",
-        "category": "crypto",
-        "lang": "en"
+        "category": "crypto", "lang": "en"
     },
     "NewsBTC": {
         "url": "https://www.newsbtc.com/feed/",
-        "category": "crypto",
-        "lang": "en"
+        "category": "crypto", "lang": "en"
     },
     "BeInCrypto": {
         "url": "https://beincrypto.com/feed/",
-        "category": "crypto",
-        "lang": "en"
+        "category": "crypto", "lang": "en"
     },
     # ═══════════════════════════════════════════════════════════
-    # 🏛️ مصادر الفيدرالي والاقتصاد الكلي (لقرارات الفائدة)
+    # 🏛️ Federal Reserve فقط (قرارات الفائدة الرسمية)
     # ═══════════════════════════════════════════════════════════
     "Federal Reserve": {
         "url": "https://www.federalreserve.gov/feeds/press_all.xml",
-        "category": "fed",
-        "lang": "en"
-    },
-    "CNBC Economy": {
-        "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258",
-        "category": "fed",
-        "lang": "en"
-    },
-    "Forexlive": {
-        "url": "https://www.forexlive.com/feed/",
-        "category": "fed",
-        "lang": "en"
+        "category": "fed", "lang": "en"
     },
     # ═══════════════════════════════════════════════════════════
     # 🌐 مصادر عربية (كريبتو + فيدرالي فقط)
     # ═══════════════════════════════════════════════════════════
-    "Sky News Arabia - Technology": {
-        "url": "https://www.skynewsarabia.com/rss/technology.xml",
-        "category": "crypto",
-        "lang": "ar"
-    },
     "Google News AR - Bitcoin": {
-        "url": "https://news.google.com/rss/search?q=بيتكوين+OR+العملات+الرقمية&hl=ar&gl=EG&ceid=EG:ar",
-        "category": "crypto",
-        "lang": "ar"
+        "url": "https://news.google.com/rss/search?q=بيتكوين+OR+العملات+الرقمية+OR+كريبتو&hl=ar&gl=EG&ceid=EG:ar",
+        "category": "crypto", "lang": "ar"
     },
     "Google News AR - Fed": {
-        "url": "https://news.google.com/rss/search?q=الفيدرالي+OR+أسعار+الفائدة&hl=ar&gl=EG&ceid=EG:ar",
-        "category": "fed",
-        "lang": "ar"
+        "url": "https://news.google.com/rss/search?q=الفيدرالي+OR+أسعار+الفائدة+OR+باول&hl=ar&gl=EG&ceid=EG:ar",
+        "category": "fed", "lang": "ar"
     },
 }
 
@@ -2334,11 +2309,8 @@ def scan_news_loop():
                         save_sent_news()
                     continue
                 categories = classify_news(item)
-                # الأخبار المهمة
-                important_cats = ["breaking", "hack", "etf", "tech", "market", "whale", "fed", "trump", "geopolitics", "stocks"]
-                matched_cats = [c for c in categories if c in important_cats]
-                if not matched_cats:
-                    continue
+                # 🚫 تم حذف matched_cats - كان يقبل أخبار جيوسياسة وأسهم وحروب
+                # الفلتر الجديد: فقط كريبتو + فيدرالي + وارش
                 # 🚨 فلتر صارم جداً: فقط الأحداث المحددة
                 # 1) اختراق/سرقة  2) انهيار/تصحيح حاد  3) سيولة مؤسسية كبيرة
                 # 4) تحديث برمجي  5) فك توكن  6) حرق توكن  7) قرارات الفائدة
@@ -2531,13 +2503,36 @@ def scan_news_loop():
                     "interview", "podcast", "review",
                     "guide", "explained", "what is",
                     "5 coins", "10 coins", "3 coins",
-                    # 🆕 رفض إضافي للأخبار الجانبية
                     "minor upgrade", "minor update", "minor bug",
                     "small purchase", "minor hack",
-                    # 🚫 رفض ميتاداتا Reddit ومنصات المجتمع
                     "[link]", "[تعليقات]", "[comments]", "/u/",
                     "submitted by", "مقدم بواسطة",
                     "crossposted from", "xposted from",
+                    # 🚫🚫 رفض قاطع: حروب وسياسة وجيوسياسة
+                    "war", "military", "missile", "airstrike", "drone strike",
+                    "gaza", "palestine", "hamas", "hezbollah", "houthi",
+                    "ukraine", "zelensky", "putin", "kyiv", "moscow",
+                    "taiwan", "beijing", "north korea", "kim jong",
+                    "syria", "lebanon", "yemen", "afghanistan",
+                    "ceasefire", "invasion", "troops", "nuclear weapon",
+                    "killed", "death toll", "casualties", "refugees",
+                    "حرب", "عسكرية", "صاروخ", "غزة", "فلسطين", "حماس",
+                    "أوكرانيا", "روسيا", "بوتين", "تايوان", "كوريا الشمالية",
+                    "سوريا", "لبنان", "اليمن", "ضحايا", "قتلى",
+                    # 🚫🚫 رفض قاطع: نفط وطاقة
+                    "oil price", "crude oil", "opec", "barrel of oil",
+                    "natural gas", "pipeline", "refinery", "petroleum",
+                    "energy crisis", "gas price",
+                    "النفط", "الغاز", "أوبك", "بترول",
+                    # 🚫🚫 رفض قاطع: أسهم وبورصات (بدون كريبتو)
+                    "s&p 500", "dow jones", "stock market", "equity",
+                    "dividend", "earnings report", "quarterly results",
+                    "apple stock", "tesla stock", "nvidia stock",
+                    "s&p", "nasdaq 100",
+                    # 🚫🚫 رفض قاطع: سياسة عامة
+                    "election", "campaign", "senator dies", "congress passes",
+                    "tariff", "trade war", "sanctions",
+                    "انتخابات", "سيناتور", "تعريفات",
                 ]
                 has_rejection = any(kw in news_text for kw in rejection_keywords)
                 if has_rejection:
@@ -2548,9 +2543,7 @@ def scan_news_loop():
 
                 important_news += 1
                 # 🔧 إصلاح: احترام alert_categories - إن كانت كل الفئات المطابقة معطّلة، تخطّي
-                allowed_cats = [c for c in matched_cats if is_category_allowed(c)]
-                if not allowed_cats:
-                    continue
+                # 🚫 تم حذف allowed_cats - الفلتر الجديد لا يستخدم matched_cats
                 h = news_hash(item)
                 # 🆕 ذاكرة دائمة: إذا الخبر أُرسل من قبل، لا تعد إرساله أبداً
                 if h in sent_news_hashes:
@@ -3576,10 +3569,34 @@ if __name__ == "__main__":
                     "5 coins", "10 coins", "3 coins",
                     "minor upgrade", "minor update", "minor bug",
                     "small purchase", "minor hack",
-                    # 🚫 رفض ميتاداتا Reddit ومنصات المجتمع
                     "[link]", "[تعليقات]", "[comments]", "/u/",
                     "submitted by", "مقدم بواسطة",
                     "crossposted from", "xposted from",
+                    # 🚫🚫 رفض قاطع: حروب وسياسة وجيوسياسة
+                    "war", "military", "missile", "airstrike", "drone strike",
+                    "gaza", "palestine", "hamas", "hezbollah", "houthi",
+                    "ukraine", "zelensky", "putin", "kyiv", "moscow",
+                    "taiwan", "beijing", "north korea", "kim jong",
+                    "syria", "lebanon", "yemen", "afghanistan",
+                    "ceasefire", "invasion", "troops", "nuclear weapon",
+                    "killed", "death toll", "casualties", "refugees",
+                    "حرب", "عسكرية", "صاروخ", "غزة", "فلسطين", "حماس",
+                    "أوكرانيا", "روسيا", "بوتين", "تايوان", "كوريا الشمالية",
+                    "سوريا", "لبنان", "اليمن", "ضحايا", "قتلى",
+                    # 🚫🚫 رفض قاطع: نفط وطاقة
+                    "oil price", "crude oil", "opec", "barrel of oil",
+                    "natural gas", "pipeline", "refinery", "petroleum",
+                    "energy crisis", "gas price",
+                    "النفط", "الغاز", "أوبك", "بترول",
+                    # 🚫🚫 رفض قاطع: أسهم وبورصات (بدون كريبتو)
+                    "s&p 500", "dow jones", "stock market", "equity",
+                    "dividend", "earnings report", "quarterly results",
+                    "apple stock", "tesla stock", "nvidia stock",
+                    "s&p", "nasdaq 100",
+                    # 🚫🚫 رفض قاطع: سياسة عامة
+                    "election", "campaign", "senator dies", "congress passes",
+                    "tariff", "trade war", "sanctions",
+                    "انتخابات", "سيناتور", "تعريفات",
                 ]
                 has_rejection = any(kw in news_text for kw in rejection_keywords)
                 if has_rejection:
@@ -3589,9 +3606,7 @@ if __name__ == "__main__":
                     continue
 
                 important_news += 1
-                allowed_cats = [c for c in matched_cats if is_category_allowed(c)]
-                if not allowed_cats:
-                    continue
+                # 🚫 تم حذف allowed_cats - الفلتر الجديد لا يستخدم matched_cats
 
                 h = news_hash(item)
                 if h in sent_news_hashes:

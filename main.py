@@ -32,7 +32,9 @@ REDDIT_HEADERS = {"User-Agent": "WhaleNewsBot/1.0 by u/whale_news_bot"}
 # مصادر الأخبار (RSS)
 # ═══════════════════════════════════════════════════════════
 NEWS_SOURCES = {
-    # 🪙 مصادر كريبتو
+    # ═══════════════════════════════════════════════════════════
+    # 🪙 مصادر كريبتو (إنجليزية)
+    # ═══════════════════════════════════════════════════════════
     "CoinDesk": {
         "url": "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml",
         "category": "crypto",
@@ -53,143 +55,57 @@ NEWS_SOURCES = {
         "category": "crypto",
         "lang": "en"
     },
-    # 🇺🇸 مصادر الاقتصاد الكلي والبيت الأبيض
-    "CNBC Economy": {
-        "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258",
-        "category": "macro",
-        "lang": "en"
-    },
-    "CNBC White House": {
-        "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000113",
-        "category": "macro",
-        "lang": "en"
-    },
-    "Federal Reserve": {
-        "url": "https://www.federalreserve.gov/feeds/press_all.xml",
-        "category": "macro",
-        "lang": "en"
-    },
-    "Forexlive": {
-        "url": "https://www.forexlive.com/feed/",
-        "category": "macro",
-        "lang": "en"
-    },
-    # 🐋 مصادر الأثرياء والمستثمرين
-    # 🔧 إصلاح: Benzinga يحظر البوتات (403) → استبدلنا بـ Crypto.News
     "Crypto.News": {
         "url": "https://crypto.news/feed/",
         "category": "crypto",
         "lang": "en"
     },
-    # 🔍 مجتمعي
-    # 🚫 تم حذف Reddit - ينتج محتوى هواة مع metadata غريبة (مثل [link] [تعليقات] /u/username)
-    # وليس أخباراً مهنية. البوت يحتاج مصادر إخبارية احترافية فقط.
-    # "Reddit r/CryptoCurrency": {
-    #     "url": "https://old.reddit.com/r/CryptoCurrency/.rss",
-    #     "category": "crypto",
-    #     "lang": "en",
-    #     "is_reddit_rss": True
-    # },
-    # 🆕 مصدر إضافي: NewsBTC
     "NewsBTC": {
         "url": "https://www.newsbtc.com/feed/",
         "category": "crypto",
         "lang": "en"
     },
-    # 🆕🆕 مصادر موثوقة وآنية (إضافة جديدة)
-    # 🌍 الجزيرة - تغطية جيوسياسية ممتازة (الشرق الأوسط، إيران، إسرائيل)
-    "Al Jazeera": {
-        "url": "https://www.aljazeera.com/xml/rss/all.xml",
-        "category": "geopolitics",
-        "lang": "en"
-    },
-    # 💼 MarketWatch - أسواق مالية وأسهم
-    "MarketWatch": {
-        "url": "https://www.marketwatch.com/rss/topstories",
-        "category": "stocks",
-        "lang": "en"
-    },
-    # 💼 Yahoo Finance - أسواق واقتصاد
-    "Yahoo Finance": {
-        "url": "https://finance.yahoo.com/news/rssindex",
-        "category": "stocks",
-        "lang": "en"
-    },
-    # 🇺🇸 CNBC Top News - أخبار عامة واقتصادية
-    "CNBC Top News": {
-        "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
-        "category": "macro",
-        "lang": "en"
-    },
-    # 🪙 BeInCrypto - مصدر كريبتو إضافي
     "BeInCrypto": {
         "url": "https://beincrypto.com/feed/",
         "category": "crypto",
         "lang": "en"
     },
     # ═══════════════════════════════════════════════════════════
-    # 🌐 مصادر عربية أصلية (لا تحتاج ترجمة - عربية فصحى)
+    # 🏛️ مصادر الفيدرالي والاقتصاد الكلي (لقرارات الفائدة)
     # ═══════════════════════════════════════════════════════════
-    # 📺 Sky News Arabia - Business (اقتصاد + أسواق + نفط + ذهب)
-    "Sky News Arabia - Business": {
-        "url": "https://www.skynewsarabia.com/rss/business.xml",
-        "category": "macro",
-        "lang": "ar"
+    "Federal Reserve": {
+        "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+        "category": "fed",
+        "lang": "en"
     },
-    # ⚡ Sky News Arabia - Energy - محذوف (نفط/غاز ليس كريبتو)
-    # "Sky News Arabia - Energy": {
-    #     "url": "https://www.skynewsarabia.com/rss/energy.xml",
-    #     "category": "macro",
-    #     "lang": "ar"
-    # },
-    # 💻 Sky News Arabia - Technology (كريبتو + blockchain)
+    "CNBC Economy": {
+        "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258",
+        "category": "fed",
+        "lang": "en"
+    },
+    "Forexlive": {
+        "url": "https://www.forexlive.com/feed/",
+        "category": "fed",
+        "lang": "en"
+    },
+    # ═══════════════════════════════════════════════════════════
+    # 🌐 مصادر عربية (كريبتو + فيدرالي فقط)
+    # ═══════════════════════════════════════════════════════════
     "Sky News Arabia - Technology": {
         "url": "https://www.skynewsarabia.com/rss/technology.xml",
         "category": "crypto",
         "lang": "ar"
     },
-    # 💰 Investing.com SA - السلع (ذهب + نفط)
-    "Investing.com SA - Commodities": {
-        "url": "https://sa.investing.com/rss/news_11.rss",
-        "category": "macro",
-        "lang": "ar"
-    },
-    # 🏛️ Investing.com SA - Economy - محذوف (فيدرالي/فائدة ليس كريبتو)
-    # "Investing.com SA - Economy": {
-    #     "url": "https://sa.investing.com/rss/news_14.rss",
-    #     "category": "fed",
-    #     "lang": "ar"
-    # },
-    # 📊 Investing.com SA - أسواق الأسهم
-    "Investing.com SA - Stocks": {
-        "url": "https://sa.investing.com/rss/news_25.rss",
-        "category": "stocks",
-        "lang": "ar"
-    },
-    # 🌍 RT Arabic - عام + اقتصاد
-    "RT Arabic": {
-        "url": "https://arabic.rt.com/rss",
-        "category": "macro",
-        "lang": "ar"
-    },
-    # 📰 BBC Arabic - عام + اقتصاد
-    "BBC Arabic": {
-        "url": "https://feeds.bbci.co.uk/arabic/rss.xml",
-        "category": "macro",
-        "lang": "ar"
-    },
-    # 🔍 Google News Arabic - بيتكوين (يجمع من كل المصادر)
     "Google News AR - Bitcoin": {
         "url": "https://news.google.com/rss/search?q=بيتكوين+OR+العملات+الرقمية&hl=ar&gl=EG&ceid=EG:ar",
         "category": "crypto",
         "lang": "ar"
     },
-    # 🔍 Google News AR - Fed - محذوف (فيدرالي ليس كريبتو)
-    # "Google News AR - Fed": {
-    #     "url": "https://news.google.com/rss/search?q=الفيدرالي+OR+أسعار+الفائدة&hl=ar&gl=EG&ceid=EG:ar",
-    #     "category": "fed",
-    #     "lang": "ar"
-    # },
+    "Google News AR - Fed": {
+        "url": "https://news.google.com/rss/search?q=الفيدرالي+OR+أسعار+الفائدة&hl=ar&gl=EG&ceid=EG:ar",
+        "category": "fed",
+        "lang": "ar"
+    },
 }
 
 # 🆕 كلمات مفتاحية شاملة جداً للفلترة
@@ -2455,7 +2371,10 @@ def scan_news_loop():
                         "فك توكن", "إلغاء تأمين", "حرق توكن", "حرق عملة", "إتلاف",
                         # 🆕 6) تصريحات كيفن وارش (المرشح لرئاسة الفيدرالي)
                         "كيفن وارش", "وارش", "kevin warsh", "warsh",
-                        # 🚫 تم إلغاء أخبار الفائدة والفيدرالي - فقط كريبتو
+                        # 🆕 قرارات الفائدة والفيدرالي
+                        "الفائدة", "الفيدرالي", "باول", "اجتماع الفيدرالي",
+                        "خفض الفائدة", "رفع الفائدة", "تثبيت الفائدة",
+                        "أسعار الفائدة", "الاحتياطي الفيدرالي",
                         # 7) عملات وأسماء مهمة
                         "بيتكوين", "إيثيريوم", "بايننس", "كريبتو", "عملات رقمية",
                         "عملات مشفرة", "البلوكتشين", "USDT", "USDC",
@@ -2581,10 +2500,23 @@ def scan_news_loop():
                 ]
                 has_warsh_context = any(kw in news_text for kw in warsh_keywords)
 
-                # 🚫 تم إلغاء أخبار الفيدرالي/الفائدة بناءً على طلب المستخدم
-                # نلتزم بأخبار الكريبتو فقط
-                # القبول: (سياق كريبتو + حدث جوهري) أو تصريحات وارش
-                if not ((has_crypto_context and has_critical_event) or has_warsh_context):
+                # 🆕🆕 قرارات الفيدرالي والفائدة (يُعفى من شرط سياق الكريبتو)
+                # لأنها تتحرك بها كل الأسواق بما فيها الكريبتو
+                macro_critical_keywords = [
+                    "rate cut", "rate hike", "rate decision", "rate pause",
+                    "emergency cut", "fomc", "powell", "federal reserve",
+                    "interest rate", "fed cuts", "fed hikes",
+                    "fed signals", "powell signals", "powell says",
+                    "rate hold", "hold rates", "pause rates",
+                    "rate increase", "rate reduction",
+                    "fed meeting", "fomc meeting", "fed chair",
+                    "raises rates", "lowers rates", "cuts rates",
+                    "50 basis points", "25 basis points", "bps cut", "bps hike",
+                ]
+                has_macro_critical = any(kw in news_text for kw in macro_critical_keywords)
+
+                # القبول: (سياق كريبتو + حدث جوهري) أو (حدث ماكرو للفائدة) أو تصريحات وارش
+                if not ((has_crypto_context and has_critical_event) or has_macro_critical or has_warsh_context):
                     continue
 
                 # (4) كلمات ترفض الخبر تلقائياً (حتى لو طابق الكلمات أعلاه)
@@ -3612,9 +3544,22 @@ if __name__ == "__main__":
                 ]
                 has_critical_event = any(kw in news_text for kw in critical_event_keywords)
 
-                # 🆕🆕 تخفيف: اقبل لو (matched_cats) OR (crypto + critical)
-                # بدل شرط matched_cats الصارم فقط
-                if not matched_cats and not (has_crypto_context and has_critical_event):
+                # 🆕 قرارات الفيدرالي والفائدة (يُعفى من شرط سياق الكريبتو)
+                macro_critical_keywords = [
+                    "rate cut", "rate hike", "rate decision", "rate pause",
+                    "emergency cut", "fomc", "powell", "federal reserve",
+                    "interest rate", "fed cuts", "fed hikes",
+                    "fed signals", "powell signals", "powell says",
+                    "rate hold", "hold rates", "pause rates",
+                    "rate increase", "rate reduction",
+                    "fed meeting", "fomc meeting", "fed chair",
+                    "raises rates", "lowers rates", "cuts rates",
+                    "50 basis points", "25 basis points", "bps cut", "bps hike",
+                ]
+                has_macro_critical = any(kw in news_text for kw in macro_critical_keywords)
+
+                # القبول: (matched_cats) OR (crypto + critical) OR (macro/fed)
+                if not matched_cats and not (has_crypto_context and has_critical_event) and not has_macro_critical:
                     continue
 
                 # (4) كلمات ترفض الخبر تلقائياً

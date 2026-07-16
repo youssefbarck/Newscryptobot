@@ -64,11 +64,7 @@ NEWS_SOURCES = {
         "category": "crypto", "lang": "en"
     },
     # ═══════════════════════════════════════════════════════════
-    # 🏛️ Federal Reserve فقط (قرارات الفائدة الرسمية)
-    # ═══════════════════════════════════════════════════════════
-
-    # ═══════════════════════════════════════════════════════════
-    # 🌐 مصادر عربية (كريبتو + فيدرالي فقط)
+    # 🌐 مصادر عربية (كريبتو فقط)
     # ═══════════════════════════════════════════════════════════
     "Google News AR - Bitcoin": {
         "url": "https://news.google.com/rss/search?q=بيتكوين+OR+العملات+الرقمية+OR+كريبتو&hl=ar&gl=EG&ceid=EG:ar",
@@ -91,19 +87,32 @@ KEYWORDS_BREAKING = [
     "announce", "announces", "launches", "unveils", "reveals", "partnership", "acquisition", "merger",
 ]
 
-
-
 KEYWORDS_WHALES = [
-    # 🐋 شخصيات كريبتو مؤثرة فقط
-    "elon musk", "michael saylor", "cathie wood", "whale", "whales",
+    "elon musk", "michael saylor", "warren buffett", "bill ackman", "ray dalio", "cathie wood", "whale", "whales",
     "blackrock", "microstrategy", "satoshi", "binance", "cz", "changpeng zhao", "sam bankman-fried", "sbf",
     "vitalik", "vitalik buterin", "charles hoskinson", "brian armstrong", "coinbase ceo",
     "institutional", "inflows", "outflows", "accumulation",
-    # تنظيم كريبتو
+    # 🆕🆕 شخصيات مؤثرة جداً (تصريحات تتحرك بها الأسواق)
+    "eric trump", "donald trump jr", "don jr", "ivanka trump", "jared kushner", "melania trump",
+    "melania", "trump family", "trump organization", "truth social", "trump media",
+    "jd vance", "vp pick", "vice president",
+    "jerome powell", "powell", "fed chair", "federal reserve chair",
+    "joe biden", "kamala harris", "harris",
+    "netanyahu", "benjamin netanyahu", "khamenei", "ayatollah",
+    "mbs", "mohammed bin salman", "crown prince",
+    "schumer", "pelosi", "mccarthy", "mcconnell", "speaker",
     "gary gensler", "sec chair", "sec chief",
+    "janet yellen", "treasury secretary", "yellen",
+    "bill gates", "jeff bezzos", "mark zuckerberg", "zuckerberg",
+    "sam altman", "openai ceo", "altman",
+    "jensen huang", "nvidia ceo", "huang",
+    "tim cook", "apple ceo",
+    "sundar pichai", "google ceo",
+    "satya nadella", "microsoft ceo",
     "larry fink", "blackrock ceo", "fink",
-    # مؤثرون كريبتو
+    "david einhorn", "paul tudor", "carl icahn",
     "naval ravikant", "balaji srinivasan", "balaji",
+    "michael dell", "dell ceo",
     "jack dorsey", "square ceo", "block ceo",
     "pro-crypto", "anti-crypto", "crypto advocate", "crypto critic",
 ]
@@ -133,8 +142,6 @@ KEYWORDS_HACK = [
     "hack", "exploit", "stolen", "drained", "vulnerability", "flash loan", "rug pull", "breach", "cyberattack", "security breach",
     "rekt", "drained", "empty", "compromised", "attacker", "hacker", "malicious", "phishing",
 ]
-
-
 
 # ═══════════════════════════════════════════════════════════
 # المتغيرات العامة
@@ -260,7 +267,6 @@ def save_sent_news(force=False):
 
 # 🔔 إعدادات التنبيهات
 auto_alerts_enabled = True
-# 🆕 إضافة فئتي الجيوسياسة والأسواق العالمية
 alert_categories = {"crypto": True, "breaking": True, "tech": True, "market": True}
 # 🔧 إصلاح: نقل الإعدادات للملف الدائم
 SETTINGS_FILE = _os.path.join(_PERSISTENT_DIR, "news_settings.json")
@@ -879,7 +885,6 @@ GLOSSARY_AR = {
     "lagarde": "لاجارد",
 }
 
-
 def _protect_terms(text):
     """🆕 يستبدل المصطلحات المحمية بـ placeholders قبل الترجمة
     يعيد tuple: (النص مع placeholders, قاموس الاستعادة)
@@ -915,7 +920,6 @@ def _protect_terms(text):
                 restore_map[placeholder] = (original_match, arabic_translation)
                 counter += 1
     return protected_text, restore_map
-
 
 def _restore_terms(translated_text, restore_map):
     """🆕 يعيد المصطلحات الأصلية مكان الـ placeholders بعد الترجمة
@@ -992,7 +996,6 @@ def _restore_terms(translated_text, restore_map):
     result = re.sub(r"ZZ\s*[٠-٩]+\s*ZZ", "", result)
     return result
 
-
 _deepl_disabled_until = 0  # 🆕 تعطيل DeepL مؤقتاً عند فشل الاتصال لتقليل التحذيرات
 
 # ════════════════════════════════════════════════════════════════════
@@ -1006,7 +1009,6 @@ _deepl_disabled_until = 0  # 🆕 تعطيل DeepL مؤقتاً عند فشل ا
 # 🚫 تم إزالة: Z.AI, deep-translator, Google REST, NLLB
 _gemini_models = []  # 🆕 قائمة النماذج المتاحة (Flash + Pro)
 _gemini_init_failed = False
-
 
 def _init_gemini():
     """تهيئة Gemini API - اكتشاف كل النماذج المتاحة (Flash + Pro)"""
@@ -1031,7 +1033,7 @@ def _init_gemini():
         genai.configure(api_key=api_key)
 
         system_prompt = (
-            "أنت محرر صحفي محترف متخصص في أخبار العملات الرقمية (الكريبتو). "
+            "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والأسواق المالية. "
             "مهمتك: إعادة صياغة الأخبار الإنجليزية بالعربية الفصحى بأسلوب صحفي احترافي. "
             "قواعد: (1) العربية الفصحى فقط. (2) أعد الصياغة وليس ترجمة حرفية. "
             "(3) حافظ على جميع المعلومات والأرقام دون إضافة. "
@@ -1092,7 +1094,6 @@ def _init_gemini():
         log.warning(f"⚠️ Gemini init failed: {e}")
         _gemini_init_failed = True
 
-
 def _translate_with_gemini(text):
     """إعادة صياغة الخبر بالعربية - تجربة كل نماذج Gemini المتاحة"""
     if _gemini_init_failed:
@@ -1135,7 +1136,6 @@ def _translate_with_gemini(text):
             continue
     return None
 
-
 def _translate_with_groq(text):
     """🆕🆕 Fallback 1: Groq API (Llama 3.3 70B) - مجاني، سريع جداً
     إعادة صياغة احترافية (وليس ترجمة حرفية)
@@ -1152,7 +1152,7 @@ def _translate_with_groq(text):
         # Groq متوافق 100% مع OpenAI API
         url = "https://api.groq.com/openai/v1/chat/completions"
         system_prompt = (
-            "أنت محرر صحفي محترف متخصص في أخبار العملات الرقمية (الكريبتو). "
+            "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والأسواق المالية. "
             "مهمتك: إعادة صياغة الأخبار الإنجليزية بالعربية الفصحى بأسلوب صحفي احترافي. "
             "قواعد: (1) العربية الفصحى فقط. (2) أعد الصياغة وليس ترجمة حرفية. "
             "(3) حافظ على جميع المعلومات دون إضافة. "
@@ -1198,7 +1198,6 @@ def _translate_with_groq(text):
         log.warning(f"Groq err: {e}")
     return None
 
-
 def _translate_with_openrouter(text):
     """🆕🆕 Fallback 2: OpenRouter (Qwen 2.5 72B) - مجاني
     إعادة صياغة احترافية
@@ -1214,7 +1213,7 @@ def _translate_with_openrouter(text):
             return None
         url = "https://openrouter.ai/api/v1/chat/completions"
         system_prompt = (
-            "أنت محرر صحفي محترف متخصص في أخبار العملات الرقمية (الكريبتو). "
+            "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والأسواق المالية. "
             "مهمتك: إعادة صياغة الأخبار الإنجليزية بالعربية الفصحى بأسلوب صحفي احترافي. "
             "قواعد: (1) العربية الفصحى فقط. (2) أعد الصياغة وليس ترجمة حرفية. "
             "(3) حافظ على جميع المعلومات دون إضافة. "
@@ -1259,7 +1258,6 @@ def _translate_with_openrouter(text):
         log.warning(f"OpenRouter err: {e}")
     return None
 
-
 def _is_arabic_quality_good(text):
     """🆕🆕 التحقق من جودة النص العربي
     يرفض النصوص التي تحتوي على كلمات إنجليزية كثيرة (مكسورة)
@@ -1286,8 +1284,9 @@ def _is_arabic_quality_good(text):
         # اختصارات
         "SEC", "ETF", "DeFi", "NFT", "Web3", "DAO", "MiCA", "FIT21",
         "CPI", "PPI", "GDP", "FOMC", "Fed", "FED", "API", "USD",
-        # شخصيات كريبتو
-        "Saylor", "Gensler", "Vitalik", "Satoshi",
+        # شخصيات
+        "Kevin", "Warsh", "Powell", "Saylor", "Gensler", "Vitalik", "Satoshi",
+        "Yellen", "Lagarde", "Trump", "Biden", "Dimon",
     }
     # 🚫 فحص صارم: أي كلمة إنجليزية غير مسموح بها = مكسور
     suspicious_english = [w for w in english_words if w not in allowed_english]
@@ -1305,7 +1304,6 @@ def _is_arabic_quality_good(text):
             log.warning(f"   ⚠️ Translation has weird pattern: {pattern}")
             return False
     return True
-
 
 def translate_to_arabic(text, force=False):
     """ترجمة النص للعربية - نظام 4 طبقات LLM احترافية:
@@ -1359,10 +1357,6 @@ def translate_to_arabic(text, force=False):
     # 4️⃣ الطبقة 4: تخطي الخبر (لا إرسال - لا Google Translate)
     log.warning("   ❌ All LLM translation methods failed or low quality - skipping news")
     return None
-
-
-
-
 
 def _cleanup_translation(text):
     """🆕 تنظيف شامل للنص المترجم من المخلفات والأخطاء الشائعة
@@ -1529,7 +1523,6 @@ def _strip_source_from_title(title, source_name=""):
                         break
     return cleaned
 
-
 def parse_rss_source(source_name, source_info):
     """يجلب ويحلل RSS source واحد"""
     url = source_info["url"]
@@ -1645,9 +1638,7 @@ def get_all_news():
     return all_items
 
 def classify_news(item):
-    """🆕 يصنف الخبر بدقة باستخدام حدود الكلمات وفئات موسعة
-    🔧 إصلاح: إضافة فئتي الجيوسياسة والأسواق العالمية
-    """
+    """يصنف الخبر بدقة باستخدام حدود الكلمات (كريبتو فقط)"""
     title = item.get("title", "").lower()
     summary = item.get("summary", "").lower()
     text = f"{title} {summary}"
@@ -1664,7 +1655,7 @@ def classify_news(item):
         categories.append("etf")
     if any(has_word(text, kw) for kw in KEYWORDS_HACK):
         categories.append("hack")
-    # فئات كريبتو
+    # 🆕 فئات جديدة
     if any(has_word(text, kw) for kw in KEYWORDS_TECH):
         categories.append("tech")
     if any(has_word(text, kw) for kw in KEYWORDS_MARKET):
@@ -1832,7 +1823,6 @@ def detect_content_type(item):
     # 📰 3. خبر عادي (افتراضي)
     return "📰 <b>خبر عام</b>"
 
-
 def get_market_sentiment(item):
     """🆕 يحلل سياق الخبر لتحديد تأثيره على السوق (إيجابي/سلبي/معتدل)"""
     title = item.get("title", "").lower()
@@ -1866,7 +1856,6 @@ def get_market_sentiment(item):
         return "🔴 <b>تأثير متوقع: سلبي هابط 📉</b>"
     else:
         return "🟡 <b>تأثير متوقع: معتدل / محايد ➖</b>"
-
 
 def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
     """🆕 تنسيق جديد مبسط:
@@ -1962,12 +1951,18 @@ def translate_source_name(source):
         "Cointelegraph": "كوين تيليغراف",
         "Decrypt": "ديكريبٽ",
         "Bitcoin.com": "بيتكوين دوت كوم",
-
+        "CNBC Economy": "سي إن بي سي - اقتصاد",
+        "CNBC White House": "سي إن بي سي - البيت الأبيض",
+        "CNBC Top News": "سي إن بي سي - عام",
+        "Federal Reserve": "الفيدرالي الأمريكي",
+        "Forexlive": "فوركس لايف",
         "Reddit r/CryptoCurrency": "مجتمع الكريبتو",
         "Crypto.News": "كريبتو نيوز",
         "NewsBTC": "نيوز بي تي سي",
         # 🆕 مصادر جديدة
-
+        "Al Jazeera": "الجزيرة",
+        "MarketWatch": "ماركت ووتش",
+        "Yahoo Finance": "ياهو فاينانس",
         "BeInCrypto": "بي إن كريبتو",
     }
     return sources_ar.get(source, source)
@@ -2044,7 +2039,6 @@ def build_breaking_news(limit=5):
         msg += "\n"
     return msg
 
-
 def build_coin_news(symbol, limit=5):
     """💎 أخبار عملة معينة"""
     symbol = symbol.upper().strip()
@@ -2084,9 +2078,7 @@ def news_hash(item):
     return hashlib.md5(hash_input.encode()).hexdigest()[:12]
 
 def is_category_allowed(category):
-    """🔧 إصلاح: فحص إن كانت الفئة مفعّلة في alert_categories
-    🆕 إضافة فئتي الجيوسياسة والأسواق العالمية
-    """
+    """فحص إن كانت الفئة مفعّلة في alert_categories (كريبتو فقط)"""
     # mapping: category → key in alert_categories
     cat_map = {
         "breaking": "breaking",
@@ -2100,7 +2092,7 @@ def is_category_allowed(category):
     return alert_categories.get(key, True)
 
 def scan_news_loop():
-    """يفحص الأخبار الجديدة ويرسل تنبيهات للأخبار المهمة (كريبتو فقط: عاجل/اختراق/تقني/سوقي)
+    """يفحص الأخبار الجديدة ويرسل تنبيهات كريبتو فقط (عاجل/اختراق/تقني/سوقي/ETF)
     🔧 إصلاحات:
     - احترام alert_categories
     - تطبيق ALERT_COOLDOWN
@@ -2217,8 +2209,7 @@ def scan_news_loop():
                         "إطلاق الشبكة", "الشبكة الرئيسية",
                         # 5) فك/حرق توكن
                         "فك توكن", "إلغاء تأمين", "حرق توكن", "حرق عملة", "إتلاف",
-                        # 🆕 6) تنظيم كريبتو
-                        "تنظيم", "هيئة الأوراق المالية",
+
                         # 7) عملات وأسماء مهمة
                         "بيتكوين", "إيثيريوم", "بايننس", "كريبتو", "عملات رقمية",
                         "عملات مشفرة", "البلوكتشين", "USDT", "USDC",
@@ -2236,9 +2227,6 @@ def scan_news_loop():
                         continue
                     # ✅ خبر عربي مهم - تم القبول (بدون حاجة للترجمة)
                     important_news += 1
-                    allowed_cats = [c for c in matched_cats if is_category_allowed(c)]
-                    if not allowed_cats:
-                        continue
                     h = news_hash(item)
                     if h in sent_news_hashes:
                         already_sent += 1
@@ -2330,7 +2318,9 @@ def scan_news_loop():
                 ]
                 has_critical_event = any(kw in news_text for kw in critical_event_keywords)
 
-                # القبول: سياق كريبتو + حدث جوهري (فقط كريبتو)
+
+
+                # القبول: سياق كريبتو + حدث جوهري (كريبتو فقط)
                 if not (has_crypto_context and has_critical_event):
                     continue
 
@@ -2376,12 +2366,6 @@ def scan_news_loop():
                     "election", "campaign", "senator dies", "congress passes",
                     "tariff", "trade war", "sanctions",
                     "انتخابات", "سيناتور", "تعريفات",
-                    # 🚫🚫 رفض قاطع: فيدرالي واقتصاد كلي
-                    "federal reserve", "interest rate", "rate cut", "rate hike",
-                    "fomc", "powell", "jerome powell", "yellen", "janet yellen",
-                    "kevin warsh", "warsh",
-                    "nonfarm", "cpi data", "inflation data", "jobs report",
-                    "economic data", "gdp growth",
                 ]
                 has_rejection = any(kw in news_text for kw in rejection_keywords)
                 if has_rejection:
@@ -2516,7 +2500,6 @@ def send_telegram(chat_id, msg, image_url=None):
     except Exception as e:
         log.warning(f"send_telegram err: {e}")
         return False
-
 
 def _add_watermark_to_image(image_url):
     """🆕🆕 يحمل الصورة من URL ويضيف شعار القناة newscrypto1m@ عليها
@@ -2751,7 +2734,7 @@ def handle_msg(cid, txt, chat=None):
         if is_owner(cid):
             msg = "📰 <b>بوت الأخبار الكريبتو</b>\n"
             msg += "━━━━━━━━━━━━━━━━━━\n\n"
-            msg += "📡 المصادر: CoinDesk, Cointelegraph, Decrypt, Bitcoin.com, Crypto.News\n"
+            msg += "📡 المصادر: CoinDesk, Cointelegraph, Decrypt, CNBC, Fed, Reddit\n"
             msg += f"🔔 التنبيهات: {'🟢 مفعّل' if auto_alerts_enabled else '🔴 معطّل'}\n"
             msg += f"👥 المستخدمون: {len(ALLOWED_USERS)}\n"
             # 🔧 إصلاح: استخدام CHANNEL_LINK و CHANNEL_NAME بدلاً من كونها ميتة
@@ -2763,7 +2746,7 @@ def handle_msg(cid, txt, chat=None):
             first_name = chat.get("first_name", "") if chat else ""
             msg = f"📰 <b>أهلاً {first_name}!</b>\n"
             msg += "━━━━━━━━━━━━━━━━━━\n\n"
-            msg += "📊 <b>بوت أخبار العملات الرقمية</b>\n"
+            msg += "📊 <b>بوت الأخبار الكريبتو والاقتصادية</b>\n"
             msg += "📡 مصادر موثوقة متعددة\n\n"
             msg += "✅ <b>تم تفعيل استقبال الأخبار</b>\n"
             msg += "⏳ سيصلك تنبيه فور ظهور خبر عاجل\n\n"
@@ -2794,7 +2777,8 @@ def handle_msg(cid, txt, chat=None):
             send_msg(msg, None, cid)
         else:
             send_msg("ℹ️ هذه الميزة متاحة للمالك فقط.", None, cid)
-elif txt == "⚙️ الإعدادات":
+
+    elif txt == "⚙️ الإعدادات":
         if is_owner(cid):
             show_settings(cid)
         else:
@@ -3005,13 +2989,12 @@ def self_ping():
         # 🔧 إصلاح: 5 دقائق بدلاً من 10 (آمن ضد النوم)
         time.sleep(300)
 
-
 # 🆕 إحصائيات يومية للملخص
 _daily_stats = {
     "alerts_sent": 0,
     "important_found": 0,
     "total_scanned": 0,
-    "categories": {"breaking": 0, "hack": 0, "etf": 0, "whale": 0, "tech": 0, "market": 0},
+    "categories": {"breaking": 0, "hack": 0, "etf": 0, "fed": 0, "trump": 0, "whale": 0, "tech": 0, "market": 0, "geopolitics": 0, "stocks": 0},
     "date": datetime.now(tz).strftime("%Y-%m-%d")
 }
 
@@ -3024,7 +3007,7 @@ def update_daily_stats(alerts_sent=0, important=0, total=0, categories=None):
         log.info(f"📅 New day - resetting daily stats (was {_daily_stats['date']})")
         _daily_stats = {
             "alerts_sent": 0, "important_found": 0, "total_scanned": 0,
-            "categories": {"breaking": 0, "hack": 0, "etf": 0, "whale": 0, "tech": 0, "market": 0},
+            "categories": {"breaking": 0, "hack": 0, "etf": 0, "fed": 0, "trump": 0, "whale": 0, "tech": 0, "market": 0, "geopolitics": 0, "stocks": 0},
             "date": today
         }
     _daily_stats["alerts_sent"] += alerts_sent
@@ -3034,7 +3017,6 @@ def update_daily_stats(alerts_sent=0, important=0, total=0, categories=None):
         for cat in categories:
             if cat in _daily_stats["categories"]:
                 _daily_stats["categories"][cat] += 1
-
 
 def build_daily_summary():
     """🆕 بناء ملخص يومي للأخبار"""
@@ -3057,10 +3039,12 @@ def build_daily_summary():
         sorted_cats = sorted(cats.items(), key=lambda x: -x[1])
         for cat, count in sorted_cats:
             if count > 0:
-                icon = {"breaking": "🚨", "hack": "⚠️", "etf": "📊",
-                        "whale": "🐋", "tech": "🔧", "market": "📈"}.get(cat, "📰")
-                cat_name = {"breaking": "عاجل", "hack": "اختراق", "etf": "ETF",
-                            "whale": "حيتان", "tech": "تقني", "market": "سوقي"}.get(cat, cat)
+                icon = {"breaking": "🚨", "hack": "⚠️", "etf": "📊", "fed": "🏛️",
+                        "trump": "🇺🇸", "whale": "🐋", "tech": "🔧", "market": "📈",
+                        "geopolitics": "🌍", "stocks": "💼"}.get(cat, "📰")
+                cat_name = {"breaking": "عاجل", "hack": "اختراق", "etf": "ETF", "fed": "الفيدرالي",
+                            "trump": "ترامب", "whale": "حيتان", "tech": "تقني", "market": "سوقي",
+                            "geopolitics": "جيوسياسة", "stocks": "أسواق عالمية"}.get(cat, cat)
                 pct = (count / total_cats) * 100
                 msg += f"   {icon} {cat_name}: {count} ({pct:.0f}%)\n"
     else:
@@ -3109,7 +3093,6 @@ def build_daily_summary():
     msg += "━━━━━━━━━━━━━━━━━━\n"
     msg += "🤖 <i>تم إنشاء هذا الملخص تلقائياً بواسطة البوت</i>"
     return msg
-
 
 def daily_summary_loop():
     """🆕 يرسل ملخصاً يومياً في الساعة 23:59 بتوقيت المستخدم
@@ -3275,7 +3258,8 @@ if __name__ == "__main__":
                     continue
 
                 categories = classify_news(item)
-                important_cats = ["breaking", "hack", "etf", "tech", "market", "whale"]
+                important_cats = ["breaking", "hack", "etf", "tech", "market", "whale",
+                                  "fed", "trump", "geopolitics", "stocks"]
                 matched_cats = [c for c in categories if c in important_cats]
 
                 # 🆕🆕 تخفيف الفلتر: لو الخبر يذكر كريبتو + حدث مهم → اقبله
@@ -3344,7 +3328,12 @@ if __name__ == "__main__":
                     "spot etf", "19b-4", "s-1",
                     "lawsuit", "crackdown", "ban", "banned",
                     "mica", "clarity act", "genius act", "fit21",
-
+                    # تصريحات كيفن وارش
+                    "kevin warsh", "warsh fed", "warsh crypto",
+                    "warsh bitcoin", "warsh says", "warsh signals",
+                    "warsh rate", "warsh interest",
+                    "fed chair nominee", "fed chair pick",
+                    "warsh nomination", "warsh nominated",
                     # 🆕 كلمات إضافية لتخفيف الفلتر
                     "surge", "rally", "all-time high", "ath", "record high",
                     "soars", "spikes", "jumps", "soars",
@@ -3357,7 +3346,7 @@ if __name__ == "__main__":
                 ]
                 has_critical_event = any(kw in news_text for kw in critical_event_keywords)
 
-                # القبول: (matched_cats) OR (crypto + critical) فقط كريبتو
+                # القبول: (matched_cats) OR (crypto + critical) - كريبتو فقط
                 if not matched_cats and not (has_crypto_context and has_critical_event):
                     continue
 
@@ -3399,16 +3388,16 @@ if __name__ == "__main__":
                     "dividend", "earnings report", "quarterly results",
                     "apple stock", "tesla stock", "nvidia stock",
                     "s&p", "nasdaq 100",
-                    # 🚫🚫 رفض قاطع: سياسة عامة
-                    "election", "campaign", "senator dies", "congress passes",
-                    "tariff", "trade war", "sanctions",
-                    "انتخابات", "سيناتور", "تعريفات",
-                    # 🚫🚫 رفض قاطع: فيدرالي واقتصاد كلي
+                    # 🚫🚫 رفض قاطع: فيدرالي واقتصاد كلي (غير كريبتو)
                     "federal reserve", "interest rate", "rate cut", "rate hike",
                     "fomc", "powell", "jerome powell", "yellen", "janet yellen",
                     "kevin warsh", "warsh",
                     "nonfarm", "cpi data", "inflation data", "jobs report",
                     "economic data", "gdp growth",
+                    # 🚫🚫 رفض قاطع: سياسة عامة
+                    "election", "campaign", "senator dies", "congress passes",
+                    "tariff", "trade war", "sanctions",
+                    "انتخابات", "سيناتور", "تعريفات",
                 ]
                 has_rejection = any(kw in news_text for kw in rejection_keywords)
                 if has_rejection:
@@ -3440,7 +3429,7 @@ if __name__ == "__main__":
                 image_url = item.get("image", "")
                 broadcast_alert(msg, image_url)
                 alerts_sent += 1
-                print(f"  ✉️ [{','.join(matched_cats)}] {item.get('title', '')[:60]}...")
+                print(f"  ✉️ {item.get('title', '')[:60]}...")
                 time.sleep(1.5)  # تجنب flood limit
 
             print("=" * 60)

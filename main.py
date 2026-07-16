@@ -1027,34 +1027,157 @@ def _init_gemini():
         _gemini_init_failed = True
 
 
-def _translate_with_gemini(text):
-    """إعادة صياغة الخبر بالعربية - تجربة كل نماذج Gemini المتاحة"""
+# ═══════════════════════════════════════════════════════════
+# برومبت الترجمة الموحد (يُستخدم في Gemini + Groq + OpenRouter)
+# ═══════════════════════════════════════════════════════════
+_TRANSLATION_SYSTEM_PROMPT = """أنت محرر أخبار متخصص في العملات الرقمية.
+
+مهمتك هي إعادة صياغة الخبر باللغة العربية الفصحى بأسلوب صحفي احترافي، وليس ترجمته حرفياً.
+
+قواعد إلزامية:
+
+1. لا تحذف أي معلومة مهمة موجودة في النص الأصلي.
+2. لا تضف أي معلومة أو تحليل أو توقع غير موجود في النص.
+3. لا تستخدم عبارات مثل "المشروع" أو "الشركة" أو "المنصة" أو "العملة" إذا كان الاسم الحقيقي موجوداً في النص.
+4. يجب الحفاظ على جميع أسماء:
+   - العملات الرقمية.
+   - الشركات.
+   - البروتوكولات.
+   - البلوكتشينات.
+   - المؤسسات.
+   - الشخصيات.
+   - صناديق ETF.
+   - الجهات التنظيمية.
+5. اترك جميع الأسماء الرسمية باللغة الإنجليزية كما هي دون ترجمة.
+6. لا تختصر الخبر بطريقة تؤدي إلى حذف اسم عملة أو شركة أو شخصية أو رقم.
+7. حافظ على جميع الأرقام والنسب المئوية والأسعار والتواريخ والكميات كما وردت.
+8. إذا ذكر النص أكثر من عملة أو شركة فيجب ذكرها جميعاً.
+9. لا تكرر الكلمات.
+10. لا تستخدم مقدمات أو تعليقات أو عبارات مثل:
+   - إليك الخبر
+   - الترجمة
+   - بالطبع
+   - حسب طلبك
+11. تجاهل اسم الموقع أو المصدر إذا كان موجوداً في نهاية العنوان.
+12. أعد النص العربي فقط.
+13. إذا كان النص ناقصاً فلا تخترع تكملته.
+14. تأكد أن كل جملة مكتملة لغوياً ولا تنتهي في منتصف الفكرة.
+15. استخدم أسلوب وكالات الأنباء العربية الاحترافي."""
+
+# أسماء يجب التحقق من وجودها بعد الترجمة (بالأحرف الأصلية)
+_CRITICAL_NAMES = [
+    # عملات
+    "bitcoin", "btc", "ethereum", "eth", "solana", "sol", "xrp", "ripple",
+    "cardano", "ada", "dogecoin", "doge", "avalanche", "avax", "polkadot", "dot",
+    "chainlink", "link", "polygon", "matic", "litecoin", "ltc", "tron", "trx",
+    "arbitrum", "arb", "optimism", "op", "aptos", "apt", "sui", "sei",
+    "near", "fantom", "ftm", "cosmos", "atom", "uniswap", "aave",
+    # عملات مستقرة
+    "usdt", "usdc", "tether", "dai", "busd",
+    # شركات وبورصات
+    "binance", "coinbase", "kraken", "bybit", "okx", "kucoin",
+    "blackrock", "microstrategy", "grayscale", "fidelity", "van eck",
+    "franklin templeton", "ark invest", "robinhood", "gemini",
+    # جهات تنظيمية
+    "sec", "cftc", "gensler",
+    # شخصيات
+    "satoshi", "vitalik", "saylor", "buterin", "zhao", "cz",
+    "musk", "dorsey", "armstrong", "hoskinson",
+    # بروتوكولات/شبكات
+    "ethereum", "bitcoin", "solana",
+    # ETF
+    "etf", "spot etf",
+    # مصطلحات
+    "defi", "nft", "web3", "dao",
+]
+
+
+def _extract_entities(text):
+    """🔍 يستخرج أسماء الكيانات (عملات، شركات، شخصيات...) من النص
+    Returns: list of names found (بالأحرف الأصلية من النص)
+    """
+    text_lower = text.lower()
+    found = []
+    # ترتيب: الأطول أولاً (لتجنب استخراج "eth" بدل "ethereum")
+    for name in sorted(_CRITICAL_NAMES, key=len, reverse=True):
+        if name in text_lower and name not in found:
+            found.append(name)
+    return found
+
+
+def _verify_entities(original_text, translated_text):
+    """🔍 يتحقق أن أسماء الكيانات من النص الأصلي موجودة في الترجمة
+    Returns: (is_ok, missing_names)
+    """
+    if not translated_text:
+        return False, ["(empty)"]
+    entities = _extract_entities(original_text)
+    if not entities:
+        return True, []  # لا أسماء حرجة = لا فحص
+    translated_lower = translated_text.lower()
+    missing = [n for n in entities if n not in translated_lower]
+    return len(missing) == 0, missing
+
+
+def _build_user_prompt(text, missing_names=None):
+    """بناء user prompt ذكي حسب طول الخبر وأسماء مفقودة"""
+    text_len = len(text)
+    # عدد الجمل مرن حسب طول الخبر
+    if text_len < 150:
+        sent_count = "2"
+    elif text_len < 400:
+        sent_count = "2-3"
+    else:
+        sent_count = "3-4"
+    
+    prompt = (
+        f"أعد صياغة الخبر التالي بالعربية الفصحى بأسلوب صحفي احترافي.\n\n"
+        f"الشروط:\n\n"
+        f"- اكتب من {sent_count} جمل حسب طول الخبر، مع الحفاظ الكامل على جميع أسماء العملات والشركات والأرقام. "
+        f"إذا احتاج الخبر إلى جملة إضافية للحفاظ على المعلومات فلا تختصره.\n"
+        f"- حافظ على جميع المعلومات المهمة.\n"
+        f"- لا تحذف أي اسم عملة أو شركة أو بروتوكول أو شخصية أو مؤسسة.\n"
+        f"- لا تستبدل الأسماء بكلمات مثل \"الشركة\" أو \"المشروع\".\n"
+        f"- حافظ على جميع الأرقام والنسب المئوية كما هي.\n"
+        f"- لا تضف أي معلومات غير موجودة.\n"
+        f"- إذا كان الخبر يحتوي على عدة أسماء فيجب ذكرها جميعاً.\n"
+        f"- لا تستخدم لغة تسويقية أو مبالغات.\n"
+        f"- أخرج النص العربي النهائي فقط.\n"
+    )
+    
+    # 🔴 إذا كانت هذه إعادة محاولة: أدرج الأسماء المفقودة صراحة
+    if missing_names:
+        names_str = ", ".join(missing_names)
+        prompt += (
+            f"\n🔴 تنبيه مهم: في المحاولة السابقة اختفت هذه الأسماء من الترجمة: "
+            f"({names_str}). "
+            f"يجب أن تظهر كلها بالإنجليزية كما هي في النص الأصلي.\n"
+        )
+    
+    prompt += f"\nالخبر:\n\n{text}"
+    return prompt
+
+
+def _translate_with_gemini(text, missing_names=None):
+    """إعادة صياغة الخبر بالعربية - تجربة كل نماذج Gemini المتاحة
+    missing_names: أسماء مفقودة من محاولة سابقة (لإعادة المحاولة مع تذكير)
+    """
     if _gemini_init_failed:
         return None
     _init_gemini()
     if not _gemini_models:
         return None
-    prompt = (
-        f"أعد صياغة النص الإخباري التالي باللغة العربية الفصحى، "
-        f"بأسلوب صحفي احترافي واضح ومختصر. "
-        f"هذه إعادة صياغة وليست ترجمة حرفية. "
-        f"حافظ على المعلومات الأساسية والأرقام الرئيسية فقط. "
-        f"اللغة الهدف: العربية الفصحى فقط. "
-        f"⚠️ مهم جداً: لا تحذف أسماء العملات الرقمية من النص أبداً. "
-        f"إذا ذُكرت Bitcoin أو Solana أو أي عملة أخرى، يجب أن تظهر في النتيجة. "
-        f"اكتب 3-4 جمل. "
-        f"كن موجزاً ومباشراً.\n\n"
-        f"النص الأصلي:\n{text}\n\n"
-        f"النص العربي المعاد صياغته:"
-    )
-    # 🆕🆕 تجربة كل النماذج المتاحة حتى ينجح واحد
+    user_prompt = _build_user_prompt(text, missing_names)
+    prompt = _TRANSLATION_SYSTEM_PROMPT + "\n\n" + user_prompt
+    # تجربة كل النماذج المتاحة حتى ينجح واحد
     for i, model in enumerate(_gemini_models):
         try:
             response = model.generate_content(
                 prompt,
                 generation_config={
-                    "temperature": 0.3, "top_p": 0.8, "top_k": 40,
-                    "max_output_tokens": 600,  # 🆕 يكفي لجملتين عربيتين
+                    "temperature": 0.2 if missing_names else 0.3,
+                    "top_p": 0.8, "top_k": 40,
+                    "max_output_tokens": 800,
                 }
             )
             if response and response.text:
@@ -1071,10 +1194,9 @@ def _translate_with_gemini(text):
     return None
 
 
-def _translate_with_groq(text):
+def _translate_with_groq(text, missing_names=None):
     """🆕🆕 Fallback 1: Groq API (Llama 3.3 70B) - مجاني، سريع جداً
-    إعادة صياغة احترافية (وليس ترجمة حرفية)
-    يحتاج: GROQ_API_KEY في env vars
+    missing_names: أسماء مفقودة من محاولة سابقة
     """
     try:
         api_key = (
@@ -1084,34 +1206,17 @@ def _translate_with_groq(text):
         )
         if not api_key:
             return None
-        # Groq متوافق 100% مع OpenAI API
         url = "https://api.groq.com/openai/v1/chat/completions"
-        system_prompt = (
-            "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والأسواق المالية. "
-            "مهمتك: إعادة صياغة الأخبار الإنجليزية بالعربية الفصحى بأسلوب صحفي احترافي. "
-            "قواعد: (1) العربية الفصحى فقط. (2) أعد الصياغة وليس ترجمة حرفية. "
-            "(3) حافظ على جميع المعلومات دون إضافة. "
-            "(4) اترك أسماء العملات والشركات بالإنجليزية دائماً: Bitcoin, Ethereum, Solana, "
-            "XRP, Cardano, Dogecoin, Binance, Coinbase, USDT, USDC, Tether, BlackRock, "
-            "MicroStrategy, Grayscale, Fidelity, SEC, ETF, Arbitrum, Avalanche, Polkadot, Chainlink. "
-            "(5) ترجم: hack=اختراق, exploit=ثغرة, crash=انهيار, surge=قفزة. "
-            "(6) تجاهل اسم المصدر وميتاداتا Reddit. (7) لا إيموجي أو مقدمات. "
-            "(8) أكمل كل جملة. (9) أعد النص العربي فقط."
-        )
-        user_prompt = (
-            f"أعد صياغة هذا الخبر بالعربية الفصحى بأسلوب صحفي احترافي ومختصر. "
-            f"⚠️ لا تحذف أسماء العملات الرقمية من النص أبداً. "
-            f"اكتب 3-4 جمل. "
-            f"حافظ على المعلومات الأساسية والأرقام الرئيسية فقط:\n\n{text}"
-        )
+        system_prompt = _TRANSLATION_SYSTEM_PROMPT
+        user_prompt = _build_user_prompt(text, missing_names)
         payload = {
             "model": "llama-3.3-70b-versatile",
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            "temperature": 0.3,
-            "max_tokens": 600,  # 🆕 يكفي لجملتين عربيتين
+            "temperature": 0.2 if missing_names else 0.3,
+            "max_tokens": 800,
         }
         r = requests.post(
             url, json=payload,
@@ -1136,10 +1241,9 @@ def _translate_with_groq(text):
     return None
 
 
-def _translate_with_openrouter(text):
+def _translate_with_openrouter(text, missing_names=None):
     """🆕🆕 Fallback 2: OpenRouter (Qwen 2.5 72B) - مجاني
-    إعادة صياغة احترافية
-    يحتاج: OPENROUTER_API_KEY في env vars
+    missing_names: أسماء مفقودة من محاولة سابقة
     """
     try:
         api_key = (
@@ -1150,31 +1254,16 @@ def _translate_with_openrouter(text):
         if not api_key:
             return None
         url = "https://openrouter.ai/api/v1/chat/completions"
-        system_prompt = (
-            "أنت محرر صحفي محترف متخصص في أخبار الكريبتو والأسواق المالية. "
-            "مهمتك: إعادة صياغة الأخبار الإنجليزية بالعربية الفصحى بأسلوب صحفي احترافي. "
-            "قواعد: (1) العربية الفصحى فقط. (2) أعد الصياغة وليس ترجمة حرفية. "
-            "(3) حافظ على جميع المعلومات دون إضافة. "
-            "(4) اترك أسماء العملات والشركات بالإنجليزية دائماً: Bitcoin, Ethereum, Solana, "
-            "XRP, Cardano, Dogecoin, Binance, Coinbase, USDT, USDC, Tether, BlackRock, "
-            "MicroStrategy, Grayscale, Fidelity, SEC, ETF, Arbitrum, Avalanche, Polkadot, Chainlink. "
-            "(5) تجاهل اسم المصدر وميتاداتا Reddit. (6) لا إيموجي أو مقدمات. "
-            "(7) أكمل كل جملة. (8) أعد النص العربي فقط."
-        )
-        user_prompt = (
-            f"أعد صياغة هذا الخبر بالعربية الفصحى بأسلوب صحفي احترافي ومختصر. "
-            f"⚠️ لا تحذف أسماء العملات الرقمية من النص أبداً. "
-            f"اكتب 3-4 جمل. "
-            f"حافظ على المعلومات الأساسية والأرقام الرئيسية فقط:\n\n{text}"
-        )
+        system_prompt = _TRANSLATION_SYSTEM_PROMPT
+        user_prompt = _build_user_prompt(text, missing_names)
         payload = {
             "model": "qwen/qwen-2.5-72b-instruct",
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            "temperature": 0.3,
-            "max_tokens": 600,  # 🆕 يكفي لجملتين عربيتين
+            "temperature": 0.2 if missing_names else 0.3,
+            "max_tokens": 800,
         }
         r = requests.post(
             url, json=payload,
@@ -1217,14 +1306,17 @@ def _is_arabic_quality_good(text):
         "Bitcoin", "Ethereum", "Binance", "Coinbase", "USDT", "USDC", "Tether",
         "Solana", "Cardano", "Ripple", "Litecoin", "Dogecoin", "Polkadot",
         "Chainlink", "Avalanche", "Polygon", "Arbitrum", "Optimism", "Uniswap",
-        # شركات كريبتو فقط
+        "Aptos", "Sui", "Near", "Fantom", "Cosmos", "Tron", "Starknet",
+        # شركات كريبتو
         "BlackRock", "MicroStrategy", "Grayscale", "Fidelity", "Kraken",
-        "Bybit", "Huobi", "Gemini", "Bitfinex", "Anchorage",
+        "Bybit", "Huobi", "Gemini", "Bitfinex", "Anchorage", "Robinhood",
+        "Van", "Eck", "Franklin", "Templeton",  # من Van Eck, Franklin Templeton
         # اختصارات
         "SEC", "ETF", "DeFi", "NFT", "Web3", "DAO", "MiCA", "FIT21",
-        "API", "USD",
+        "API", "USD", "CFTC", "Lido",
         # شخصيات
-        "Saylor", "Gensler", "Vitalik", "Satoshi",
+        "Saylor", "Gensler", "Vitalik", "Satoshi", "Musk", "Buterin",
+        "Armstrong", "Zhao", "Dorsey", "Hoskinson", "Fink", "Wood",
     }
     # 🚫 فحص صارم: أي كلمة إنجليزية غير مسموح بها = مكسور
     suspicious_english = [w for w in english_words if w not in allowed_english]
@@ -1261,40 +1353,109 @@ def translate_to_arabic(text, force=False):
     if not force and cache_key in _translation_cache:
         return _translation_cache[cache_key]
 
-    # 1️⃣ الطبقة 1: Gemini (كل النماذج المتاحة)
+    # 🆕 استخراج الأسماء الحرجة من النص الأصلي مرة واحدة
+    entities = _extract_entities(text)
+    has_entities = len(entities) > 0
+    if has_entities:
+        log.info(f"   📋 Entities found: {entities}")
+
+    # المسار: كل طبقة = محاولة أولى + إعادة محاولة مع تذكير الأسماء المفقودة
+    _MAX_RETRIES_PER_LAYER = 1  # محاولة إعادة واحدة لكل طبقة
+
+    # 1️⃣ الطبقة 1: Gemini
     translated = _translate_with_gemini(text)
     if translated:
         translated = _cleanup_translation(translated)
         if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
-            _translation_cache[cache_key] = translated
-            return translated
+            if has_entities:
+                ok, missing = _verify_entities(text, translated)
+                if not ok:
+                    log.warning(f"   🔄 Gemini retry — missing: {missing}")
+                    translated = _translate_with_gemini(text, missing_names=missing)
+                    if translated:
+                        translated = _cleanup_translation(translated)
+                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
+                            ok2, missing2 = _verify_entities(text, translated)
+                            if ok2:
+                                _translation_cache[cache_key] = translated
+                                return translated
+                            else:
+                                log.warning(f"   ⚠️ Gemini retry still missing: {missing2}")
+                        else:
+                            log.info("   ⏭️ Gemini retry quality low")
+                else:
+                    _translation_cache[cache_key] = translated
+                    return translated
+            else:
+                _translation_cache[cache_key] = translated
+                return translated
         else:
-            log.info("   ⏭️ Gemini output quality too low - trying next layer")
+            log.info("   ⏭️ Gemini output quality too low")
 
-    # 2️⃣ الطبقة 2: Groq (Llama 3.3 70B) - مجاني وسريع
+    # 2️⃣ الطبقة 2: Groq (Llama 3.3 70B)
     log.info("   🔄 Trying Groq (Llama 3.3 70B)...")
     translated = _translate_with_groq(text)
     if translated:
         translated = _cleanup_translation(translated)
         if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
-            _translation_cache[cache_key] = translated
-            return translated
+            if has_entities:
+                ok, missing = _verify_entities(text, translated)
+                if not ok:
+                    log.warning(f"   🔄 Groq retry — missing: {missing}")
+                    translated = _translate_with_groq(text, missing_names=missing)
+                    if translated:
+                        translated = _cleanup_translation(translated)
+                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
+                            ok2, missing2 = _verify_entities(text, translated)
+                            if ok2:
+                                _translation_cache[cache_key] = translated
+                                return translated
+                            else:
+                                log.warning(f"   ⚠️ Groq retry still missing: {missing2}")
+                        else:
+                            log.info("   ⏭️ Groq retry quality low")
+                else:
+                    _translation_cache[cache_key] = translated
+                    return translated
+            else:
+                _translation_cache[cache_key] = translated
+                return translated
         else:
-            log.info("   ⏭️ Groq output quality too low - trying next layer")
+            log.info("   ⏭️ Groq output quality too low")
 
-    # 3️⃣ الطبقة 3: OpenRouter (Qwen 2.5 72B) - مجاني
+    # 3️⃣ الطبقة 3: OpenRouter (Qwen 2.5 72B)
     log.info("   🔄 Trying OpenRouter (Qwen 2.5 72B)...")
     translated = _translate_with_openrouter(text)
     if translated:
         translated = _cleanup_translation(translated)
         if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
-            _translation_cache[cache_key] = translated
-            return translated
+            if has_entities:
+                ok, missing = _verify_entities(text, translated)
+                if not ok:
+                    log.warning(f"   🔄 OpenRouter retry — missing: {missing}")
+                    translated = _translate_with_openrouter(text, missing_names=missing)
+                    if translated:
+                        translated = _cleanup_translation(translated)
+                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
+                            ok2, missing2 = _verify_entities(text, translated)
+                            if ok2:
+                                log.info("   ✅ OpenRouter retry recovered all names")
+                            else:
+                                log.warning(f"   ⚠️ OpenRouter retry still missing: {missing2} — accepting")
+                        # نقبل النتيجة في آخر طبقة حتى مع أسماء مفقودة
+                        _translation_cache[cache_key] = translated
+                        return translated
+                else:
+                    _translation_cache[cache_key] = translated
+                    return translated
+            else:
+                _translation_cache[cache_key] = translated
+                return translated
         else:
             log.info("   ⏭️ OpenRouter output quality too low")
 
-    # 4️⃣ الطبقة 4: تخطي الخبر (لا إرسال - لا Google Translate)
-    log.warning("   ❌ All LLM translation methods failed or low quality - skipping news")
+    # 4️⃣ الطبقة 4: تخطي الخبر
+    log.warning("   ❌ All LLM translation methods failed - skipping news")
     return None
 
 

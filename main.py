@@ -2478,98 +2478,13 @@ def scan_news_loop():
                 ]
                 has_crypto_context = any(kw in news_text for kw in crypto_context_keywords)
 
-                # (2) حدث جوهري صارم - فقط 7 فئات محددة
-                critical_event_keywords = [
-                    # 1️⃣ اختراق/سرقة (Hacks & Exploits)
-                    "hack", "hacked", "exploit", "stolen", "drained", "drain",
-                    "vulnerability", "flash loan", "rug pull", "breach", "cyberattack",
-                    "security breach", "rekt", "compromised", "attacker", "hacker",
-                    "phishing", "empty", "lost funds", "$10m", "$50m", "$100m", "$500m",
-                    "million stolen", "billion stolen", "funds drained",
-
-                    # 2️⃣ انهيار/تصحيح حاد (Crash & Plunge)
-                    "crash", "plunge", "dump", "collapse", "liquidation",
-                    "long squeeze", "short squeeze", "flash crash",
-                    "10% drop", "15% drop", "20% drop", "30% drop",
-                    "10% plunge", "15% plunge", "20% plunge",
-                    "sharp decline", "steep decline", "massive sell-off",
-                    "capitulation", "bloodbath", "meltdown",
-
-                    # 3️⃣ سيولة مؤسسية كبيرة (Institutional Flows)
-                    "institutional inflows", "institutional outflows",
-                    "record inflows", "record outflows",
-                    "blackrock buys", "microstrategy buys", "saylor buys",
-                    "purchases bitcoin", "adds bitcoin", "buying bitcoin",
-                    "$100m bitcoin", "$500m bitcoin", "$1b bitcoin", "$1 billion bitcoin",
-                    "treasury allocation", "bitcoin treasury",
-                    "etf inflows", "etf outflows", "fund flow",
-                    "accumulation", "whale accumulat",
-
-                    # 4️⃣ تحديث برمجي (Protocol Upgrades)
-                    "halving", "hard fork", "soft fork", "the merge",
-                    "ethereum 2.0", "mainnet launch", "mainnet upgrade",
-                    "network upgrade", "protocol upgrade",
-                    "shapella", "dencun", "pectra", "purge", "verge",
-                    "smart contract upgrade", "consensus upgrade",
-
-                    # 5️⃣ فك توكن (Token Unlock)
-                    "token unlock", "unlocking", "unlocked",
-                    "vesting unlock", "cliff unlock",
-                    "$unlock", "tokens unlocked", "unlock schedule",
-                    "linear unlock", "token release", "release schedule",
-
-                    # 6️⃣ حرق توكن (Token Burn)
-                    "burn", "burned", "burning",
-                    "token burn", "coin burn", "buyback and burn",
-                    "deflationary burn", "burn mechanism",
-                    "burned tokens", "burn event",
-
-                    # 7️⃣ قرارات تنظيمية كبرى (تكميلي)
-                    "approval", "approved", "reject", "rejected",
-                    "sec approves", "sec rejects", "sec sues", "sec charges",
-                    "spot etf", "19b-4", "s-1",
-                    "lawsuit", "crackdown", "ban", "banned",
-                    "mica", "clarity act", "genius act", "fit21",
-
-                    # 8️⃣ تصريحات كيفن وارش (Kevin Warsh) - المرشح لرئاسة الفيدرالي
-                    # تصريحاته عن الفائدة والكريبتو تتحرك بها الأسواق
-                    "kevin warsh", "warsh fed", "warsh crypto",
-                    "warsh bitcoin", "warsh says", "warsh signals",
-                    "warsh rate", "warsh interest",
-                    "fed chair nominee", "fed chair pick",
-                    "warsh nomination", "warsh nominated",
-                ]
-                has_critical_event = any(kw in news_text for kw in critical_event_keywords)
-
-                # 🆕 استثناء: تصريحات كيفن وارش عن الكريبتو تُقبل بدون شرط سياق الكريبتو
-                warsh_keywords = [
-                    "warsh crypto", "warsh bitcoin",
-                    "kevin warsh crypto", "kevin warsh bitcoin",
-                    "warsh fed", "warsh says", "warsh signals",
-                ]
-                has_warsh_context = any(kw in news_text for kw in warsh_keywords)
-
-                # 🆕🆕 قرارات الفيدرالي والفائدة (يُعفى من شرط سياق الكريبتو)
-                # لأنها تتحرك بها كل الأسواق بما فيها الكريبتو
-                macro_critical_keywords = [
-                    "rate cut", "rate hike", "rate decision", "rate pause",
-                    "emergency cut", "fomc", "powell", "federal reserve",
-                    "interest rate", "fed cuts", "fed hikes",
-                    "fed signals", "powell signals", "powell says",
-                    "rate hold", "hold rates", "pause rates",
-                    "rate increase", "rate reduction",
-                    "fed meeting", "fomc meeting", "fed chair",
-                    "raises rates", "lowers rates", "cuts rates",
-                    "50 basis points", "25 basis points", "bps cut", "bps hike",
-                ]
-                has_macro_critical = any(kw in news_text for kw in macro_critical_keywords)
-
-                # القبول: (سياق كريبتو + حدث جوهري) أو (حدث ماكرو للفائدة) أو تصريحات وارش
-                if not ((has_crypto_context and has_critical_event) or has_macro_critical or has_warsh_context):
+                # ✅ القبول: سياق كريبتو كافي (مطابق لمنطق GA mode)
+                if not has_crypto_context:
                     continue
 
-                # (4) كلمات ترفض الخبر تلقائياً (حتى لو طابق الكلمات أعلاه)
+                # (3) كلمات ترفض الخبر (سبام وتحليلات فقط — لا حروب/أسهم عريضة)
                 rejection_keywords = [
+                    # سبام وتحليلات
                     "price prediction", "price target", "forecast",
                     "analyst says", "analyst predicts", "analyst expects",
                     "could reach", "might reach", "may hit",
@@ -2585,31 +2500,24 @@ def scan_news_loop():
                     "[link]", "[تعليقات]", "[comments]", "/u/",
                     "submitted by", "مقدم بواسطة",
                     "crossposted from", "xposted from",
-                    # 🚫🚫 رفض قاطع: حروب وسياسة وجيوسياسة
-                    "war", "military", "missile", "airstrike", "drone strike",
+                    # حروب فعلية (أسماء محددة فقط — لا كلمة "war" العامة)
+                    "military strike", "airstrike", "drone strike",
                     "gaza", "palestine", "hamas", "hezbollah", "houthi",
-                    "ukraine", "zelensky", "putin", "kyiv", "moscow",
-                    "taiwan", "beijing", "north korea", "kim jong",
+                    "ukraine war", "zelensky", "kyiv", "moscow",
+                    "north korea", "kim jong",
                     "syria", "lebanon", "yemen", "afghanistan",
-                    "ceasefire", "invasion", "troops", "nuclear weapon",
-                    "killed", "death toll", "casualties", "refugees",
+                    "ceasefire", "invasion", "nuclear weapon",
+                    "death toll", "casualties", "refugees",
                     "حرب", "عسكرية", "صاروخ", "غزة", "فلسطين", "حماس",
                     "أوكرانيا", "روسيا", "بوتين", "تايوان", "كوريا الشمالية",
                     "سوريا", "لبنان", "اليمن", "ضحايا", "قتلى",
-                    # 🚫🚫 رفض قاطع: نفط وطاقة
+                    # نفط وطاقة (كلمات مركبة محددة)
                     "oil price", "crude oil", "opec", "barrel of oil",
-                    "natural gas", "pipeline", "refinery", "petroleum",
-                    "energy crisis", "gas price",
-                    "النفط", "الغاز", "أوبك", "بترول",
-                    # 🚫🚫 رفض قاطع: أسهم وبورصات (بدون كريبتو)
-                    "s&p 500", "dow jones", "stock market", "equity",
+                    "refinery", "petroleum", "energy crisis",
+                    "النفط", "أوبك", "بترول",
+                    # أسهم بحتة (كلمات مركبة — لا stock market العامة)
                     "dividend", "earnings report", "quarterly results",
                     "apple stock", "tesla stock", "nvidia stock",
-                    "s&p", "nasdaq 100",
-                    # 🚫🚫 رفض قاطع: سياسة عامة
-                    "election", "campaign", "senator dies", "congress passes",
-                    "tariff", "trade war", "sanctions",
-                    "انتخابات", "سيناتور", "تعريفات",
                 ]
                 has_rejection = any(kw in news_text for kw in rejection_keywords)
                 if has_rejection:
@@ -3516,7 +3424,7 @@ if __name__ == "__main__":
 
                 categories = classify_news(item)
                 # 🚫 تم حذف important_cats/matched_cats - لا تستخدم للقبول
-                # الفلتر الجديد: فقط (crypto_context + critical_event) أو macro_critical
+                # الفلتر الجديد: سياق كريبتو فقط
 
                 news_text = (item.get("title", "") + " " + item.get("summary", "")).lower()
 
@@ -3536,67 +3444,18 @@ if __name__ == "__main__":
                 ]
                 has_crypto_context = any(kw in news_text for kw in crypto_context_keywords)
 
-                # (2) أحداث مهمة (مستويين)
-                # المستوى A: أحداث جوهرية صارمة (اختراق، انهيار، تنظيم)
-                critical_event_keywords = [
-                    # اختراق/سرقة
-                    "hack", "hacked", "exploit", "stolen", "drained", "drain",
-                    "vulnerability", "flash loan", "rug pull", "breach", "cyberattack",
-                    "security breach", "rekt", "compromised", "attacker", "hacker",
-                    "phishing", "empty", "lost funds", "$10m", "$50m", "$100m", "$500m",
-                    "million stolen", "billion stolen", "funds drained",
-                    # انهيار/تصحيح حاد
-                    "crash", "plunge", "collapse", "liquidation",
-                    "long squeeze", "short squeeze", "flash crash",
-                    "10% drop", "15% drop", "20% drop", "30% drop",
-                    "sharp decline", "steep decline", "massive sell-off",
-                    "capitulation", "bloodbath", "meltdown",
-                    # تنظيم
-                    "sec approves", "sec rejects", "sec sues", "sec charges",
-                    "lawsuit", "crackdown", "ban", "banned",
-                    "mica", "clarity act", "genius act", "fit21",
-                ]
-                # المستوى B: أخبار كريبتو مهمة (شراكات، إطلاقات، سيولة، تحديثات)
-                crypto_news_keywords = [
-                    # سيولة مؤسسية وETF
-                    "inflows", "outflows", "fund flow", "etf inflows", "etf outflows",
-                    "institutional", "treasury allocation", "bitcoin treasury",
-                    "blackrock", "grayscale", "fidelity", "microstrategy",
-                    "spot etf", "19b-4", "s-1",
-                    "record inflows", "record outflows",
-                    "purchases bitcoin", "adds bitcoin", "buying bitcoin",
-                    "$100m bitcoin", "$500m bitcoin", "$1b bitcoin",
-                    # شراكات وإطلاقات
-                    "partnership", "collaboration", "launches", "unveils",
-                    "mainnet launch", "mainnet upgrade", "network upgrade",
-                    "protocol upgrade", "smart contract upgrade",
-                    "listing", "delisting", "integrate", "integration",
-                    # تحديثات برمجية
-                    "halving", "hard fork", "soft fork", "the merge",
-                    "shapella", "dencun", "pectra", "purge", "verge",
-                    "consensus upgrade",
-                    # فك/حرق توكن
-                    "token unlock", "unlocked", "tokens unlocked",
-                    "vesting unlock", "unlock schedule",
-                    "token burn", "burned tokens", "burn event",
-                    # تصريحات شخصيات مؤثرة
-                    "says", "announces", "reveals", "warns", "confirms",
-                    # حركة سعرية ملفتة
-                    "surge", "rally", "all-time high", "ath",
-                    "dump", "pump", "breakout",
-                    "whale", "whales", "accumulation", "whale accumulat",
-                ]
-                has_critical_event = any(kw in news_text for kw in critical_event_keywords)
-                has_crypto_news = any(kw in news_text for kw in crypto_news_keywords)
-
-                # 🔴 القبول: سياق كريبتو مطلوب دائماً + (حدث جوهري OR خبر كريبتو مهم)
+                # ✅ القبول: سياق كريبتو كافي (has_crypto_context يضمن أن الخبر عن كريبتو)
+                # 🚫 تم حذف critical_event/crypto_news — كان الشرط الإضافي يرفض أخبار مشروعة
                 if not has_crypto_context:
                     continue
-                if not (has_critical_event or has_crypto_news):
-                    continue
 
-                # (4) كلمات ترفض الخبر تلقائياً
+                # (3) كلمات ترفض الخبر (سبام وتحليلات فقط — لا حروب/أسهم عريضة)
+                # ⚠️ تمت إزالة كلمات واسعة جداً كانت تدمر أخبار كريبتو:
+                #   "war" كان يطابق "warren", "reward" | "stock market" كانت ترفض أخبار ارتباط
+                #   "s&p" كانت قصيرة جداً | "sanctions" ترفض أخبار SEC
+                #   "pipeline" كلمة DeFi شائعة | "election"/"campaign" سياسة كريبتو
                 rejection_keywords = [
+                    # سبام وتحليلات
                     "price prediction", "price target", "forecast",
                     "analyst says", "analyst predicts", "analyst expects",
                     "could reach", "might reach", "may hit",
@@ -3612,31 +3471,24 @@ if __name__ == "__main__":
                     "[link]", "[تعليقات]", "[comments]", "/u/",
                     "submitted by", "مقدم بواسطة",
                     "crossposted from", "xposted from",
-                    # 🚫🚫 رفض قاطع: حروب وسياسة وجيوسياسة
-                    "war", "military", "missile", "airstrike", "drone strike",
+                    # حروب فعلية (أسماء أماكن/منظمات محددة فقط — لا كلمة "war" العامة)
+                    "military strike", "airstrike", "drone strike",
                     "gaza", "palestine", "hamas", "hezbollah", "houthi",
-                    "ukraine", "zelensky", "putin", "kyiv", "moscow",
-                    "taiwan", "beijing", "north korea", "kim jong",
+                    "ukraine war", "zelensky", "kyiv", "moscow",
+                    "north korea", "kim jong",
                     "syria", "lebanon", "yemen", "afghanistan",
-                    "ceasefire", "invasion", "troops", "nuclear weapon",
-                    "killed", "death toll", "casualties", "refugees",
+                    "ceasefire", "invasion", "nuclear weapon",
+                    "death toll", "casualties", "refugees",
                     "حرب", "عسكرية", "صاروخ", "غزة", "فلسطين", "حماس",
                     "أوكرانيا", "روسيا", "بوتين", "تايوان", "كوريا الشمالية",
                     "سوريا", "لبنان", "اليمن", "ضحايا", "قتلى",
-                    # 🚫🚫 رفض قاطع: نفط وطاقة
+                    # نفط وطاقة (كلمات مركبة محددة)
                     "oil price", "crude oil", "opec", "barrel of oil",
-                    "natural gas", "pipeline", "refinery", "petroleum",
-                    "energy crisis", "gas price",
-                    "النفط", "الغاز", "أوبك", "بترول",
-                    # 🚫🚫 رفض قاطع: أسهم وبورصات (بدون كريبتو)
-                    "s&p 500", "dow jones", "stock market", "equity",
+                    "refinery", "petroleum", "energy crisis",
+                    "النفط", "أوبك", "بترول",
+                    # أسهم بحتة (كلمات مركبة — لا stock market العامة)
                     "dividend", "earnings report", "quarterly results",
                     "apple stock", "tesla stock", "nvidia stock",
-                    "s&p", "nasdaq 100",
-                    # 🚫🚫 رفض قاطع: سياسة عامة
-                    "election", "campaign", "senator dies", "congress passes",
-                    "tariff", "trade war", "sanctions",
-                    "انتخابات", "سيناتور", "تعريفات",
                 ]
                 has_rejection = any(kw in news_text for kw in rejection_keywords)
                 if has_rejection:

@@ -53,16 +53,16 @@ NEWS_SOURCES = {
         "url": "https://crypto.news/feed/",
         "category": "crypto", "lang": "en"
     },
-    "The Block": {
-        "url": "https://www.theblock.co/rss",
+    "CoinPedia": {
+        "url": "https://coingeek.com/feed/",
         "category": "crypto", "lang": "en"
     },
     "Blockworks": {
         "url": "https://blockworks.co/feed",
         "category": "crypto", "lang": "en"
     },
-    "Bitcoin Magazine": {
-        "url": "https://bitcoinmagazine.com/.rss/",
+    "Bitcoinist": {
+        "url": "https://bitcoinist.com/feed/",
         "category": "crypto", "lang": "en"
     },
     # ═══════════════════════════════════════════════════════════

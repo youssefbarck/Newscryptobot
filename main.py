@@ -69,8 +69,10 @@ if __name__ == "__main__":
             # نفحص آخر 40 خبر
             for item in news[:40]:
                 item_ts = item.get("timestamp", 0)
-                # تجاهل الأخبار الأقدم من 30 دقيقة
-                if item_ts > 0 and (now - item_ts) > 1800:
+                # تجاهل الأخبار الأقدم من 3 ساعات (10800 ثانية)
+                # 30 دقيقة كانت ضيقة جداً — الأخبار من المصادر المباشرة
+                # تصل كل 30-60+ دقيقة، فكان يتم تجاوزها كلها
+                if item_ts > 0 and (now - item_ts) > 10800:
                     old_news_skipped += 1
                     h_old = news_hash(item)
                     if h_old not in sent_news_hashes:

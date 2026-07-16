@@ -269,7 +269,7 @@ def scan_news_loop():
                 # 🆕 فحص إضافي: تجاوز الأخبار القديمة (timestamp < 30 دقيقة)
                 # هذا يمنع إرسال أخبار قديمة جداً حتى لو لم تكن في sent_news_hashes
                 item_ts = item.get("timestamp", 0)
-                if item_ts > 0 and (now - item_ts) > 1800:  # 30 دقيقة
+                if item_ts > 0 and (now - item_ts) > 10800:  # 3 ساعات
                     old_news_skipped += 1
                     # أضفها لـ sent_news_hashes حتى لا تُفحص مرة أخرى
                     h_old = news_hash(item)

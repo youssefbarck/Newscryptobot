@@ -116,8 +116,6 @@ KEYWORDS_WHALES = [
     # 🏛️ شخصيات تنظيمية مؤثرة مباشرة على الكريبتو
     "gary gensler", "sec chair", "sec chief",
     "larry fink", "blackrock ceo", "fink",
-    "jerome powell", "powell", "fed chair", "federal reserve chair",
-    "janet yellen", "treasury secretary", "yellen",
     # 🐋 شخصيات مؤيدة/معارضة للكريبتو
     "jack dorsey", "square ceo", "block ceo",
     "pro-crypto", "anti-crypto", "crypto advocate", "crypto critic",
@@ -535,7 +533,7 @@ ECONOMIC_TERMS = {
     "cryptocurrency": "العملات الرقمية",
     "crypto": "الكريبتو",
     "blockchain": "البلوكتشين",
-    "federal reserve": "الفيدرالي الأمريكي",
+    # "federal reserve": تمت إزالته (غير كريبتو)
     "approval": "الموافقة",
     "hack": "اختراق",
     "exploit": "ثغرة أمنية",
@@ -623,9 +621,7 @@ ECONOMIC_TERMS = {
     "volume": "حجم التداول",
     "volatility": "التقلب",
     "sentiment": "التوجه",
-    "fomc": "اللجنة الفيدرالية للسوق المفتوحة",
-    "cpi": "مؤشر أسعار المستهلك",
-    "ppi": "مؤشر أسعار المنتج",
+    # "fomc", "cpi", "ppi": تمت إزالتها (مصطلحات اقتصادية عامة)
 }
 
 # 🆕🆕 قاموس الاستثناءات: أسماء لا تُترجم (تبقى بالإنجليزية)
@@ -661,7 +657,6 @@ TRANSLATION_EXCEPTIONS = [
     "coinbase", "kraken", "okx", "bybit", "kucoin",
     "huobi", "gemini", "bitfinex", "crypto.com",
     "grayscale", "blackrock", "fidelity",
-"truth social", "truth media",
     # 📱 تطبيقات ومحافظ
     "metamask", "trust wallet", "phantom", "rabby",
     # 🤖 مشاريع AI
@@ -675,8 +670,7 @@ TRANSLATION_EXCEPTIONS = [
     # 🌐 اختصارات تقنية ومالية (تبقى بالإنجليزية)
     "web3", "dao", "ico", "ido", "ieo", "ipo",
     "erc20", "erc721", "bep20", "trc20",
-    "etf", "spot etf", "sec", "cftc", "fomc",
-    "cpi", "ppi", "gdp", "qe", "qt",
+    "etf", "spot etf", "sec", "cftc",
     "defi", "nft", "tvl", "apy", "apr",
     "kyc", "aml",
     "btc.d", "altseason",
@@ -684,8 +678,7 @@ TRANSLATION_EXCEPTIONS = [
     "mica", "fit21", "genius act", "clarity act",
     "19b-4", "s-1",
     # 👤 شخصيات (تبقى بالإنجليزية)
-    "kevin warsh", "warsh", "powell", "saylor", "gensler", "vitalik", "satoshi",
-    "yellen", "lagarde",
+    "kevin warsh", "warsh", "saylor", "gensler", "vitalik", "satoshi",
 ]
 
 # تحويل القائمة إلى set للبحث السريع
@@ -718,7 +711,6 @@ GLOSSARY_AR = {
     "funding rate": "سعر التمويل",
     "long squeeze": "ضغط المراكز الطويلة",
     "short squeeze": "ضغط المراكز القصيرة",
-    # 🌍 مصطلحات جيوسياسية
     # 🔧 مصطلحات تقنية أخرى
     "user experience": "تجربة المستخدم",
     "user interface": "واجهة المستخدم",
@@ -786,7 +778,6 @@ GLOSSARY_AR = {
     "options": "الخيارات",
     "long": "مراكز طويلة",
     "short": "مراكز قصيرة",
-    # 🌍 مصطلحات إضافية
     # 🆕 مصطلحات فك وحرق التوكنات
     "token unlock": "فك توكن",
     "token unlocking": "فك التوكنات",
@@ -1051,7 +1042,7 @@ def _translate_with_gemini(text):
         f"اللغة الهدف: العربية الفصحى فقط. "
         f"⚠️ مهم جداً: لا تحذف أسماء العملات الرقمية من النص أبداً. "
         f"إذا ذُكرت Bitcoin أو Solana أو أي عملة أخرى، يجب أن تظهر في النتيجة. "
-        f"اكتب 2-3 جمل كحد أقصى. "
+        f"اكتب 3-4 جمل. "
         f"كن موجزاً ومباشراً.\n\n"
         f"النص الأصلي:\n{text}\n\n"
         f"النص العربي المعاد صياغته:"
@@ -1100,8 +1091,9 @@ def _translate_with_groq(text):
             "مهمتك: إعادة صياغة الأخبار الإنجليزية بالعربية الفصحى بأسلوب صحفي احترافي. "
             "قواعد: (1) العربية الفصحى فقط. (2) أعد الصياغة وليس ترجمة حرفية. "
             "(3) حافظ على جميع المعلومات دون إضافة. "
-            "(4) اترك أسماء العملات والشركات بالإنجليزية: Bitcoin, Ethereum, Binance, "
-            "USDT, SEC, ETF, MicroStrategy, BlackRock, Coinbase, Solana, XRP. "
+            "(4) اترك أسماء العملات والشركات بالإنجليزية دائماً: Bitcoin, Ethereum, Solana, "
+            "XRP, Cardano, Dogecoin, Binance, Coinbase, USDT, USDC, Tether, BlackRock, "
+            "MicroStrategy, Grayscale, Fidelity, SEC, ETF, Arbitrum, Avalanche, Polkadot, Chainlink. "
             "(5) ترجم: hack=اختراق, exploit=ثغرة, crash=انهيار, surge=قفزة. "
             "(6) تجاهل اسم المصدر وميتاداتا Reddit. (7) لا إيموجي أو مقدمات. "
             "(8) أكمل كل جملة. (9) أعد النص العربي فقط."
@@ -1109,7 +1101,7 @@ def _translate_with_groq(text):
         user_prompt = (
             f"أعد صياغة هذا الخبر بالعربية الفصحى بأسلوب صحفي احترافي ومختصر. "
             f"⚠️ لا تحذف أسماء العملات الرقمية من النص أبداً. "
-            f"اكتب 2-3 جمل كحد أقصى. "
+            f"اكتب 3-4 جمل. "
             f"حافظ على المعلومات الأساسية والأرقام الرئيسية فقط:\n\n{text}"
         )
         payload = {
@@ -1163,14 +1155,16 @@ def _translate_with_openrouter(text):
             "مهمتك: إعادة صياغة الأخبار الإنجليزية بالعربية الفصحى بأسلوب صحفي احترافي. "
             "قواعد: (1) العربية الفصحى فقط. (2) أعد الصياغة وليس ترجمة حرفية. "
             "(3) حافظ على جميع المعلومات دون إضافة. "
-            "(4) اترك أسماء العملات والشركات بالإنجليزية. "
+            "(4) اترك أسماء العملات والشركات بالإنجليزية دائماً: Bitcoin, Ethereum, Solana, "
+            "XRP, Cardano, Dogecoin, Binance, Coinbase, USDT, USDC, Tether, BlackRock, "
+            "MicroStrategy, Grayscale, Fidelity, SEC, ETF, Arbitrum, Avalanche, Polkadot, Chainlink. "
             "(5) تجاهل اسم المصدر وميتاداتا Reddit. (6) لا إيموجي أو مقدمات. "
             "(7) أكمل كل جملة. (8) أعد النص العربي فقط."
         )
         user_prompt = (
             f"أعد صياغة هذا الخبر بالعربية الفصحى بأسلوب صحفي احترافي ومختصر. "
             f"⚠️ لا تحذف أسماء العملات الرقمية من النص أبداً. "
-            f"اكتب 2-3 جمل كحد أقصى. "
+            f"اكتب 3-4 جمل. "
             f"حافظ على المعلومات الأساسية والأرقام الرئيسية فقط:\n\n{text}"
         )
         payload = {
@@ -1225,7 +1219,7 @@ def _is_arabic_quality_good(text):
         "Chainlink", "Avalanche", "Polygon", "Arbitrum", "Optimism", "Uniswap",
         # شركات كريبتو فقط
         "BlackRock", "MicroStrategy", "Grayscale", "Fidelity", "Kraken",
-        "Bybit", "Huobi", "Gemini", "Bitfinex", "Anchorage", "Digital",
+        "Bybit", "Huobi", "Gemini", "Bitfinex", "Anchorage",
         # اختصارات
         "SEC", "ETF", "DeFi", "NFT", "Web3", "DAO", "MiCA", "FIT21",
         "API", "USD",
@@ -1724,8 +1718,8 @@ def extract_keywords(text, max_keywords=6):
         "hack": "اختراق", "exploit": "ثغرة", "stolen": "سرقة",
         "lawsuit": "دعوى قضائية", "sue": "رفع دعوى",
         "partnership": "شراكة", "collaboration": "تعاون",
-        "launch": "إطلاق", "release": "إصدار",
-        "upgrade": "ترقية", "update": "تحديث",
+        "launch": "إطلاق",
+        "upgrade": "ترقية",
         "listing": "إدراج", "delisting": "إلغاء الإدراج",
         "staking": "تحصيص", "airdrop": "توزيع مجاني",
         "bull market": "سوق صاعد", "bear market": "سوق هابط",
@@ -1902,12 +1896,10 @@ def translate_source_name(source):
         "Cointelegraph": "كوين تيليغراف",
         "Decrypt": "ديكريبٽ",
         "Bitcoin.com": "بيتكوين دوت كوم",
-        "Federal Reserve": "الفيدرالي الأمريكي",
         "Crypto.News": "كريبتو نيوز",
         "NewsBTC": "نيوز بي تي سي",
         "BeInCrypto": "بي إن كريبتو",
         "Google News AR - Bitcoin": "أخبار بيتكوين",
-        "Google News AR - Fed": "أخبار الفيدرالي",
     }
     return sources_ar.get(source, source)
 
@@ -3004,7 +2996,7 @@ _daily_stats = {
     "alerts_sent": 0,
     "important_found": 0,
     "total_scanned": 0,
-    "categories": {"breaking": 0, "hack": 0, "etf": 0, "fed": 0, "whale": 0, "tech": 0, "market": 0},
+    "categories": {"breaking": 0, "hack": 0, "etf": 0, "whale": 0, "tech": 0, "market": 0},
     "date": datetime.now(tz).strftime("%Y-%m-%d")
 }
 
@@ -3017,7 +3009,7 @@ def update_daily_stats(alerts_sent=0, important=0, total=0, categories=None):
         log.info(f"📅 New day - resetting daily stats (was {_daily_stats['date']})")
         _daily_stats = {
             "alerts_sent": 0, "important_found": 0, "total_scanned": 0,
-            "categories": {"breaking": 0, "hack": 0, "etf": 0, "fed": 0, "whale": 0, "tech": 0, "market": 0},
+            "categories": {"breaking": 0, "hack": 0, "etf": 0, "whale": 0, "tech": 0, "market": 0},
             "date": today
         }
     _daily_stats["alerts_sent"] += alerts_sent
@@ -3050,9 +3042,9 @@ def build_daily_summary():
         sorted_cats = sorted(cats.items(), key=lambda x: -x[1])
         for cat, count in sorted_cats:
             if count > 0:
-                icon = {"breaking": "🚨", "hack": "⚠️", "etf": "📊", "fed": "🏛️",
+                icon = {"breaking": "🚨", "hack": "⚠️", "etf": "📊",
                         "whale": "🐋", "tech": "🔧", "market": "📈"}.get(cat, "📰")
-                cat_name = {"breaking": "عاجل", "hack": "اختراق", "etf": "ETF", "fed": "الفيدرالي",
+                cat_name = {"breaking": "عاجل", "hack": "اختراق", "etf": "ETF",
                             "whale": "حيتان", "tech": "تقني", "market": "سوقي"}.get(cat, cat)
                 pct = (count / total_cats) * 100
                 msg += f"   {icon} {cat_name}: {count} ({pct:.0f}%)\n"
@@ -3329,38 +3321,17 @@ if __name__ == "__main__":
                     "token burn", "coin burn", "buyback and burn",
                     "deflationary burn", "burn mechanism",
                     "burned tokens", "burn event",
-                    # تنظيم
-                    "approval", "approved", "reject", "rejected",
+                    # تنظيم (كلمات محددة لكريبتو فقط)
                     "sec approves", "sec rejects", "sec sues", "sec charges",
                     "spot etf", "19b-4", "s-1",
                     "lawsuit", "crackdown", "ban", "banned",
                     "mica", "clarity act", "genius act", "fit21",
-                    # تصريحات كيفن وارش
-                    "kevin warsh", "warsh fed", "warsh crypto",
-                    "warsh bitcoin", "warsh says", "warsh signals",
-                    "warsh rate", "warsh interest",
-                    "fed chair nominee", "fed chair pick",
-                    "warsh nomination", "warsh nominated",
                 ]
                 has_critical_event = any(kw in news_text for kw in critical_event_keywords)
 
-                # 🆕 قرارات الفيدرالي والفائدة (يُعفى من شرط سياق الكريبتو)
-                macro_critical_keywords = [
-                    "rate cut", "rate hike", "rate decision", "rate pause",
-                    "emergency cut", "fomc", "powell", "federal reserve",
-                    "interest rate", "fed cuts", "fed hikes",
-                    "fed signals", "powell signals", "powell says",
-                    "rate hold", "hold rates", "pause rates",
-                    "rate increase", "rate reduction",
-                    "fed meeting", "fomc meeting", "fed chair",
-                    "raises rates", "lowers rates", "cuts rates",
-                    "50 basis points", "25 basis points", "bps cut", "bps hike",
-                ]
-                has_macro_critical = any(kw in news_text for kw in macro_critical_keywords)
-
-                # القبول: (crypto_context + critical_event) OR (macro_critical)
-                # 🚫 تم حذف matched_cats من شرط القبول
-                if not (has_crypto_context and has_critical_event) and not has_macro_critical:
+                # 🔴 القبول: سياق كريبتو + حدث جوهري (إلزامي دائماً)
+                # 🚫 تم حذف macro_critical bypass — لا أخبار فيدرالي بدون سياق كريبتو
+                if not (has_crypto_context and has_critical_event):
                     continue
 
                 # (4) كلمات ترفض الخبر تلقائياً
@@ -3452,11 +3423,14 @@ if __name__ == "__main__":
             save_sent_news(force=True)
             print("✅ انتهى. سيتم التشغيل التالي بعد 5 دقائق.")
 
+        except SystemExit:
+            raise
         except Exception as e:
             import traceback
             print(f"❌ خطأ: {e}")
             traceback.print_exc()
-            exit(1)
+            # 🔧 إصلاح: exit(0) بدل exit(1) — لا نُفشل الـ workflow بأخطاء عابرة
+            exit(0)
     else:
         # === وضع Render: تشغيل دائم ===
         start_bot()

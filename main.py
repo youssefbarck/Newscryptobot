@@ -3536,7 +3536,8 @@ if __name__ == "__main__":
                 ]
                 has_crypto_context = any(kw in news_text for kw in crypto_context_keywords)
 
-                # (2) حدث جوهري صارم
+                # (2) أحداث مهمة (مستويين)
+                # المستوى A: أحداث جوهرية صارمة (اختراق، انهيار، تنظيم)
                 critical_event_keywords = [
                     # اختراق/سرقة
                     "hack", "hacked", "exploit", "stolen", "drained", "drain",
@@ -3544,49 +3545,54 @@ if __name__ == "__main__":
                     "security breach", "rekt", "compromised", "attacker", "hacker",
                     "phishing", "empty", "lost funds", "$10m", "$50m", "$100m", "$500m",
                     "million stolen", "billion stolen", "funds drained",
-                    # انهيار/تصحيح
-                    "crash", "plunge", "dump", "collapse", "liquidation",
+                    # انهيار/تصحيح حاد
+                    "crash", "plunge", "collapse", "liquidation",
                     "long squeeze", "short squeeze", "flash crash",
                     "10% drop", "15% drop", "20% drop", "30% drop",
-                    "10% plunge", "15% plunge", "20% plunge",
                     "sharp decline", "steep decline", "massive sell-off",
                     "capitulation", "bloodbath", "meltdown",
-                    # سيولة مؤسسية
-                    "institutional inflows", "institutional outflows",
-                    "record inflows", "record outflows",
-                    "blackrock buys", "microstrategy buys", "saylor buys",
-                    "purchases bitcoin", "adds bitcoin", "buying bitcoin",
-                    "$100m bitcoin", "$500m bitcoin", "$1b bitcoin", "$1 billion bitcoin",
-                    "treasury allocation", "bitcoin treasury",
-                    "etf inflows", "etf outflows", "fund flow",
-                    "accumulation", "whale accumulat",
-                    # تحديث برمجي
-                    "halving", "hard fork", "soft fork", "the merge",
-                    "ethereum 2.0", "mainnet launch", "mainnet upgrade",
-                    "network upgrade", "protocol upgrade",
-                    "shapella", "dencun", "pectra", "purge", "verge",
-                    "smart contract upgrade", "consensus upgrade",
-                    # فك توكن
-                    "token unlock", "unlocking", "unlocked",
-                    "vesting unlock", "cliff unlock",
-                    "$unlock", "tokens unlocked", "unlock schedule",
-                    "linear unlock", "token release", "release schedule",
-                    # حرق توكن
-                    "burn", "burned", "burning",
-                    "token burn", "coin burn", "buyback and burn",
-                    "deflationary burn", "burn mechanism",
-                    "burned tokens", "burn event",
-                    # تنظيم (كلمات محددة لكريبتو فقط)
+                    # تنظيم
                     "sec approves", "sec rejects", "sec sues", "sec charges",
-                    "spot etf", "19b-4", "s-1",
                     "lawsuit", "crackdown", "ban", "banned",
                     "mica", "clarity act", "genius act", "fit21",
                 ]
+                # المستوى B: أخبار كريبتو مهمة (شراكات، إطلاقات، سيولة، تحديثات)
+                crypto_news_keywords = [
+                    # سيولة مؤسسية وETF
+                    "inflows", "outflows", "fund flow", "etf inflows", "etf outflows",
+                    "institutional", "treasury allocation", "bitcoin treasury",
+                    "blackrock", "grayscale", "fidelity", "microstrategy",
+                    "spot etf", "19b-4", "s-1",
+                    "record inflows", "record outflows",
+                    "purchases bitcoin", "adds bitcoin", "buying bitcoin",
+                    "$100m bitcoin", "$500m bitcoin", "$1b bitcoin",
+                    # شراكات وإطلاقات
+                    "partnership", "collaboration", "launches", "unveils",
+                    "mainnet launch", "mainnet upgrade", "network upgrade",
+                    "protocol upgrade", "smart contract upgrade",
+                    "listing", "delisting", "integrate", "integration",
+                    # تحديثات برمجية
+                    "halving", "hard fork", "soft fork", "the merge",
+                    "shapella", "dencun", "pectra", "purge", "verge",
+                    "consensus upgrade",
+                    # فك/حرق توكن
+                    "token unlock", "unlocked", "tokens unlocked",
+                    "vesting unlock", "unlock schedule",
+                    "token burn", "burned tokens", "burn event",
+                    # تصريحات شخصيات مؤثرة
+                    "says", "announces", "reveals", "warns", "confirms",
+                    # حركة سعرية ملفتة
+                    "surge", "rally", "all-time high", "ath",
+                    "dump", "pump", "breakout",
+                    "whale", "whales", "accumulation", "whale accumulat",
+                ]
                 has_critical_event = any(kw in news_text for kw in critical_event_keywords)
+                has_crypto_news = any(kw in news_text for kw in crypto_news_keywords)
 
-                # 🔴 القبول: سياق كريبتو + حدث جوهري (إلزامي دائماً)
-                # 🚫 تم حذف macro_critical bypass — لا أخبار فيدرالي بدون سياق كريبتو
-                if not (has_crypto_context and has_critical_event):
+                # 🔴 القبول: سياق كريبتو مطلوب دائماً + (حدث جوهري OR خبر كريبتو مهم)
+                if not has_crypto_context:
+                    continue
+                if not (has_critical_event or has_crypto_news):
                     continue
 
                 # (4) كلمات ترفض الخبر تلقائياً

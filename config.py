@@ -31,7 +31,7 @@ REDDIT_HEADERS = {"User-Agent": "WhaleNewsBot/1.0 by u/whale_news_bot"}
 # ═══════════════════════════════════════════════════════════
 NEWS_SOURCES = {
     # ═══════════════════════════════════════════════════════════
-    # 🪙 مصادر كريبتو فقط (إنجليزية)
+    # 🪙 مصادر كريبتو إنجليزية (مباشرة وسريعة)
     # ═══════════════════════════════════════════════════════════
     "CoinDesk": {
         "url": "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml",
@@ -45,28 +45,43 @@ NEWS_SOURCES = {
         "url": "https://decrypt.co/feed",
         "category": "crypto", "lang": "en"
     },
-    "Bitcoin.com": {
-        "url": "https://news.bitcoin.com/feed/",
+    "BeInCrypto": {
+        "url": "https://beincrypto.com/feed/",
         "category": "crypto", "lang": "en"
     },
     "Crypto.News": {
         "url": "https://crypto.news/feed/",
         "category": "crypto", "lang": "en"
     },
-    "NewsBTC": {
-        "url": "https://www.newsbtc.com/feed/",
+    "The Block": {
+        "url": "https://www.theblock.co/rss",
         "category": "crypto", "lang": "en"
     },
-    "BeInCrypto": {
-        "url": "https://beincrypto.com/feed/",
+    "Blockworks": {
+        "url": "https://blockworks.co/feed",
+        "category": "crypto", "lang": "en"
+    },
+    "Bitcoin Magazine": {
+        "url": "https://bitcoinmagazine.com/.rss/",
         "category": "crypto", "lang": "en"
     },
     # ═══════════════════════════════════════════════════════════
-    # 🏛️ Federal Reserve فقط (قرارات الفائدة الرسمية)
+    # 🏛️ اقتصاد كلّي (قرارات رسمية مؤثرة على الكريبتو)
     # ═══════════════════════════════════════════════════════════
     "Federal Reserve": {
         "url": "https://www.federalreserve.gov/feeds/press_all.xml",
         "category": "fed", "lang": "en"
+    },
+    # ═══════════════════════════════════════════════════════════
+    # 🌐 مصادر عامة RSS (أخبار كريبتو مُرشّحة بالبحث)
+    # ═══════════════════════════════════════════════════════════
+    "Google News - Crypto": {
+        "url": "https://news.google.com/rss/search?q=bitcoin+OR+ethereum+OR+cryptocurrency+OR+crypto+regulation&hl=en&gl=US&ceid=US:en",
+        "category": "crypto", "lang": "en"
+    },
+    "Google News - ETF": {
+        "url": "https://news.google.com/rss/search?q=bitcoin+ETF+OR+ethereum+ETF+OR+spot+ETF&hl=en&gl=US&ceid=US:en",
+        "category": "etf", "lang": "en"
     },
     # ═══════════════════════════════════════════════════════════
     # 🌐 مصادر عربية (كريبتو + فيدرالي فقط)

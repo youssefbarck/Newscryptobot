@@ -106,7 +106,10 @@ def _strip_source_from_title(title, source_name=""):
 
 
 def parse_rss_source(source_name, source_info):
-    """يجلب ويحلل RSS source واحد"""
+    """يجلب ويحلل RSS source واحد
+    🔧 عزل كامل: أي خطأ في هذا المصدر لا يؤثر على البقية
+    🔧 تسجيل سبب الفشل التفصيلي في السجل
+    """
     url = source_info["url"]
     category = source_info["category"]
     is_json = source_info.get("is_json", False)
@@ -144,7 +147,6 @@ def parse_rss_source(source_name, source_info):
                     })
         else:
             # RSS XML
-            # استخدام REDDIT_HEADERS لمصادر Reddit RSS
             headers_to_use = REDDIT_HEADERS if is_reddit_rss else HEADERS
             r = requests.get(url, headers=headers_to_use, timeout=15)
             # Reddit قد يرجع 429 لكن مع محتوى صالح
@@ -198,21 +200,35 @@ def parse_rss_source(source_name, source_info):
                             "timestamp": parse_date(pub_date),
                             "date_str": pub_date
                         })
+            else:
+                log.warning(f"📰 {source_name}: HTTP {r.status_code} — فشل الاتصال")
         log.info(f"📰 {source_name}: {len(items)} items")
+    except requests.exceptions.Timeout:
+        log.warning(f"📰 {source_name}: timeout (15s) — المصدر بطيء")
+    except requests.exceptions.ConnectionError as e:
+        log.warning(f"📰 {source_name}: connection error — {type(e).__name__}")
+    except ET.ParseError as e:
+        log.warning(f"📰 {source_name}: XML parse error — قد لا يكون RSS صالح")
     except Exception as e:
-        log.warning(f"Source {source_name} err: {e}")
+        log.warning(f"📰 {source_name}: {type(e).__name__}: {e}")
     return items
 
 
 def get_all_news():
-    """يجلب كل الأخبار من كل المصادر"""
+    """يجلب كل الأخبار من كل المصادر
+    🔧 عزل كامل: تعطل أي مصدر لا يؤثر على البقية
+    🔧 كل مصدر يُفحص بالتساوي مع try/except منفصل
+    """
     cached = get_cached("all_news", 120)  # كاش دقيقتين
     if cached:
         return cached
     all_items = []
     for source_name, source_info in NEWS_SOURCES.items():
-        items = parse_rss_source(source_name, source_info)
-        all_items.extend(items)
+        try:
+            items = parse_rss_source(source_name, source_info)
+            all_items.extend(items)
+        except Exception as e:
+            log.warning(f"📰 {source_name}: فشل غير متوقع في الدالة الخارجية — {type(e).__name__}: {e}")
         # تأخير بسيط بين المصادر
         time.sleep(0.3)
     # ترتيب حسب الوقت (الأحدث أولاً)
@@ -222,35 +238,53 @@ def get_all_news():
 
 
 def deduplicate_news(news_list):
-    """إزالة الأخبار المكررة بشكل صارم"""
-    seen = set()
+    """إزالة الأخبار المكررة عبر مصادر مختلفة
+    🔧 محسّن: يمنع نفس الخبر من عدة مواقع، لكن لا يعتبر خبرين
+       مختلفين مكررين بسبب تشابه جزئي في العنوان.
+       مقارنة أول 40 حرف فقط عبر المصادر، و 80 حرف لنفس المصدر.
+    """
+    seen = set()       # (normalized_key) → عناوين متطابقة جداً
+    seen_cross = set() # (normalized_key) بدون مصدر → لمنع التكرار عبر المصادر
     unique = []
     for item in news_list:
         title = item.get("title", "").lower().strip()
-        # تطبيع شديد: إزالة كل الرموز والمسافات الزائدة
+        source = item.get("source", "").lower()
+        # تطبيع: إزالة الرموز والمسافات الزائدة
         normalized = re.sub(r'[^\w\s]', '', title)
         normalized = re.sub(r'\s+', ' ', normalized).strip()
-        # إزالة الكلمات الشائعة في البداية (Breaking, Update, News)
-        normalized = re.sub(r'^(breaking|update|news|alert|urgent)[\s:]*', '', normalized)
-        # أخذ أول 60 حرف فقط للمقارنة (لتجنب التكرار مع عناوين مختلفة قليلاً)
-        normalized = normalized[:60]
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            unique.append(item)
+        # إزالة الكلمات الشائعة في البداية
+        normalized = re.sub(r'^(breaking|update|news|alert|urgent|just in|report|analysis)[\s:]*', '', normalized)
+        if not normalized:
+            continue
+        # مفتاح صارم: نفس المصدر + أول 80 حرف
+        strict_key = f"{normalized[:80]}|{source}"
+        # مفتاح متقاطع: بدون مصدر، أول 40 حرف فقط
+        cross_key = normalized[:40]
+
+        # (1) نفس المصدر + نفس العنوان → مكرر دائماً
+        if strict_key in seen:
+            continue
+        # (2) مصدر مختلف + أول 40 حرف متطابقة → مكرر عبر مصادر
+        if cross_key in seen_cross:
+            continue
+
+        seen.add(strict_key)
+        seen_cross.add(cross_key)
+        unique.append(item)
     return unique
 
 
 def news_hash(item):
     """hash فريد للخبر
-    hash أذكى - يشمل العنوان (مُطبّع) + المصدر
+    🔧 محسّن: لا يعتمد على المصدر — حتى لو نفس الخبر جاء من مصدرين
+       مختلفين، يُعتبر مكرراً (لمنع إرساله مرتين).
     """
     title = item.get("title", "").lower().strip()
-    # تطبيع شديد: إزالة الرموز والمسافات الزائدة
+    # تطبيع: إزالة الرموز والمسافات الزائدة
     normalized = re.sub(r'[^\w\s]', '', title)
     normalized = re.sub(r'\s+', ' ', normalized).strip()
     # إزالة الكلمات الشائعة في البداية
-    normalized = re.sub(r'^(breaking|update|news|alert|urgent|just in)[\s:]*', '', normalized)
-    # إضافة المصدر للـ hash لتجنب التكرار عبر مصادر مختلفة بنفس العنوان
-    source = item.get("source", "").lower()
-    hash_input = f"{normalized[:80]}|{source}"
+    normalized = re.sub(r'^(breaking|update|news|alert|urgent|just in|report)[\s:]*', '', normalized)
+    # hash بدون مصدر — نفس الخبر من مصدرين = نفس الخبر
+    hash_input = normalized[:50]
     return hashlib.md5(hash_input.encode()).hexdigest()[:12]

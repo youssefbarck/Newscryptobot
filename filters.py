@@ -11,6 +11,7 @@ from config import (
 # كلمات مفتاحية مشتركة للسياق الكريبتوي
 # ═══════════════════════════════════════════════════════════
 CRYPTO_CONTEXT_KEYWORDS = [
+    # عملات رئيسية
     "bitcoin", "btc", "ethereum", "eth", "ether", "crypto", "cryptocurrency",
     "blockchain", "altcoin", "stablecoin", "defi", "nft", "token", "coin",
     "binance", "coinbase", "tether", "usdt", "usdc", "xrp", "ripple",
@@ -18,68 +19,66 @@ CRYPTO_CONTEXT_KEYWORDS = [
     "polkadot", "dot", "avalanche", "avax", "chainlink", "link",
     "web3", "wallet", "staking", "mining", "halving", "smart contract",
     "decentralized", "dex", "cex", "ledger", "satoshi",
+    # مؤسسات كريبتو مؤثرة
     "sec", "gensler", "spot etf", "blackrock bitcoin", "fidelity crypto",
     "grayscale", "microstrategy", "saylor", "cz", "vitalik",
+    # عملات إضافية شائعة
+    "litecoin", "ltc", "tron", "trx", "toncoin", "ton",
+    "stellar", "xlm", "hedera", "hbar", "near protocol", "aptos", "apt",
+    "arbitrum", "arb", "optimism", "op", "sei", "sui",
+    "pepe", "shiba", "memecoin", "shitcoin",
+    # مصطلحات DeFi وبروتوكولات
+    "aave", "uniswap", "compound", "makerdao", "lido", "rocket pool",
+    "restaking", "ethereum etf", "bitcoin etf",
+    "on-chain", "token burn", "airdrop", "ico", "ieo",
+    # عربية
     "بيتكوين", "إيثيريوم", "كريبتو", "عملة رقمية", "عملة مشفرة", "بلوكتشين",
     "بايننس", "كوين بيس", "توكين", "تعدين", "محفظة",
+    "تيثر", "سولانا", "ريبل", "ألبتكوين", "عملات مستقرة",
 ]
 
 # ═══════════════════════════════════════════════════════════
 # كلمات مفتاحية للرفض / فلترة السبام
 # ═══════════════════════════════════════════════════════════
 REJECTION_KEYWORDS = [
-    "price prediction", "price target", "forecast",
-    "analyst says", "analyst predicts", "analyst expects",
-    "could reach", "might reach", "may hit",
+    # سبام ومحتوى منخفض القيمة فقط
+    "price prediction", "price target",
     "top 10", "top 5", "best coins", "best crypto",
     "how to buy", "how to trade", "tutorial",
-    "watch these", "watch list", "watchlist",
     "newsletter", "weekly recap", "daily recap",
-    "interview", "podcast", "review",
     "guide", "explained", "what is",
     "5 coins", "10 coins", "3 coins",
-    "minor upgrade", "minor update", "minor bug",
-    "small purchase", "minor hack",
     "[link]", "[تعليقات]", "[comments]", "/u/",
     "submitted by", "مقدم بواسطة",
     "crossposted from", "xposted from",
-    "military strike", "airstrike", "drone strike",
-    "gaza", "palestine", "hamas", "hezbollah", "houthi",
-    "ukraine war", "zelensky", "kyiv", "moscow",
-    "north korea", "kim jong",
-    "syria", "lebanon", "yemen", "afghanistan",
-    "ceasefire", "invasion", "nuclear weapon",
-    "death toll", "casualties", "refugees",
-    "حرب", "عسكرية", "صاروخ", "غزة", "فلسطين", "حماس",
-    "أوكرانيا", "روسيا", "بوتين", "تايوان", "كوريا الشمالية",
-    "سوريا", "لبنان", "اليمن", "ضحايا", "قتلى",
-    "oil price", "crude oil", "opec", "barrel of oil",
-    "refinery", "petroleum", "energy crisis",
-    "النفط", "أوبك", "بترول",
-    "dividend", "earnings report", "quarterly results",
-    "apple stock", "tesla stock", "nvidia stock",
 ]
 
 # ═══════════════════════════════════════════════════════════
 # كلمات مفتاحية عربية حرجة (أخبار عربية مهمة)
 # ═══════════════════════════════════════════════════════════
 AR_CRITICAL_KEYWORDS = [
+    # أمن واختراقات
     "اختراق", "اخترق", "سرقة", "سُرق", "تم اختراق", "ثغرة", "احتيال",
     "استغلال", "اختراقات", "سايبر", "هجوم إلكتروني",
+    # حركة السوق
     "انهيار", "انهار", "تدهور", "هبوط حاد", "سقوط", "تراجع حاد",
-    "بيع جماعي", "تصحيح", "تصفية", "ضغط",
+    "بيع جماعي", "تصفية", "ضغط",
+    # مؤسسات وتدفقات
     "تدفقات", "تدفق", "استثمارات مؤسسية", "شراء كبير",
     "مايكروستراتيجي", "بلاك روك", "مؤسسي",
-    "تحديث", "ترقية", "التنصيف", "انقسام", "تحديث الشبكة",
+    # تحديثات تقنية
+    "التنصيف", "انقسام", "تحديث الشبكة",
     "إطلاق الشبكة", "الشبكة الرئيسية",
     "فك توكن", "إلغاء تأمين", "حرق توكن", "حرق عملة", "إتلاف",
-    "كيفن وارش", "وارش", "kevin warsh", "warsh",
+    # اقتصاد كلّي مؤثر
     "الفائدة", "الفيدرالي", "باول", "اجتماع الفيدرالي",
     "خفض الفائدة", "رفع الفائدة", "تثبيت الفائدة",
     "أسعار الفائدة", "الاحتياطي الفيدرالي",
+    # تنظيم وقانون
+    "موافقة", "رفض", "قانون", "تنظيم", "حظر", "عقوبات",
+    # عملات (مطلوبة كسياق)
     "بيتكوين", "إيثيريوم", "بايننس", "كريبتو", "عملات رقمية",
     "عملات مشفرة", "البلوكتشين", "USDT", "USDC",
-    "موافقة", "رفض", "قانون", "تنظيم", "حظر", "عقوبات",
 ]
 
 AR_REJECTION_KEYWORDS = [

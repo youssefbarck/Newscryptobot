@@ -462,10 +462,14 @@ def _init_gemini():
 
         # قائمة كل النماذج المرشحة (Flash أولاً لأنه أسرع، ثم Pro)
         candidate_models = [
-            "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-exp",
-            "gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-flash-latest",
-            "gemini-2.5-pro", "gemini-2.0-pro", "gemini-1.5-pro-latest",
-            "gemini-1.5-pro", "gemini-pro-latest",
+            "gemini-2.5-flash", "gemini-2.5-flash-preview-05-20",
+            "gemini-2.0-flash", "gemini-2.0-flash-exp", "gemini-2.0-flash-001",
+            "gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-flash-001",
+            "gemini-flash-latest",
+            "gemini-2.5-pro", "gemini-2.5-pro-preview-05-06",
+            "gemini-2.0-pro", "gemini-2.0-pro-exp",
+            "gemini-1.5-pro-latest", "gemini-1.5-pro", "gemini-1.5-pro-001",
+            "gemini-pro-latest",
         ]
         for model_name in candidate_models:
             try:
@@ -482,21 +486,39 @@ def _init_gemini():
                 continue
 
         # اكتشاف تلقائي عبر list_models
+        # الإصدارات الجديدة من google-generativeai تعيد strings من list_models()
+        # وليس كائنات تحتوي على .name و .supported_generation_methods
         if not _gemini_models:
             try:
-                for m in genai.list_models():
-                    if ("generateContent" in [meth.name for meth in m.supported_generation_methods]
-                            and ("flash" in m.name.lower() or "pro" in m.name.lower())):
-                        try:
-                            model = genai.GenerativeModel(
-                                model_name=m.name, system_instruction=system_prompt
-                            )
+                models_list = list(genai.list_models())
+                for m in models_list:
+                    try:
+                        # التعامل مع كلا الإصدارين: str أو كائن
+                        if isinstance(m, str):
+                            model_name = m
+                        else:
+                            model_name = getattr(m, 'name', str(m))
+
+                        if not model_name:
+                            continue
+                        # تخطي النماذج التي ليست flash أو pro
+                        name_lower = model_name.lower()
+                        if not ("flash" in name_lower or "pro" in name_lower):
+                            continue
+
+                        model = genai.GenerativeModel(
+                            model_name=model_name, system_instruction=system_prompt
+                        )
+                        test_resp = model.generate_content(
+                            "test", generation_config={"max_output_tokens": 5}
+                        )
+                        if test_resp and test_resp.text:
                             _gemini_models.append(model)
-                            log.info(f"✅ Gemini ready (discovered): {m.name}")
+                            log.info(f"✅ Gemini ready (discovered): {model_name}")
                             if len(_gemini_models) >= 3:
                                 break
-                        except Exception:
-                            continue
+                    except Exception:
+                        continue
             except Exception as e:
                 log.warning(f"Model listing failed: {e}")
 

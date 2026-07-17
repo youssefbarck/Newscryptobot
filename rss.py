@@ -8,12 +8,13 @@ import re, time, asyncio
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple
 from xml.etree import ElementTree as ET
+from dataclasses import dataclass
 
 import aiohttp
 from aiohttp import ClientTimeout, TCPConnector
 
 from config import (
-    log, NEWS_SOURCES, HEADERS, REDDIT_HEADERS,
+    log, NEWS_SOURCES, HEADERS, REDDIT_HEADERS, 
     FARSIDE_RATE_LIMITER, FARSIDE_CB,
 )
 from filters import NewsItem
@@ -27,16 +28,19 @@ class SessionManager:
 
     def __init__(self):
         self._session: Optional[aiohttp.ClientSession] = None
-        self._connector = TCPConnector(
-            limit=50,           # إجمالي الاتصالات
-            limit_per_host=10,  # لكل host
-            ttl_dns_cache=300,  # cache DNS 5 دقائق
-            use_dns_cache=True,
-        )
+        self._connector: Optional[TCPConnector] = None
         self._timeout = ClientTimeout(total=20, connect=10)
 
     async def get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
+            # تهيئة كسولة: لا نُنشئ TCPConnector إلا داخل event loop
+            if self._connector is None or self._connector.closed:
+                self._connector = TCPConnector(
+                    limit=50,           # إجمالي الاتصالات
+                    limit_per_host=10,  # لكل host
+                    ttl_dns_cache=300,  # cache DNS 5 دقائق
+                    use_dns_cache=True,
+                )
             self._session = aiohttp.ClientSession(
                 connector=self._connector,
                 timeout=self._timeout,
@@ -48,6 +52,9 @@ class SessionManager:
         if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
+        if self._connector and not self._connector.closed:
+            await self._connector.close()
+            self._connector = None
 
 
 session_manager = SessionManager()
@@ -164,33 +171,21 @@ def strip_source_from_title(title: str, source_name: str = "") -> str:
 # ═══════════════════════════════════════════════════════════
 # 📰 RSS Parser (Async)
 # ═══════════════════════════════════════════════════════════
-async def parse_rss_source(source) -> List[NewsItem]:
-    """جلب وتحليل مصدر RSS واحد (async)
-    يدعم source كـ NewsSource أو dict.
-    """
+async def parse_rss_source(source: "NewsSource") -> List[NewsItem]:
+    """جلب وتحليل مصدر RSS واحد (async)"""
     items = []
-
-    # استخراج الحقول (دعم dict و attribute access)
-    source_url = source.get("url") if hasattr(source, 'get') else getattr(source, 'url', '')
-    source_name = source.get("name") if hasattr(source, 'get') else getattr(source, 'name', '')
-    source_category = source.get("category") if hasattr(source, 'get') else getattr(source, 'category', 'crypto')
-    source_lang = source.get("lang") if hasattr(source, 'get') else getattr(source, 'lang', 'en')
-    source_timeout = source.get("timeout") if hasattr(source, 'get') else getattr(source, 'timeout', 15)
-
-    if not source_url:
-        return items
 
     try:
         session = await session_manager.get_session()
 
         async with session.get(
-            source_url,
-            headers=REDDIT_HEADERS if "reddit" in source_url.lower() else HEADERS,
-            timeout=ClientTimeout(total=int(source_timeout))
+            source.url, 
+            headers=REDDIT_HEADERS if "reddit" in source.url.lower() else HEADERS,
+            timeout=ClientTimeout(total=source.timeout)
         ) as response:
 
             if response.status != 200:
-                log.warning(f"📰 {source_name}: HTTP {response.status}")
+                log.warning(f"📰 {source.name}: HTTP {response.status}")
                 return items
 
             content = await response.text()
@@ -199,7 +194,7 @@ async def parse_rss_source(source) -> List[NewsItem]:
             try:
                 root = ET.fromstring(content.encode())
             except ET.ParseError:
-                log.warning(f"📰 {source_name}: XML parse error")
+                log.warning(f"📰 {source.name}: XML parse error")
                 return items
 
             # RSS 2.0
@@ -222,18 +217,18 @@ async def parse_rss_source(source) -> List[NewsItem]:
                             image = enclosure.get('url', '')
 
                     items.append(NewsItem(
-                        title=strip_source_from_title(clean_html(title), source_name),
+                        title=strip_source_from_title(clean_html(title), source.name),
                         link=link,
                         summary=extract_summary(desc),
                         image=image,
-                        source=source_name,
-                        category=source_category,
+                        source=source.name,
+                        category=source.category,
                         timestamp=parse_date(pub_date),
                         date_str=pub_date,
-                        lang=source_lang,
+                        lang=source.lang,
                     ))
                 except Exception as e:
-                    log.debug(f"Parse item error in {source_name}: {e}")
+                    log.debug(f"Parse item error in {source.name}: {e}")
                     continue
 
             # Atom fallback
@@ -248,32 +243,32 @@ async def parse_rss_source(source) -> List[NewsItem]:
                         pub_date = entry.findtext('atom:updated', '', ns) or entry.findtext('atom:published', '', ns) or ""
 
                         items.append(NewsItem(
-                            title=strip_source_from_title(clean_html(title), source_name),
+                            title=strip_source_from_title(clean_html(title), source.name),
                             link=link,
                             summary=extract_summary(summary),
                             image=extract_image_from_html(summary),
-                            source=source_name,
-                            category=source_category,
+                            source=source.name,
+                            category=source.category,
                             timestamp=parse_date(pub_date),
                             date_str=pub_date,
-                            lang=source_lang,
+                            lang=source.lang,
                         ))
                     except Exception as e:
-                        log.debug(f"Parse atom error in {source_name}: {e}")
+                        log.debug(f"Parse atom error in {source.name}: {e}")
                         continue
 
-        log.info(f"📰 {source_name}: {len(items)} items")
+        log.info(f"📰 {source.name}: {len(items)} items")
 
     except asyncio.TimeoutError:
-        log.warning(f"📰 {source_name}: timeout ({source_timeout}s)")
+        log.warning(f"📰 {source.name}: timeout ({source.timeout}s)")
     except Exception as e:
-        log.warning(f"📰 {source_name}: {type(e).__name__}: {e}")
+        log.warning(f"📰 {source.name}: {type(e).__name__}: {e}")
 
     return items
 
 
 # ═══════════════════════════════════════════════════════════
-# 🚀 Parallel Fetching (Async)
+# 🚀 Parallel Fetching
 # ═══════════════════════════════════════════════════════════
 async def fetch_all_news(max_concurrent: int = 5) -> List[NewsItem]:
     """جلب كل الأخبار بشكل متوازي مع semaphore"""
@@ -281,10 +276,11 @@ async def fetch_all_news(max_concurrent: int = 5) -> List[NewsItem]:
 
     async def fetch_with_limit(source):
         async with semaphore:
+            # circuit breaker
             try:
-                return await parse_rss_source(source)
+                return await source.circuit_breaker.call(parse_rss_source, source)
             except Exception as e:
-                log.warning(f"Error fetching {getattr(source, 'name', '?')}: {e}")
+                log.warning(f"Circuit breaker for {source.name}: {e}")
                 return []
 
     tasks = [fetch_with_limit(source) for source in NEWS_SOURCES.values()]
@@ -294,61 +290,8 @@ async def fetch_all_news(max_concurrent: int = 5) -> List[NewsItem]:
     for result in results:
         if isinstance(result, list):
             all_items.extend(result)
-        elif isinstance(result, Exception):
-            log.warning(f"Gather error: {result}")
 
     # ترتيب حسب الوقت (الأحدث أولاً)
-    all_items.sort(key=lambda x: x.timestamp, reverse=True)
-    return all_items
-
-
-# ═══════════════════════════════════════════════════════════
-# 🔄 Sync Fallback (للبيئات التي لا تدعم asyncio جيداً)
-# ═══════════════════════════════════════════════════════════
-def get_all_news_sync() -> List[NewsItem]:
-    """جلب كل الأخبار بشكل متزامن (fallback)"""
-    import requests as req
-    all_items = []
-
-    for source_name, source in NEWS_SOURCES.items():
-        source_url = source.get("url") if hasattr(source, 'get') else getattr(source, 'url', '')
-        source_category = source.get("category") if hasattr(source, 'get') else getattr(source, 'category', 'crypto')
-        source_lang = source.get("lang") if hasattr(source, 'get') else getattr(source, 'lang', 'en')
-
-        try:
-            headers = REDDIT_HEADERS if "reddit" in source_url.lower() else HEADERS
-            r = req.get(source_url, headers=headers, timeout=15)
-            if r.status_code != 200:
-                continue
-
-            root = ET.fromstring(r.content)
-
-            for item_elem in root.findall('.//item')[:15]:
-                try:
-                    title = item_elem.findtext('title', '') or ""
-                    link = item_elem.findtext('link', '') or ""
-                    desc = item_elem.findtext('description', '') or ""
-                    pub_date = item_elem.findtext('pubDate', '') or ""
-
-                    image = extract_image_from_html(desc)
-
-                    all_items.append(NewsItem(
-                        title=strip_source_from_title(clean_html(title), source_name),
-                        link=link,
-                        summary=extract_summary(desc),
-                        image=image,
-                        source=source_name,
-                        category=source_category,
-                        timestamp=parse_date(pub_date),
-                        date_str=pub_date,
-                        lang=source_lang,
-                    ))
-                except Exception:
-                    continue
-
-        except Exception as e:
-            log.warning(f"📰 Sync {source_name}: {type(e).__name__}: {e}")
-
     all_items.sort(key=lambda x: x.timestamp, reverse=True)
     return all_items
 
@@ -372,7 +315,7 @@ def _parse_farside_table(html: str, etf_type: str = "btc") -> Optional[Dict]:
         return None
 
     fund_cells = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', rows[1], re.DOTALL | re.IGNORECASE)
-    fund_names = [re.sub(r'<[^>]+>', '', c).strip().replace('&nbsp;', ' ').replace('&amp;', '&').strip()
+    fund_names = [re.sub(r'<[^>]+>', '', c).strip().replace('&nbsp;', ' ').replace('&amp;', '&').strip() 
                   for c in fund_cells]
     fund_names = [f for f in fund_names if f]
 

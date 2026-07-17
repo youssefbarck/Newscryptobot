@@ -187,6 +187,9 @@ sent_news_hashes = set()  # كل أخبار تم إرسالها
 # 🔧 إصلاح: علم لتأجيل الحفظ (batch save) لتقليل طلبات API
 _sent_news_dirty = False  # True = يوجد تغييرات غير محفوظة
 _last_sent_news_save = 0  # آخر وقت حفظ (timestamp)
+# 🔧 حماية: نسخة احتياطية من الهاشات في الذاكرة (تُحمّل مرة واحدة)
+_backup_hashes_loaded = False
+_backup_hashes = set()
 
 # ═══════════════════════════════════════════════════════════
 # دوال GitHub Gist للمخزن الدائم المجاني
@@ -234,52 +237,90 @@ def _gist_set(gist_id, filename, content):
         return False
 
 def load_sent_news():
-    """🆕 تحميل الأخبار المُرسلة سابقاً (من Gist أو محلي)"""
-    global sent_news_hashes
-    # محاولة من Gist أولاً
+    """🆕 تحميل الأخبار المُرسلة سابقاً — يجمع من كل المصادر المتاحة
+    لا يبدأ بـ set() فارغ أبداً لو وُجدت أي بيانات من أي مصدر.
+    """
+    global sent_news_hashes, _backup_hashes, _backup_hashes_loaded
+    all_hashes = set()
+
+    # (1) محاولة من Gist
     if _GIST_ID_SENT_NEWS:
         content = _gist_get(_GIST_ID_SENT_NEWS, "sent_news.json")
         if content:
             try:
                 data = json.loads(content)
-                sent_news_hashes = set(data.get("hashes", []))
-                log.info(f"✅ Loaded {len(sent_news_hashes)} sent news hashes from Gist")
-                return
+                hashes = set(data.get("hashes", []))
+                if hashes:
+                    all_hashes.update(hashes)
+                    log.info(f"✅ Gist: {len(hashes)} hashes")
             except Exception as e:
-                log.warning(f"gist sent_news parse err: {e}")
-    # fallback محلي
+                log.warning(f"Gist parse err: {e}")
+
+    # (2) محاولة من الملف المحلي
     try:
         with open(SENT_NEWS_FILE, "r") as f:
-            sent_news_hashes = set(json.load(f).get("hashes", []))
-        log.info(f"✅ Loaded {len(sent_news_hashes)} sent news hashes from local")
+            data = json.load(f)
+            hashes = set(data.get("hashes", []))
+            if hashes:
+                all_hashes.update(hashes)
+                log.info(f"✅ Local file: {len(hashes)} hashes")
     except Exception:
-        sent_news_hashes = set()
+        pass
+
+    # (3) محاولة من ملف commit في الريبو (GitHub Actions)
+    repo_file = os.path.join(os.getcwd(), "sent_news.json")
+    if os.path.exists(repo_file) and repo_file != SENT_NEWS_FILE:
+        try:
+            with open(repo_file, "r") as f:
+                data = json.load(f)
+                hashes = set(data.get("hashes", []))
+                if hashes:
+                    all_hashes.update(hashes)
+                    log.info(f"✅ Repo file: {len(hashes)} hashes")
+        except Exception:
+            pass
+
+    # الدمج النهائي
+    if all_hashes:
+        sent_news_hashes = all_hashes
+    else:
+        log.warning("⚠️ No sent hashes found from ANY source — starting fresh")
+
+    # حفظ نسخة احتياطية في الذاكرة
+    if not _backup_hashes_loaded:
+        _backup_hashes = set(sent_news_hashes)
+        _backup_hashes_loaded = True
+
+    log.info(f"📊 Total loaded: {len(sent_news_hashes)} sent news hashes")
 
 def save_sent_news(force=False):
-    """🆕 حفظ الأخبار المُرسلة (في Gist + محلي)
-    🔧 إصلاح: حفظ مجمّع (batch) - كل 60 ثانية أو عند الإجبار
+    """حفظ الأخبار المُرسلة — فوري في الملف المحلي، مجمّع في Gist
+    إصلاح: الملف المحلي يُحفظ فوراً دائماً (لا يُفقد لو توقف البوت)
+    Gist يُحدّث كل 60 ثانية لتقليل طلبات API.
     """
     global _sent_news_dirty, _last_sent_news_save
     _sent_news_dirty = True
     now = time.time()
-    # 🔧 إصلاح: حفظ فقط كل 60 ثانية أو عند الإجبار (force=True)
+
+    # 🔧 إصلاح حرج: حفظ فوري في الملف المحلي دائماً
+    try:
+        content = json.dumps({"hashes": list(sent_news_hashes)[-500:]})
+        with open(SENT_NEWS_FILE, "w") as f:
+            f.write(content)
+    except Exception:
+        pass
+
+    # Gist: مجمّع كل 60 ثانية أو عند الإجبار
     if not force and (now - _last_sent_news_save) < 60:
         return
     _sent_news_dirty = False
     _last_sent_news_save = now
     content = json.dumps({"hashes": list(sent_news_hashes)[-500:]})
-    # حفظ في Gist
     if _GIST_ID_SENT_NEWS:
         if _gist_set(_GIST_ID_SENT_NEWS, "sent_news.json", content):
             log.info(f"💾 Saved {len(sent_news_hashes)} hashes to Gist")
         else:
             log.warning("⚠️ Failed to save sent_news to Gist")
-    # حفظ محلي كـ cache (في /tmp الذي يوجد دائماً)
-    try:
-        with open(SENT_NEWS_FILE, "w") as f:
-            f.write(content)
-    except Exception:
-        pass
 
 # 🔔 إعدادات التنبيهات
 auto_alerts_enabled = True

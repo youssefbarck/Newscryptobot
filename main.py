@@ -42,6 +42,13 @@ if __name__ == "__main__":
         load_settings()
         load_sent_news()
 
+        # 🔧 حماية: لو لا توجد أي هاشات محفوظة = أول تشغيل أو خطأ
+        # نسجّل وقت البدء ونرفض أي خبر أقدم من هذا الوقت
+        _session_start = time.time()
+        if len(sent_news_hashes) == 0:
+            print("⚠️ No sent hashes loaded — SAFETY MODE: only news AFTER this moment will be sent")
+            print(f"   Session start: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
         # تفعيل القناة إذا كانت معطّلة في الإعدادات المحفوظة
         if CHANNEL_ID and not channel_enabled:
             channel_enabled = True
@@ -69,14 +76,21 @@ if __name__ == "__main__":
             # نفحص آخر 40 خبر
             for item in news[:40]:
                 item_ts = item.get("timestamp", 0)
-                # تجاهل الأخبار الأقدم من 3 ساعات (10800 ثانية)
-                # 30 دقيقة كانت ضيقة جداً — الأخبار من المصادر المباشرة
-                # تصل كل 30-60+ دقيقة، فكان يتم تجاوزها كلها
+
+                # 🔧 حماية timestamp: خبر بدون timestamp أو أقدم من 3 ساعات
                 if item_ts > 0 and (now - item_ts) > 10800:
                     old_news_skipped += 1
                     h_old = news_hash(item)
                     if h_old not in sent_news_hashes:
                         sent_news_hashes.add(h_old)
+                    continue
+
+                # 🔧 حماية Safety Mode: لو لا هاشات محفوظة، ارفض كل الأخبار
+                # التي timestampها قبل بدء الجلسة
+                if len(sent_news_hashes) == 0 and item_ts > 0 and item_ts < _session_start:
+                    old_news_skipped += 1
+                    h_old = news_hash(item)
+                    sent_news_hashes.add(h_old)
                     continue
 
                 news_text = (item.get("title", "") + " " + item.get("summary", "")).lower()
@@ -175,8 +189,10 @@ if __name__ == "__main__":
             print("✅ انتهى. سيتم التشغيل التالي بعد 5 دقائق.")
 
         except SystemExit:
+            save_sent_news(force=True)
             raise
         except Exception as e:
+            save_sent_news(force=True)
             print(f"❌ خطأ: {e}")
             traceback.print_exc()
             exit(0)

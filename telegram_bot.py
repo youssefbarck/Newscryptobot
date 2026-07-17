@@ -16,6 +16,7 @@ from config import (
     log, BotConfig, BotState, TELEGRAM_RATE_LIMITER, TELEGRAM_CB,
     MAX_NEWS_PER_SCAN, MAX_NEWS_AGE, SCAN_INTERVAL,
     SUMMARY_HOUR, SUMMARY_MINUTE, tz,
+    load_sent_news, save_sent_news,
 )
 from filters import NewsItem, filter_news_items, is_complete_news, time_ago
 from rss import fetch_all_news, fetch_etf_flows, session_manager
@@ -579,6 +580,12 @@ async def run_oneshot(config: BotConfig, state: BotState):
     print("🤖 Running in one-shot mode")
     print("=" * 60)
 
+    # تحميل الأخبار المُرسلة سابقاً
+    load_sent_news()
+    import config as _cfg
+    state.sent_news_hashes = _cfg.sent_news_hashes
+    print(f"📊 Loaded {len(state.sent_news_hashes)} sent hashes")
+
     # جلب الأخبار
     news = await fetch_all_news(max_concurrent=5)
     if not news:
@@ -634,6 +641,11 @@ async def run_oneshot(config: BotConfig, state: BotState):
                 print(f"  📊 ETF flows: {etf['date']}")
     except Exception as e:
         print(f"  ⚠️ ETF error: {e}")
+
+    # حفظ الأخبار المُرسلة — مزامنة مع config ثم حفظ
+    _cfg.sent_news_hashes = state.sent_news_hashes
+    save_sent_news(force=True)
+    print(f"💾 Saved {len(state.sent_news_hashes)} hashes")
 
     print("=" * 60)
     print(f"📊 Results: {len(news)} fetched, {len(filtered)} important, {alerts_sent} sent")

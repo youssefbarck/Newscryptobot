@@ -584,7 +584,7 @@ def load_sent_news():
 
 def save_sent_news(force=False):
     """حفظ الأخبار المُرسلة — فوري في الملف المحلي، مجمّع في Gist"""
-    global _sent_news_dirty, _last_sent_news_save
+    global _sent_news_dirty, _last_sent_news_save, sent_news_hashes
     _sent_news_dirty = True
     now = time.time()
 

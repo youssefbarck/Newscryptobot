@@ -21,7 +21,7 @@ from config import (
     sent_news_hashes, _cache,
 )
 from filters import classify_news, CRYPTO_CONTEXT_KEYWORDS, REJECTION_KEYWORDS
-from rss import get_all_news, deduplicate_news, news_hash
+from rss import get_all_news, deduplicate_news, news_hash, fetch_etf_flows
 from translate import translate_news_item
 from telegram_bot import (
     fmt_news_item, broadcast_alert, start_bot,
@@ -136,6 +136,40 @@ if __name__ == "__main__":
             print(f"   • أُرسلت سابقاً: {already_sent}")
             print(f"   • أخبار قديمة: {old_news_skipped}")
             print("=" * 60)
+
+            # ═══════════════════════════════════════════════
+            # 📊 منشور التدفقات اليومي (مرة واحدة يومياً)
+            # ═══════════════════════════════════════════════
+            try:
+                etf = fetch_etf_flows()
+                if etf:
+                    etf_hash = f"etf_{etf['date']}"
+                    if etf_hash not in sent_news_hashes:
+                        sent_news_hashes.add(etf_hash)
+                        # بناء الرسالة
+                        btc_sign = "+" if etf['btc_total'] >= 0 else ""
+                        eth_sign = "+" if etf['eth_total'] >= 0 else ""
+                        btc_emoji = "📈" if etf['btc_total'] >= 0 else "📉"
+                        eth_emoji = "📈" if etf['eth_total'] >= 0 else "📉"
+                        msg = f"📊 صافي تدفقات صناديق ETF — {etf['date']}\n\n"
+                        msg += f"{btc_emoji} Bitcoin ETF: {btc_sign}{etf['btc_total']:.1f} مليون $"
+                        # أهم 3 صناديق
+                        top_btc = sorted(etf['btc_funds'].items(), key=lambda x: -x[1])[:3]
+                        btc_parts = [f"{t} {v:+.1f}M" for t, v in top_btc if v != 0]
+                        if btc_parts:
+                            msg += f"  ({', '.join(btc_parts)})"
+                        msg += "\n"
+                        msg += f"{eth_emoji} Ethereum ETF: {eth_sign}{etf['eth_total']:.1f} مليون $"
+                        top_eth = sorted(etf['eth_funds'].items(), key=lambda x: -x[1])[:3]
+                        eth_parts = [f"{t} {v:+.1f}M" for t, v in top_eth if v != 0]
+                        if eth_parts:
+                            msg += f"  ({', '.join(eth_parts)})"
+                        msg += "\n\n✉️"
+                        broadcast_alert(msg, "")
+                        print(f"  📊 ETF flows sent: {etf['date']}")
+                        time.sleep(1)
+            except Exception as e:
+                print(f"  ⚠️ ETF flows error: {e}")
 
             save_sent_news(force=True)
             print("✅ انتهى. سيتم التشغيل التالي بعد 5 دقائق.")

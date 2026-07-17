@@ -288,3 +288,162 @@ def news_hash(item):
     # hash بدون مصدر — نفس الخبر من مصدرين = نفس الخبر
     hash_input = normalized[:50]
     return hashlib.md5(hash_input.encode()).hexdigest()[:12]
+
+
+# ═══════════════════════════════════════════════════════════
+# بيانات صافي تدفقات صناديق ETF (Farside Investors)
+# ═══════════════════════════════════════════════════════════
+_FARSIDE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+}
+
+
+def _parse_farside_table(html, etf_type="btc"):
+    """تحليل جدول Farside HTML واستخراج بيانات التدفقات
+
+    Args:
+        html: محتوى HTML للصفحة
+        etf_type: "btc" أو "eth"
+
+    Returns:
+        dict مع: date, total, funds (dict ticker→flow), أو None
+    """
+    tables = re.findall(r'<table[^>]*>(.*?)</table>', html, re.DOTALL | re.IGNORECASE)
+    if not tables:
+        return None
+
+    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', tables[0], re.DOTALL | re.IGNORECASE)
+    if len(rows) < 4:
+        return None
+
+    # استخراج أسماء الصناديق من الصف الثاني (index 1)
+    fund_cells = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', rows[1], re.DOTALL | re.IGNORECASE)
+    fund_names = [re.sub(r'<[^>]+>', '', c).strip().replace('&nbsp;', ' ').replace('&amp;', '&').strip() for c in fund_cells]
+    fund_names = [f for f in fund_names if f]  # إزالة الفارغة
+
+    if etf_type == "eth":
+        # ETH: صف 2 = Fee، صف 3 = Staking fee، بيانات من صف 4
+        data_start = 4
+    else:
+        # BTC: صف 2 = Fee، بيانات من صف 3
+        data_start = 3
+
+    # البحث عن آخر يوم له بيانات حقيقية (ليس '-' و ليس Average/Total)
+    latest_date = None
+    latest_flows = None
+
+    for row_idx in range(data_start, len(rows)):
+        cells = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', rows[row_idx], re.DOTALL | re.IGNORECASE)
+        clean = [re.sub(r'<[^>]+>', '', c).strip().replace('&nbsp;', ' ').replace(',', '') for c in cells]
+        if not clean:
+            continue
+
+        label = clean[0].strip()
+        # تخطي صفوف الملخص
+        if label in ('Total', 'Average', 'Maximum', 'Minimum', 'Fee', 'Staking fee'):
+            continue
+
+        # تحقق: هل التاريخ صالح وهناك بيانات رقمية؟
+        date_match = re.match(r'(\d{1,2})\s+(\w{3})\s+(\d{4})', label)
+        if not date_match:
+            continue
+
+        values = clean[1:]  # كل شيء بعد التاريخ
+        # تحقق أن آخر قيمة (Total) رقمية وليست '-'
+        total_str = values[-1].strip() if values else ''
+        if total_str == '-' or total_str == '0.0' or not total_str:
+            # يوم بدون بيانات بعد — نستخدم اليوم السابق
+            break
+
+        latest_date = label
+        latest_flows = values
+        # لا نكسر — نكمل للبحث عن يوم أحدث
+
+    if not latest_date or not latest_flows:
+        return None
+
+    # بناء قاموس الصناديق
+    funds = {}
+    for i, name in enumerate(fund_names):
+        if i < len(latest_flows):
+            val_str = latest_flows[i].strip()
+            if val_str and val_str != '-':
+                try:
+                    # الأرقام السالبة بين أقواس: (300.4) = -300.4
+                    is_negative = val_str.startswith('(')
+                    val_str = val_str.strip('()')
+                    val = float(val_str)
+                    funds[name.strip()] = -val if is_negative else val
+                except ValueError:
+                    funds[name.strip()] = 0.0
+
+    # صافي التدفق الكلي
+    total_str = latest_flows[-1].strip() if latest_flows else '0'
+    try:
+        is_negative = total_str.startswith('(')
+        total_str = total_str.strip('()')
+        net_total = float(total_str)
+        if is_negative:
+            net_total = -net_total
+    except ValueError:
+        net_total = 0.0
+
+    return {
+        "date": latest_date,
+        "total": net_total,
+        "funds": funds,
+    }
+
+
+def fetch_etf_flows():
+    """جلب بيانات صافي تدفقات صناديق Bitcoin و Ethereum ETF من Farside Investors
+
+    Returns:
+        dict: {
+            "date": "16 Jul 2026",
+            "btc_total": 79.1,
+            "eth_total": -45.2,
+            "btc_funds": {"IBIT": 33.4, "FBTC": 30.7, ...},
+            "eth_funds": {"ETHA": 10.0, ...},
+        }
+        أو None إذا فشل الجلب
+    """
+    result = {
+        "date": None,
+        "btc_total": 0.0,
+        "eth_total": 0.0,
+        "btc_funds": {},
+        "eth_funds": {},
+    }
+
+    try:
+        # جلب BTC ETF
+        r_btc = requests.get("https://farside.co.uk/btc/", timeout=15, headers=_FARSIDE_HEADERS)
+        r_btc.raise_for_status()
+        btc_data = _parse_farside_table(r_btc.text, etf_type="btc")
+        if btc_data:
+            result["date"] = btc_data["date"]
+            result["btc_total"] = btc_data["total"]
+            result["btc_funds"] = btc_data["funds"]
+            log.info(f"   ✅ Farside BTC ETF: {btc_data['date']} → net {btc_data['total']}M")
+    except Exception as e:
+        log.warning(f"   ⚠️ Farside BTC fetch failed: {e}")
+
+    try:
+        # جلب ETH ETF
+        r_eth = requests.get("https://farside.co.uk/eth/", timeout=15, headers=_FARSIDE_HEADERS)
+        r_eth.raise_for_status()
+        eth_data = _parse_farside_table(r_eth.text, etf_type="eth")
+        if eth_data:
+            if eth_data["date"] and (not result["date"] or eth_data["date"] >= result["date"]):
+                result["date"] = eth_data["date"]
+            result["eth_total"] = eth_data["total"]
+            result["eth_funds"] = eth_data["funds"]
+            log.info(f"   ✅ Farside ETH ETF: {eth_data['date']} → net {eth_data['total']}M")
+    except Exception as e:
+        log.warning(f"   ⚠️ Farside ETH fetch failed: {e}")
+
+    if not result["date"]:
+        return None
+
+    return result

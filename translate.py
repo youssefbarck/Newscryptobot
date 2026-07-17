@@ -911,19 +911,66 @@ def _is_arabic_quality_good(text):
     return True
 
 
+def _is_translation_complete(text):
+    """فحص اكتمال الترجمة — يرفض النصوص المقطوعة
+    يعيد True إذا كانت الترجمة مكتملة، False إذا كانت مقطوعة.
+    """
+    if not text:
+        return False
+    trimmed = text.strip()
+
+    # علامات نهاية غير مكتملة (حروف جر وأدوات عربية + رموز)
+    BAD_ENDINGS = (
+        "على", "في", "من", "إلى", "عن", "مع",
+        "بسبب", "بعد", "قبل", "حول", "حتى", "خلال",
+        "بين", "ضد", "عبر", "نحو", "لدى",
+        "وذلك على", "وذلك في", "وذلك من",
+        "✉️", "...", "،", ":",
+    )
+    if trimmed.endswith(BAD_ENDINGS):
+        log.info(f"   ⏭️ Translation incomplete — ends with: '{trimmed[-20:]}'")
+        return False
+
+    # نصوص طويلة (250+ حرف) بدون علامة نهاية جملة → غالباً مقطوعة
+    if len(trimmed) >= 250 and not re.search(r'[.!؟?!]$', trimmed):
+        log.info(f"   ⏭️ Translation incomplete — no ending punctuation (len={len(trimmed)})")
+        return False
+
+    return True
+
+
+def _truncate_at_sentence(text, max_len=1200):
+    """قص النص عند نهاية جملة بدلاً من قص عشوائي
+    يبحث عن آخر علامة نهاية جملة قبل max_len ويقص عندها.
+    لو لم يجد، يبحث عن آخر مسافة.
+    """
+    if len(text) <= max_len:
+        return text
+    chunk = text[:max_len]
+    # البحث عن آخر نقطة/علامة نهاية جملة
+    for punct in ('. ', '.\n', '! ', '? ', '। '):
+        last = chunk.rfind(punct)
+        if last > max_len * 0.5:  # لا نقص لأقل من النصف
+            return chunk[:last + 1]
+    # بديل: آخر مسافة قبل النهاية
+    last_space = chunk.rfind(' ')
+    if last_space > max_len * 0.5:
+        return chunk[:last_space]
+    return chunk
+
+
 def translate_to_arabic(text, force=False):
     """ترجمة النص للعربية - نظام 4 طبقات LLM احترافية:
     1️⃣ Gemini (Flash + Pro) - إعادة صياغة
     2️⃣ Groq (Llama 3.3 70B) - إعادة صياغة
     3️⃣ OpenRouter (Qwen 2.5 72B) - إعادة صياغة
     4️⃣ تخطي الخبر (لا إرسال - لا Google Translate!)
-    تحقق ذكي من جودة الناتج العربي - يرفض النصوص المكسورة
+    تحقق ذكي من جودة الناتج العربي - يرفض النصوص المكسورة والمقطوعة
     """
     if not text or len(text) < 3:
         return text
-    # قص النص الطويل جداً فقط (1200 حرف كحد أقصى للحفاظ على أسماء العملات)
-    if len(text) > 1200:
-        text = text[:1200]
+    # قص النص الطويل عند نهاية جملة (ليس عند عدد أحرف ثابت)
+    text = _truncate_at_sentence(text, max_len=1200)
     cache_key = hashlib.md5(text.encode()).hexdigest()[:12]
     if not force and cache_key in _translation_cache:
         return _translation_cache[cache_key]
@@ -941,7 +988,7 @@ def translate_to_arabic(text, force=False):
     translated = _translate_with_gemini(text)
     if translated:
         translated = _cleanup_translation(translated)
-        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
+        if translated and len(translated) > 3 and _is_arabic_quality_good(translated) and _is_translation_complete(translated):
             if has_entities:
                 ok, missing = _verify_entities(text, translated)
                 if not ok:
@@ -949,7 +996,7 @@ def translate_to_arabic(text, force=False):
                     translated = _translate_with_gemini(text, missing_names=missing)
                     if translated:
                         translated = _cleanup_translation(translated)
-                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
+                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated) and _is_translation_complete(translated):
                             ok2, missing2 = _verify_entities(text, translated)
                             if ok2:
                                 _translation_cache[cache_key] = translated
@@ -972,7 +1019,7 @@ def translate_to_arabic(text, force=False):
     translated = _translate_with_groq(text)
     if translated:
         translated = _cleanup_translation(translated)
-        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
+        if translated and len(translated) > 3 and _is_arabic_quality_good(translated) and _is_translation_complete(translated):
             if has_entities:
                 ok, missing = _verify_entities(text, translated)
                 if not ok:
@@ -980,7 +1027,7 @@ def translate_to_arabic(text, force=False):
                     translated = _translate_with_groq(text, missing_names=missing)
                     if translated:
                         translated = _cleanup_translation(translated)
-                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
+                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated) and _is_translation_complete(translated):
                             ok2, missing2 = _verify_entities(text, translated)
                             if ok2:
                                 _translation_cache[cache_key] = translated
@@ -1003,7 +1050,7 @@ def translate_to_arabic(text, force=False):
     translated = _translate_with_openrouter(text)
     if translated:
         translated = _cleanup_translation(translated)
-        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
+        if translated and len(translated) > 3 and _is_arabic_quality_good(translated) and _is_translation_complete(translated):
             if has_entities:
                 ok, missing = _verify_entities(text, translated)
                 if not ok:
@@ -1011,7 +1058,7 @@ def translate_to_arabic(text, force=False):
                     translated = _translate_with_openrouter(text, missing_names=missing)
                     if translated:
                         translated = _cleanup_translation(translated)
-                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
+                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated) and _is_translation_complete(translated):
                             ok2, missing2 = _verify_entities(text, translated)
                             if ok2:
                                 log.info("   ✅ OpenRouter retry recovered all names")

@@ -18,7 +18,7 @@ from config import (
 from filters import (
     classify_news, get_coin_keywords, time_ago, is_category_allowed,
     CRYPTO_CONTEXT_KEYWORDS, REJECTION_KEYWORDS,
-    AR_CRITICAL_KEYWORDS, AR_REJECTION_KEYWORDS,
+    AR_CRITICAL_KEYWORDS, AR_REJECTION_KEYWORDS, is_complete_news,
 )
 from rss import (
     get_all_news, deduplicate_news, news_hash, clean_html,
@@ -28,6 +28,7 @@ from rss import (
 from translate import (
     translate_to_arabic, translate_news_item,
     translate_source_name, translate_coin_name,
+    _is_translation_complete, _truncate_at_sentence,
 )
 
 
@@ -75,26 +76,33 @@ def fmt_news_item(item, show_summary=True, translate=True, show_header=True):
     if show_summary:
         if summary_ar and translate:
             clean_summary = summary_ar.strip()
-            # 🆕 إزالة أي نقاط معلقة في النهاية (من قص الكلمات)
-            clean_summary = clean_summary.rstrip("…")
-            clean_summary = clean_summary.rstrip(" ")
-            # 🆕🆕 لا نقص - نعرض الملخص كاملاً (Gemini يكتبه مختصراً)
-            # فقط لو كان طويلاً جداً (> 800 حرف)، نقص عند آخر نقطة كاملة
-            if len(clean_summary) > 800:
-                cut_at = clean_summary[:800].rfind(".")
-                if cut_at > 200:
-                    clean_summary = clean_summary[:cut_at + 1]
-                else:
-                    # لو ما فيش نقطة، نقص عند آخر مسافة
-                    cut_at = clean_summary[:800].rfind(" ")
+            # 🆕 فحص اكتمال الملخص المترجم — رفض النصوص المقطوعة
+            if not _is_translation_complete(clean_summary):
+                log.info(f"   ⏭️ Summary incomplete — skipping: '{clean_summary[-30:]}'")
+                summary_ar = ""  # تجاهل الملخص المقطوع
+                clean_summary = ""
+            else:
+                clean_summary = clean_summary.rstrip("…")
+                clean_summary = clean_summary.rstrip(" ")
+                # 🆕🆕 لا نقص - نعرض الملخص كاملاً (Gemini يكتبه مختصراً)
+                # فقط لو كان طويلاً جداً (> 800 حرف)، نقص عند آخر نقطة كاملة
+                if len(clean_summary) > 800:
+                    cut_at = clean_summary[:800].rfind(".")
                     if cut_at > 200:
-                        clean_summary = clean_summary[:cut_at] + "..."
+                        clean_summary = clean_summary[:cut_at + 1]
                     else:
-                        clean_summary = clean_summary[:800] + "..."
+                        # لو ما فيش نقطة، نقص عند آخر مسافة
+                        cut_at = clean_summary[:800].rfind(" ")
+                        if cut_at > 200:
+                            clean_summary = clean_summary[:cut_at] + "..."
+                        else:
+                            clean_summary = clean_summary[:800] + "..."
             if clean_summary:
                 msg += f"\n{clean_summary}\n"
         elif summary:
-            translated_summary = translate_to_arabic(summary[:1500])
+            # قص الملخص عند نهاية جملة (ليس عند عدد أحرف ثابت)
+            trunc_summary = _truncate_at_sentence(summary, max_len=1500)
+            translated_summary = translate_to_arabic(trunc_summary)
             if translated_summary and translated_summary != summary:
                 clean_summary = translated_summary.strip()
                 clean_summary = clean_summary.rstrip("…")
@@ -354,6 +362,11 @@ def scan_news_loop():
                 last_alerts_hashes[h] = now
                 # ترجمة الخبر قبل الإرسال
                 translate_news_item(item)
+                # 🔧 فحص اكتمال الخبر المترجم (تجنب أخبار مقطوعة)
+                title_ar = item.get("title_ar", "")
+                if not is_complete_news(title_ar):
+                    log.info(f"   ⏭️ Skipping (incomplete): {item.get('title', '')[:60]}")
+                    continue
                 # إرسال للجميع - التنسيق المبسط
                 msg = fmt_news_item(item, show_summary=True, translate=True)
                 # 🆕🆕 لو fmt_news_item رجع None، معناه الترجمة فشلت → تخطي الخبر

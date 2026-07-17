@@ -988,7 +988,7 @@ def translate_to_arabic(text, force=False):
     translated = _translate_with_gemini(text)
     if translated:
         translated = _cleanup_translation(translated)
-        if translated and len(translated) > 3 and _is_arabic_quality_good(translated) and _is_translation_complete(translated):
+        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
             if has_entities:
                 ok, missing = _verify_entities(text, translated)
                 if not ok:
@@ -996,7 +996,7 @@ def translate_to_arabic(text, force=False):
                     translated = _translate_with_gemini(text, missing_names=missing)
                     if translated:
                         translated = _cleanup_translation(translated)
-                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated) and _is_translation_complete(translated):
+                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
                             ok2, missing2 = _verify_entities(text, translated)
                             if ok2:
                                 _translation_cache[cache_key] = translated
@@ -1019,7 +1019,7 @@ def translate_to_arabic(text, force=False):
     translated = _translate_with_groq(text)
     if translated:
         translated = _cleanup_translation(translated)
-        if translated and len(translated) > 3 and _is_arabic_quality_good(translated) and _is_translation_complete(translated):
+        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
             if has_entities:
                 ok, missing = _verify_entities(text, translated)
                 if not ok:
@@ -1027,7 +1027,7 @@ def translate_to_arabic(text, force=False):
                     translated = _translate_with_groq(text, missing_names=missing)
                     if translated:
                         translated = _cleanup_translation(translated)
-                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated) and _is_translation_complete(translated):
+                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
                             ok2, missing2 = _verify_entities(text, translated)
                             if ok2:
                                 _translation_cache[cache_key] = translated
@@ -1050,7 +1050,7 @@ def translate_to_arabic(text, force=False):
     translated = _translate_with_openrouter(text)
     if translated:
         translated = _cleanup_translation(translated)
-        if translated and len(translated) > 3 and _is_arabic_quality_good(translated) and _is_translation_complete(translated):
+        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
             if has_entities:
                 ok, missing = _verify_entities(text, translated)
                 if not ok:
@@ -1058,7 +1058,7 @@ def translate_to_arabic(text, force=False):
                     translated = _translate_with_openrouter(text, missing_names=missing)
                     if translated:
                         translated = _cleanup_translation(translated)
-                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated) and _is_translation_complete(translated):
+                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
                             ok2, missing2 = _verify_entities(text, translated)
                             if ok2:
                                 log.info("   ✅ OpenRouter retry recovered all names")

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import aiohttp
 
-from config_v2 import log, BotConfig
+from config import log, BotConfig
 
 
 # ═══════════════════════════════════════════════════════════

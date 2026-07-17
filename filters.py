@@ -9,7 +9,7 @@ from typing import List, Dict, Set, Tuple, Optional
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
-from config_v2 import (
+from config import (
     log, KEYWORDS_CONFIG, CRYPTO_CONTEXT_KEYWORDS, REJECTION_KEYWORDS,
     AR_CRITICAL_KEYWORDS, AR_REJECTION_KEYWORDS, COIN_MAP,
 )

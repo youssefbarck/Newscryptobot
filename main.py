@@ -15,8 +15,8 @@
 
 import os, asyncio
 
-from config_v2 import config, state, log
-from telegram_bot_v2 import run_bot, run_oneshot
+from config import config, state, log
+from telegram_bot import run_bot, run_oneshot
 
 
 async def main():

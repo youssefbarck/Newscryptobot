@@ -12,14 +12,14 @@ from dataclasses import dataclass, field
 import aiohttp
 from aiohttp import ClientTimeout
 
-from config_v2 import (
+from config import (
     log, BotConfig, BotState, TELEGRAM_RATE_LIMITER, TELEGRAM_CB,
     MAX_NEWS_PER_SCAN, MAX_NEWS_AGE, SCAN_INTERVAL,
     SUMMARY_HOUR, SUMMARY_MINUTE, tz,
 )
-from filters_v2 import NewsItem, filter_news_items, is_complete_news, time_ago
-from rss_v2 import fetch_all_news, fetch_etf_flows, session_manager
-from translate_v2 import TranslationManager, translate_source_name
+from filters import NewsItem, filter_news_items, is_complete_news, time_ago
+from rss import fetch_all_news, fetch_etf_flows, session_manager
+from translate import TranslationManager, translate_source_name
 
 
 # ═══════════════════════════════════════════════════════════

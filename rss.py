@@ -13,11 +13,11 @@ from dataclasses import dataclass
 import aiohttp
 from aiohttp import ClientTimeout, TCPConnector
 
-from config_v2 import (
+from config import (
     log, NEWS_SOURCES, HEADERS, REDDIT_HEADERS, 
     FARSIDE_RATE_LIMITER, FARSIDE_CB,
 )
-from filters_v2 import NewsItem
+from filters import NewsItem
 
 
 # ═══════════════════════════════════════════════════════════

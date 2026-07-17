@@ -531,41 +531,33 @@ def _init_gemini():
 
 
 # ═══════════════════════════════════════════════════════════
-# برومبت الترجمة الموحد (يُستخدم في Gemini + Groq + OpenRouter)
+# برومبت الترجمة الموحد (يُستخدم في Gemini)
 # ═══════════════════════════════════════════════════════════
-_TRANSLATION_SYSTEM_PROMPT = """أنت محرر أخبار متخصص في العملات الرقمية.
+_TRANSLATION_SYSTEM_PROMPT = """أنت محرر صحفي عربي محترف ومتخصص في أخبار العملات الرقمية والأسواق المالية.
 
-مهمتك هي إعادة صياغة الخبر باللغة العربية الفصحى بأسلوب صحفي احترافي، وليس ترجمته حرفياً.
+مهمتك ليست الترجمة الحرفية، بل إعادة صياغة النص المترجم ليصبح خبرًا عربيًا طبيعيًا وسلسًا مع الحفاظ الكامل على المعنى.
 
-قواعد إلزامية:
+اتبع القواعد التالية بدقة:
 
-1. لا تحذف أي معلومة مهمة موجودة في النص الأصلي.
-2. لا تضف أي معلومة أو تحليل أو توقع غير موجود في النص.
-3. لا تستخدم عبارات مثل "المشروع" أو "الشركة" أو "المنصة" أو "العملة" إذا كان الاسم الحقيقي موجوداً في النص.
-4. يجب الحفاظ على جميع أسماء:
-   - العملات الرقمية.
-   - الشركات.
-   - البروتوكولات.
-   - البلوكتشينات.
-   - المؤسسات.
-   - الشخصيات.
-   - صناديق ETF.
-   - الجهات التنظيمية.
-5. اترك جميع الأسماء الرسمية باللغة الإنجليزية كما هي دون ترجمة.
-6. لا تختصر الخبر بطريقة تؤدي إلى حذف اسم عملة أو شركة أو شخصية أو رقم.
-7. حافظ على جميع الأرقام والنسب المئوية والأسعار والتواريخ والكميات كما وردت.
-8. إذا ذكر النص أكثر من عملة أو شركة فيجب ذكرها جميعاً.
-9. لا تكرر الكلمات.
-10. لا تستخدم مقدمات أو تعليقات أو عبارات مثل:
-   - إليك الخبر
-   - الترجمة
-   - بالطبع
-   - حسب طلبك
-11. تجاهل اسم الموقع أو المصدر إذا كان موجوداً في نهاية العنوان.
-12. أعد النص العربي فقط.
-13. إذا كان النص ناقصاً فلا تخترع تكملته.
-14. تأكد أن كل جملة مكتملة لغوياً ولا تنتهي في منتصف الفكرة.
-15. استخدم أسلوب وكالات الأنباء العربية الاحترافي."""
+- لا تضف أي معلومات غير موجودة في النص الأصلي.
+- لا تحذف أي معلومة مهمة.
+- استخدم العربية الفصحى السهلة والواضحة.
+- تجنب الأسلوب الآلي أو الترجمة الحرفية.
+- استخدم المصطلحات العربية الشائعة في مجال العملات الرقمية.
+- احتفظ بأسماء العملات والرموز كما هي (Bitcoin, Ethereum, BTC, ETH...).
+- اجعل العنوان جذابًا ومختصرًا (لا يتجاوز 90 حرفًا).
+- اجعل متن الخبر بين 50 و120 كلمة.
+- استبدل العبارات الحرفية بصياغات صحفية طبيعية.
+- إذا احتوى النص على أرقام أو نسب مئوية أو أسعار أو تواريخ، فلا تغيرها إطلاقًا.
+- لا تضف مقدمات أو تعليقات أو آراء أو تحذيرات.
+- لا تستخدم عبارات مثل "وفقًا للنص" أو "تشير الترجمة".
+- أخرج النتيجة بهذا التنسيق فقط:
+
+العنوان:
+...
+
+الخبر:
+..."""
 
 # ═══════════════════════════════════════════════════════════
 # برومبت تقرير تدفقات صناديق ETF اليومية
@@ -755,15 +747,120 @@ def _build_user_prompt(text, missing_names=None):
     return prompt
 
 
+def _translate_with_google(text):
+    """بديل مجاني: Google Translate عبر endpoint غير رسمي
+    لا يحتاج مفتاح API ولا ينفد — لكنه ترجمة حرفية وليست صياغة صحفية
+    Returns: النص المترجم أو None
+    """
+    try:
+        # حماية الأسماء الإنجليزية المهمة قبل الترجمة
+        # نستبدلها بعلامات مؤقتة لمنع ترجمتها
+        protected = {}
+        counter = [0]
+        # أسماء طويلة أولاً (لتجنب استبدال جزئي)
+        protected_names = sorted(_CRITICAL_NAMES, key=len, reverse=True)
+
+        def protect_match(m):
+            key = f"__PROT{counter[0]}__"
+            counter[0] += 1
+            protected[key] = m.group(0)
+            return key
+
+        # حماية الأسماء في النص (كلمات كاملة فقط، case-insensitive)
+        text_protected = text
+        for name in protected_names:
+            pattern = re.compile(r'\b' + re.escape(name) + r'\b', re.IGNORECASE)
+            text_protected = pattern.sub(protect_match, text_protected)
+
+        # استدعاء Google Translate
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "en",
+            "tl": "ar",
+            "dt": "t",
+            "q": text_protected,
+        }
+        r = requests.get(url, params=params, timeout=15)
+        if r.status_code != 200:
+            log.info(f"   ⏭️ Google Translate failed: HTTP {r.status_code}")
+            return None
+
+        data = r.json()
+        # Google Translate يعيد قائمة متداخلة: [[["translated", "original", ...], ...], ...]
+        translated_parts = []
+        if data and isinstance(data, list) and len(data) > 0:
+            for item in data[0]:
+                if isinstance(item, list) and len(item) > 0:
+                    translated_parts.append(item[0])
+        result = "".join(translated_parts).strip()
+
+        if not result or len(result) < 3:
+            return None
+
+        # استعادة الأسماء المحمية
+        for key, original in protected.items():
+            result = result.replace(key, original)
+
+        log.info("   ✅ Google Translate succeeded")
+        return result
+
+    except Exception as e:
+        log.warning(f"Google Translate err: {e}")
+        return None
+
+
+def _parse_title_body(gemini_output):
+    """استخراج العنوان والخبر من نتيجة Gemini
+    Gemini يُخرج التنسيق:
+        العنوان:
+        ...
+
+        الخبر:
+        ...
+    Returns: (title, body) أو (النص كاملاً, "") لو لم يجد التنسيق
+    """
+    if not gemini_output:
+        return None, None
+
+    text = gemini_output.strip()
+
+    # البحث عن "العنوان:" متبوعاً بمحتوى
+    title = None
+    body = None
+
+    # نمط 1: العنوان: ... \n\n الخبر: ...
+    m = re.split(r'\n\s*الخبر\s*:\s*', text, maxsplit=1)
+    if len(m) == 2:
+        header_part = m[0].strip()
+        body = m[1].strip()
+        # استخراج العنوان من الجزء الأول
+        m2 = re.split(r'\n\s*العنوان\s*:\s*', header_part, maxsplit=1)
+        if len(m2) == 2:
+            title = m2[1].strip()
+        else:
+            title = header_part
+
+    if title and body:
+        # تنظيف
+        title = title.strip(" .,،:؛-")
+        body = body.strip(" .,،:؛-")
+        if len(title) > 3 and len(body) > 10:
+            return title, body
+
+    return text, ""
+
+
 def _translate_with_gemini(text, missing_names=None):
     """إعادة صياغة الخبر بالعربية - تجربة كل نماذج Gemini المتاحة
+    Returns: (title_ar, body_ar) أو (None, None)
     missing_names: أسماء مفقودة من محاولة سابقة (لإعادة المحاولة مع تذكير)
     """
     if _gemini_init_failed:
-        return None
+        return None, None
     _init_gemini()
     if not _gemini_models:
-        return None
+        return None, None
     user_prompt = _build_user_prompt(text, missing_names)
     prompt = _TRANSLATION_SYSTEM_PROMPT + "\n\n" + user_prompt
     # تجربة كل النماذج المتاحة حتى ينجح واحد
@@ -774,7 +871,7 @@ def _translate_with_gemini(text, missing_names=None):
                 generation_config={
                     "temperature": 0.2 if missing_names else 0.3,
                     "top_p": 0.8, "top_k": 40,
-                    "max_output_tokens": 800,
+                    "max_output_tokens": 1000,
                 }
             )
             if response and response.text:
@@ -783,12 +880,19 @@ def _translate_with_gemini(text, missing_names=None):
                     if result.startswith(prefix):
                         result = result[len(prefix):].strip()
                 if len(result) > 5:
-                    log.info(f"   ✅ Gemini model #{i+1} succeeded")
-                    return result
+                    # استخراج العنوان والخبر من تنسيق Gemini
+                    title, body = _parse_title_body(result)
+                    if title:
+                        log.info(f"   ✅ Gemini model #{i+1} succeeded (title+body)")
+                        return title, body
+                    else:
+                        # لم يلتزم بالتنسيق لكن النص موجود
+                        log.info(f"   ✅ Gemini model #{i+1} succeeded (flat)")
+                        return result, ""
         except Exception as e:
             log.info(f"   ⏭️ Gemini model #{i+1} failed: {str(e)[:80]}")
             continue
-    return None
+    return None, None
 
 
 def _translate_with_groq(text, missing_names=None):
@@ -982,12 +1086,12 @@ def _truncate_at_sentence(text, max_len=1200):
 
 
 def translate_to_arabic(text, force=False):
-    """ترجمة النص للعربية - نظام 4 طبقات LLM احترافية:
-    1️⃣ Gemini (Flash + Pro) - إعادة صياغة
-    2️⃣ Groq (Llama 3.3 70B) - إعادة صياغة
-    3️⃣ OpenRouter (Qwen 2.5 72B) - إعادة صياغة
-    4️⃣ تخطي الخبر (لا إرسال - لا Google Translate!)
-    تحقق ذكي من جودة الناتج العربي - يرفض النصوص المكسورة والمقطوعة
+    """ترجمة النص للعربية - نظام طبقتين:
+    1️⃣ Gemini (ترجمة + صياغة صحفية)
+    2️⃣ Google Translate (ترجمة حرفية مجانية — بديل موثوق)
+
+    Gemini يُخرج (title, body) بفضل البرومبت.
+    Google Translate يُرجع نصاً مسطحاً (title=النص, body="").
     """
     if not text or len(text) < 3:
         return text
@@ -1003,103 +1107,65 @@ def translate_to_arabic(text, force=False):
     if has_entities:
         log.info(f"   📋 Entities found: {entities}")
 
-    # المسار: كل طبقة = محاولة أولى + إعادة محاولة مع تذكير الأسماء المفقودة
-    _MAX_RETRIES_PER_LAYER = 1  # محاولة إعادة واحدة لكل طبقة
-
-    # 1️⃣ الطبقة 1: Gemini
-    translated = _translate_with_gemini(text)
-    if translated:
-        translated = _cleanup_translation(translated)
-        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
+    # ═══ 1️⃣ الطبقة 1: Gemini (ترجمة + صياغة صحفية) ═══
+    title_ar, body_ar = _translate_with_gemini(text)
+    if title_ar:
+        title_ar = _cleanup_translation(title_ar)
+        body_ar = _cleanup_translation(body_ar) if body_ar else ""
+        if title_ar and len(title_ar) > 3 and _is_arabic_quality_good(title_ar):
             if has_entities:
-                ok, missing = _verify_entities(text, translated)
+                check_text = title_ar + " " + body_ar
+                ok, missing = _verify_entities(text, check_text)
                 if not ok:
                     log.warning(f"   🔄 Gemini retry — missing: {missing}")
-                    translated = _translate_with_gemini(text, missing_names=missing)
-                    if translated:
-                        translated = _cleanup_translation(translated)
-                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
-                            ok2, missing2 = _verify_entities(text, translated)
+                    title_ar, body_ar = _translate_with_gemini(text, missing_names=missing)
+                    if title_ar:
+                        title_ar = _cleanup_translation(title_ar)
+                        body_ar = _cleanup_translation(body_ar) if body_ar else ""
+                        if title_ar and len(title_ar) > 3 and _is_arabic_quality_good(title_ar):
+                            check2 = title_ar + " " + body_ar
+                            ok2, missing2 = _verify_entities(text, check2)
                             if ok2:
-                                _translation_cache[cache_key] = translated
-                                return translated
+                                # نحفظ العنوان (أو العنوان+الخبر معاً)
+                                final = title_ar if not body_ar else title_ar + "\n" + body_ar
+                                _translation_cache[cache_key] = final
+                                return final
                             else:
-                                log.warning(f"   ⚠️ Gemini retry still missing: {missing2}")
+                                log.warning(f"   ⚠️ Gemini retry still missing: {missing2} — accepting")
+                                final = title_ar if not body_ar else title_ar + "\n" + body_ar
+                                _translation_cache[cache_key] = final
+                                return final
                         else:
                             log.info("   ⏭️ Gemini retry quality low")
                 else:
-                    _translation_cache[cache_key] = translated
-                    return translated
+                    final = title_ar if not body_ar else title_ar + "\n" + body_ar
+                    _translation_cache[cache_key] = final
+                    return final
             else:
-                _translation_cache[cache_key] = translated
-                return translated
+                final = title_ar if not body_ar else title_ar + "\n" + body_ar
+                _translation_cache[cache_key] = final
+                return final
         else:
             log.info("   ⏭️ Gemini output quality too low")
 
-    # 2️⃣ الطبقة 2: Groq (Llama 3.3 70B)
-    log.info("   🔄 Trying Groq (Llama 3.3 70B)...")
-    translated = _translate_with_groq(text)
+    # ═══ 2️⃣ الطبقة 2: Google Translate (مجاني، بدون مفتاح) ═══
+    log.info("   🔄 Falling back to Google Translate...")
+    translated = _translate_with_google(text)
     if translated:
         translated = _cleanup_translation(translated)
-        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
-            if has_entities:
-                ok, missing = _verify_entities(text, translated)
-                if not ok:
-                    log.warning(f"   🔄 Groq retry — missing: {missing}")
-                    translated = _translate_with_groq(text, missing_names=missing)
-                    if translated:
-                        translated = _cleanup_translation(translated)
-                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
-                            ok2, missing2 = _verify_entities(text, translated)
-                            if ok2:
-                                _translation_cache[cache_key] = translated
-                                return translated
-                            else:
-                                log.warning(f"   ⚠️ Groq retry still missing: {missing2}")
-                        else:
-                            log.info("   ⏭️ Groq retry quality low")
-                else:
-                    _translation_cache[cache_key] = translated
-                    return translated
+        if translated and len(translated) > 3:
+            # فحص مخفف لـ Google Translate — نقبل حتى لو كان فيه كلمات إنجليزية
+            # المهم أن يكون فيه نص عربي واضح
+            arabic_chars = sum(1 for c in translated if '\u0600' <= c <= '\u06FF')
+            if len(translated) > 20 and arabic_chars / len(translated) < 0.15:
+                log.info("   ⏭️ Google Translate output has almost no Arabic")
             else:
+                log.info("   ✅ Google Translate accepted")
                 _translation_cache[cache_key] = translated
                 return translated
-        else:
-            log.info("   ⏭️ Groq output quality too low")
 
-    # 3️⃣ الطبقة 3: OpenRouter (Qwen 2.5 72B)
-    log.info("   🔄 Trying OpenRouter (Qwen 2.5 72B)...")
-    translated = _translate_with_openrouter(text)
-    if translated:
-        translated = _cleanup_translation(translated)
-        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
-            if has_entities:
-                ok, missing = _verify_entities(text, translated)
-                if not ok:
-                    log.warning(f"   🔄 OpenRouter retry — missing: {missing}")
-                    translated = _translate_with_openrouter(text, missing_names=missing)
-                    if translated:
-                        translated = _cleanup_translation(translated)
-                        if translated and len(translated) > 3 and _is_arabic_quality_good(translated):
-                            ok2, missing2 = _verify_entities(text, translated)
-                            if ok2:
-                                log.info("   ✅ OpenRouter retry recovered all names")
-                            else:
-                                log.warning(f"   ⚠️ OpenRouter retry still missing: {missing2} — accepting")
-                        # نقبل النتيجة في آخر طبقة حتى مع أسماء مفقودة
-                        _translation_cache[cache_key] = translated
-                        return translated
-                else:
-                    _translation_cache[cache_key] = translated
-                    return translated
-            else:
-                _translation_cache[cache_key] = translated
-                return translated
-        else:
-            log.info("   ⏭️ OpenRouter output quality too low")
-
-    # 4️⃣ الطبقة 4: تخطي الخبر
-    log.warning("   ❌ All LLM translation methods failed - skipping news")
+    # ❌ فشلت كل الطبقات
+    log.warning("   ❌ All translation methods failed - skipping news")
     return None
 
 

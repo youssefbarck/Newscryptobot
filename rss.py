@@ -134,7 +134,7 @@ def extract_image_from_html(html_text: str) -> str:
     if not html_text:
         return ""
     # img src
-    match = re.search(r'<img[^>]+src=["']([^"']+)["']', html_text)
+    match = re.search(r"""<img[^>]+src=['"]([^'"]+)['"]""", html_text)
     if match:
         return match.group(1)
     return ""

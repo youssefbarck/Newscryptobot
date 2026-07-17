@@ -6,7 +6,6 @@
 
 import os, re, hashlib, time, asyncio
 from typing import Optional, Tuple, Dict, List
-from dataclasses import dataclass
 
 import aiohttp
 
@@ -14,7 +13,7 @@ from config import log, BotConfig
 
 
 # ═══════════════════════════════════════════════════════════
-# 💾 Translation Cache (ذاكرة دائمة + ذاكرة مؤقتة)
+# 💾 Translation Cache (ذاكرة مؤقتة)
 # ═══════════════════════════════════════════════════════════
 class TranslationCache:
     """Cache ذكي للترجمة مع TTL"""
@@ -148,7 +147,7 @@ def _protect_entities(text: str) -> Tuple[str, Dict[str, Tuple[str, Optional[str
         pattern = re.compile(re.escape(term), re.IGNORECASE)
         match = pattern.search(protected)
         if match:
-            placeholder = f"§§{counter:03d}§§"
+            placeholder = f"\u00a7\u00a7{counter:03d}\u00a7\u00a7"
             protected = pattern.sub(placeholder, protected, count=1)
             restore_map[placeholder] = (match.group(0), trans)
             counter += 1
@@ -173,11 +172,11 @@ def _restore_entities(text: str, restore_map: Dict) -> str:
         num = int(placeholder[2:5])
         patterns = [
             re.escape(placeholder),
-            re.escape(f"§§{num}§§"),
-            re.escape(f"§ {num} §"),
+            re.escape(f"\u00a7\u00a7{num}\u00a7\u00a7"),
+            re.escape(f"\u00a7 {num} \u00a7"),
             re.escape(f"({num})"),
             re.escape(f"[{num}]"),
-            re.escape(f"«{num}»"),
+            re.escape(f"\u00ab{num}\u00bb"),
         ]
 
         for pat in patterns:
@@ -187,7 +186,7 @@ def _restore_entities(text: str, restore_map: Dict) -> str:
                 break
 
     # تنظيف أي placeholders متبقية
-    result = re.sub(r"§§\d{3}§§", "", result)
+    result = re.sub(r"\u00a7\u00a7\d{3}\u00a7\u00a7", "", result)
     return result
 
 
@@ -305,7 +304,9 @@ class GeminiTranslator:
                     }
                 )
                 if response and response.text:
-                    result = response.text.strip().strip('"'`')
+                    # 🔧 إصلاح: إزالة علامات الاقتباس المتداخلة
+                    result = response.text.strip()
+                    result = result.strip('"').strip("'").strip("`")
                     title, body = self._parse_output(result)
                     if title:
                         log.info(f"✅ Gemini ({model_name}): translation success")
@@ -331,36 +332,36 @@ class GeminiTranslator:
 - أخرج النص العربي النهائي فقط
 """
         if missing_names:
-            prompt += f"
+            prompt += f"""
 🔴 تنبيه: هذه الأسماء اختفت في المحاولة السابقة: {', '.join(missing_names)}. يجب أن تظهر كلها.
-"
+"""
 
-        prompt += f"
+        prompt += f"""
 الخبر:
 
-{text}"
+{text}"""
         return prompt
 
     def _parse_output(self, text: str) -> Tuple[Optional[str], str]:
-        """استخراج العنوان والخبر"""
+        """استخراج العنوان والخبر — 🔧 إصلاح: raw strings صحيحة"""
         if not text:
             return None, ""
 
-        # البحث عن التنسيق
-        parts = re.split(r'
-\s*الخبر\s*:\s*', text, maxsplit=1)
+        # 🔧 إصلاح حرج: استخدام raw strings مع \n الحقيقي (ليس newline حرفي)
+        # البحث عن "الخبر:" مع فاصل سطر
+        parts = re.split(r'\n\s*الخبر\s*:\s*', text, maxsplit=1)
         if len(parts) == 2:
             header = parts[0].strip()
             body = parts[1].strip()
-            title_match = re.split(r'
-\s*العنوان\s*:\s*', header, maxsplit=1)
+            # البحث عن "العنوان:" مع فاصل سطر
+            title_match = re.split(r'\n\s*العنوان\s*:\s*', header, maxsplit=1)
             if len(title_match) == 2:
                 title = title_match[1].strip()
             else:
                 title = header
 
-            title = title.strip(" .,،:؛-")
-            body = body.strip(" .,،:؛-")
+            title = title.strip(" .,\u060c:;\u061b-")
+            body = body.strip(" .,\u060c:;\u061b-")
 
             if len(title) > 3 and (len(body) > 10 or not body):
                 return title, body
@@ -550,12 +551,12 @@ class TranslationManager:
         if not text:
             return False
         trimmed = text.strip()
-        bad_endings = ("على", "في", "من", "إلى", "عن", "مع", "حتى", "خلال",
-                       "بعد", "قبل", "بين", "ضد", "عبر", "نحو", "لدى", "بسبب",
-                       "✉️", "...", "،", ":")
+        bad_endings = ("\u0639\u0644\u0649", "\u0641\u064a", "\u0645\u0646", "\u0625\u0644\u0649", "\u0639\u0646", "\u0645\u0639", "\u062d\u062a\u0649", "\u062e\u0644\u0627\u0644",
+                       "\u0628\u0639\u062f", "\u0642\u0628\u0644", "\u0628\u064a\u0646", "\u0636\u062f", "\u0639\u0628\u0631", "\u0646\u062d\u0648", "\u0644\u062f\u0649", "\u0628\u0633\u0628\u0628",
+                       "\u2709\ufe0f", "...", "\u060c", ":")
         if trimmed.endswith(bad_endings):
             return False
-        if len(trimmed) >= 250 and not re.search(r'[.!؟?!]$', trimmed):
+        if len(trimmed) >= 250 and not re.search(r'[.!?\u061f?!]$', trimmed):
             return False
         return True
 
@@ -590,7 +591,7 @@ class TranslationManager:
         protected_text, restore_map = _protect_entities(text)
         entities = self._extract_entities(text)
         if entities:
-            log.info(f"   📋 Entities: {entities}")
+            log.info(f"   \U0001f4cb Entities: {entities}")
 
         # ═══ الطبقة 1: Gemini ═══
         if self.gemini:
@@ -605,7 +606,7 @@ class TranslationManager:
                     ok, missing = self._verify_entities(text, check_text)
 
                     if not ok:
-                        log.warning(f"   🔄 Gemini retry — missing: {missing}")
+                        log.warning(f"   \U0001f504 Gemini retry \u2014 missing: {missing}")
                         retry = await self.gemini.translate(protected_text, missing_names=missing)
                         if retry:
                             title, body = retry
@@ -647,7 +648,7 @@ class TranslationManager:
                 await translation_cache.set(cache_key, result)
                 return result
 
-        log.warning("   ❌ All translation methods failed")
+        log.warning("   \u274c All translation methods failed")
         return None
 
     async def translate_item(self, item) -> None:
@@ -669,6 +670,112 @@ class TranslationManager:
                     item.summary_ar = summary_ar
                 else:
                     item['summary_ar'] = summary_ar
+
+
+# ═══════════════════════════════════════════════════════════
+# 📊 ETF Flow Report (Async — مُعاد من النسخة القديمة)
+# ═══════════════════════════════════════════════════════════
+_ETF_FLOW_REPORT_PROMPT = """أنت محلل مالي متخصص في صناديق ETF الخاصة بالعملات الرقمية.
+
+ستستلم بيانات صافي التدفقات اليومية بعد إغلاق جلسة التداول الأمريكية.
+
+المطلوب:
+
+1. أنشئ تقريراً عربياً احترافياً ومختصراً.
+2. ابدأ بعنوان مناسب يوضح أن التقرير خاص بإغلاق الجلسة.
+3. اعرض جميع الصناديق بنفس الترتيب الوارد في البيانات.
+4. لا تغيّر أي رقم أو قيمة.
+5. احتفظ بالإشارات (+) و(-).
+6. استخدم:
+   \u2197\ufe0f للتدفقات الموجبة.
+   \U0001f4c9 للتدفقات السالبة.
+   \u2796 عندما تكون القيمة صفر.
+7. في النهاية اكتب فقرة قصيرة بعنوان:
+   \U0001f4ca الخلاصة
+8. يجب أن تعتمد الخلاصة على الأرقام فقط دون أي توقعات أو نصائح استثمارية.
+9. إذا كانت معظم التدفقات موجبة فاذكر أن الجلسة شهدت تدفقات إيجابية.
+10. إذا كانت معظمها سالبة فاذكر أن الجلسة شهدت ضغوط بيع.
+11. إذا كانت متباينة فاذكر أن التدفقات كانت مختلطة.
+12. إذا كانت جميع القيم صفراً فاذكر أنه لم تُسجل تدفقات تُذكر.
+13. لا تخترع أي معلومة غير موجودة.
+14. لا تذكر أسعار العملات أو توقعات السوق.
+15. أخرج التقرير النهائي فقط دون أي مقدمات أو تعليقات."""
+
+
+async def generate_etf_flow_report(etf_data: str, config_obj: BotConfig) -> Optional[str]:
+    """يولّد تقرير تدفقات ETF اليومي باستخدام LLM (async)
+    etf_data: نص يحتوي بيانات التدفقات
+    Returns: التقرير العربي أو None إذا فشل
+    """
+    if not etf_data:
+        return None
+
+    user_prompt = f"بيانات التدفقات:\n\n{etf_data}\n\nأعد التقرير:"
+
+    # تجربة Gemini أولاً
+    if config_obj.GEMINI_API_KEY:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=config_obj.GEMINI_API_KEY)
+
+            model_names = [
+                "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest",
+                "gemini-2.5-pro", "gemini-2.0-pro",
+            ]
+
+            for model_name in model_names:
+                try:
+                    model = genai.GenerativeModel(model_name, system_instruction=_ETF_FLOW_REPORT_PROMPT)
+                    response = await asyncio.to_thread(
+                        model.generate_content,
+                        _ETF_FLOW_REPORT_PROMPT + "\n\n" + user_prompt,
+                        generation_config={
+                            "temperature": 0.2, "top_p": 0.8, "top_k": 40,
+                            "max_output_tokens": 1200,
+                        }
+                    )
+                    if response and response.text:
+                        result = response.text.strip().strip('"\'`')
+                        if len(result) > 20:
+                            log.info("   \u2705 ETF report generated (Gemini)")
+                            return result
+                except Exception as e:
+                    log.info(f"   \u23ed\ufe0f Gemini ETF report failed: {str(e)[:60]}")
+                    continue
+        except Exception as e:
+            log.warning(f"Gemini ETF init err: {e}")
+
+    # Fallback: Groq (async)
+    if config_obj.GROQ_API_KEY:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [
+                            {"role": "system", "content": _ETF_FLOW_REPORT_PROMPT},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "temperature": 0.2,
+                        "max_tokens": 1200,
+                    },
+                    headers={
+                        "Authorization": f"Bearer {config_obj.GROQ_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        result = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                        if result and len(result) > 20:
+                            log.info("   \u2705 ETF report generated (Groq)")
+                            return result
+        except Exception as e:
+            log.warning(f"Groq ETF report err: {e}")
+
+    return None
 
 
 # ═══════════════════════════════════════════════════════════

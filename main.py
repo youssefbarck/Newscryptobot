@@ -13,9 +13,9 @@
 - Structured logging
 """
 
-import os, asyncio
+import os, asyncio, traceback
 
-from config import config, state, log
+from config import config, state, log, save_sent_news
 from telegram_bot import run_bot, run_oneshot
 
 
@@ -35,5 +35,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("🛑 Interrupted by user")
+        save_sent_news(force=True)
     except Exception as e:
-        log.error(f"Fatal error: {e}")
+        log.error(f"Fatal error: {e}\n{traceback.format_exc()}")
+        save_sent_news(force=True)

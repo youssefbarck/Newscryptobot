@@ -1,257 +1,384 @@
 """
-🐋 Whale News Bot v2.0 - الإعدادات المتقدمة
+⚙️ Whale News Bot v2.0 - الإعدادات والمتغيرات العامة
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-بنية async، تخزين ذكي، circuit breaker، rate limiting
+يجمع بين الإعدادات القديمة والبنية الجديدة (dataclasses)
 """
 
-import os, time, json, logging, hashlib, asyncio
+import os, time, json, logging, threading, re, hashlib, asyncio
 from datetime import datetime, timezone
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Set, Optional, Any, Callable
-from collections import defaultdict
-import pytz
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set, Tuple, Any
+import pytz, requests
+
 
 # ═══════════════════════════════════════════════════════════
-# 🔧 إعدادات اللوج المتقدمة (Structured Logging)
-# ═══════════════════════════════════════════════════════════
-class StructuredFormatter(logging.Formatter):
-    """Formatter يُخرج JSON للـ production"""
-    def format(self, record):
-        log_data = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-            "module": record.module,
-            "function": record.funcName,
-            "line": record.lineno,
-        }
-        if hasattr(record, "extra"):
-            log_data.update(record.extra)
-        return json.dumps(log_data, ensure_ascii=False, default=str)
-
-# تبديل بين JSON (production) و text (development)
-LOG_FORMAT = os.environ.get("LOG_FORMAT", "text")
-if LOG_FORMAT == "json":
-    formatter = StructuredFormatter()
-else:
-    formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
-
-handler = logging.StreamHandler()
-handler.setFormatter(formatter)
-log = logging.getLogger("WhaleBot")
-log.setLevel(logging.INFO)
-log.handlers = [handler]
-
-# ═══════════════════════════════════════════════════════════
-# 🔑 المتغيرات البيئية (مع validation)
-# ═══════════════════════════════════════════════════════════
-@dataclass(frozen=True)
-class BotConfig:
-    """إعدادات ثابتة للبوت - immutable للأمان"""
-    TOKEN: str = field(default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN", ""))
-    CHAT_ID: str = field(default_factory=lambda: os.environ.get("TELEGRAM_CHAT_ID", ""))
-    CHANNEL_ID: str = field(default_factory=lambda: os.environ.get("CHANNEL_ID", ""))
-    TIMEZONE: str = field(default_factory=lambda: os.environ.get("TIMEZONE", "Africa/Algiers"))
-    PORT: int = field(default_factory=lambda: int(os.environ.get("PORT", 10000)))
-    RENDER_URL: str = field(default_factory=lambda: os.environ.get("RENDER_EXTERNAL_URL", ""))
-    CHANNEL_LINK: str = field(default_factory=lambda: os.environ.get("CHANNEL_LINK", "https://t.me/whale_signals_channel"))
-    CHANNEL_NAME: str = field(default_factory=lambda: os.environ.get("CHANNEL_NAME", "🐋 قناة الحيتان"))
-
-    # API Keys
-    GEMINI_API_KEY: str = field(default_factory=lambda: os.environ.get("GEMINI_API_KEY", ""))
-    GROQ_API_KEY: str = field(default_factory=lambda: os.environ.get("GROQ_API_KEY", ""))
-    OPENROUTER_API_KEY: str = field(default_factory=lambda: os.environ.get("OPENROUTER_API_KEY", ""))
-    GITHUB_TOKEN: str = field(default_factory=lambda: os.environ.get("GITHUB_TOKEN", ""))
-
-    # Gist IDs
-    GIST_ID_SETTINGS: str = field(default_factory=lambda: os.environ.get("GIST_ID_SETTINGS", ""))
-    GIST_ID_SENT_NEWS: str = field(default_factory=lambda: os.environ.get("GIST_ID_SENT_NEWS", ""))
-    GIST_ID_ALLOWED: str = field(default_factory=lambda: os.environ.get("GIST_ID_ALLOWED", ""))
-
-    # Flags
-    SEND_TO_CHANNEL: bool = field(default_factory=lambda: os.environ.get("SEND_TO_CHANNEL", "false").lower() == "true")
-    GITHUB_ACTIONS: bool = field(default_factory=lambda: os.environ.get("GITHUB_ACTIONS", "").lower() == "true")
-    RUN_MODE: str = field(default_factory=lambda: os.environ.get("RUN_MODE", ""))
-
-    def validate(self) -> List[str]:
-        """التحقق من الإعدادات الضرورية"""
-        errors = []
-        if not self.TOKEN:
-            errors.append("TELEGRAM_BOT_TOKEN مفقود!")
-        if not self.CHAT_ID:
-            errors.append("TELEGRAM_CHAT_ID مفقود!")
-        return errors
-
-# ═══════════════════════════════════════════════════════════
-# ⚡ Rate Limiting & Circuit Breaker
+# 📦 Dataclasses الجديدة (للتوافق مع Kimi v2)
 # ═══════════════════════════════════════════════════════════
 @dataclass
+class BotConfig:
+    """إعدادات البوت المجمّعة"""
+    TOKEN: str = ""
+    CHAT_ID: str = ""
+    CHANNEL_ID: str = ""
+    CHANNEL_NAME: str = ""
+    CHANNEL_LINK: str = ""
+    SEND_TO_CHANNEL: bool = False
+    RENDER_URL: str = ""
+    PORT: int = 10000
+    TIMEZONE: str = "Africa/Algiers"
+    GITHUB_ACTIONS: bool = False
+    RUN_MODE: str = "polling"  # "polling" or "oneshot"
+    GEMINI_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
+    GITHUB_TOKEN: str = ""
+    GIST_ID_SETTINGS: str = ""
+    GIST_ID_SENT_NEWS: str = ""
+    GIST_ID_ALLOWED: str = ""
+
+    def validate(self) -> List[str]:
+        """فحص الإعدادات الأساسية"""
+        errors = []
+        if not self.TOKEN:
+            errors.append("❌ TELEGRAM_BOT_TOKEN not set")
+        if not self.CHAT_ID:
+            errors.append("❌ TELEGRAM_CHAT_ID not set")
+        return errors
+
+
+@dataclass
+class BotState:
+    """حالة البوت العامّة — المتغيرات التي تتغيّر أثناء التشغيل"""
+    sent_news_hashes: Set[str] = field(default_factory=set)
+    last_alerts_hashes: Dict[str, float] = field(default_factory=dict)
+    auto_alerts_enabled: bool = True
+    daily_summary_enabled: bool = True
+    bot_shutdown: bool = False
+    channel_enabled: Optional[bool] = None
+    bot_resume_time: float = 0.0
+    allowed_users: Set[int] = field(default_factory=set)
+    _skip_old_news_once: bool = False
+
+    def is_channel_enabled(self, cfg: BotConfig) -> bool:
+        """يعيد True إذا كان الإرسال للقناة مفعّل"""
+        if self.channel_enabled is not None:
+            return self.channel_enabled and bool(cfg.CHANNEL_ID)
+        return cfg.SEND_TO_CHANNEL and bool(cfg.CHANNEL_ID)
+
+
+# ═══════════════════════════════════════════════════════════
+# ⏱️ Rate Limiter (Token Bucket مع asyncio)
+# ═══════════════════════════════════════════════════════════
 class RateLimiter:
-    """Rate limiter بسيط باستخدام token bucket"""
-    rate: float  # طلبات في الثانية
-    burst: int   # الحد الأقصى للـ burst
-    _tokens: float = field(default=0, repr=False)
-    _last_update: float = field(default_factory=time.time, repr=False)
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    """محدّد معدّل الطلبات — token bucket"""
+
+    def __init__(self, rate: int, period: float):
+        self.rate = rate
+        self.period = period
+        self._tokens = rate
+        self._last_refill = time.time()
+        self._lock = asyncio.Lock()
 
     async def acquire(self):
+        """انتظار حتى يتوفر توكن"""
         async with self._lock:
             now = time.time()
-            elapsed = now - self._last_update
-            self._tokens = min(self.burst, self._tokens + elapsed * self.rate)
-            self._last_update = now
+            elapsed = now - self._last_refill
+            if elapsed >= self.period:
+                self._tokens = self.rate
+                self._last_refill = now
 
-            if self._tokens < 1:
-                wait = (1 - self._tokens) / self.rate
-                await asyncio.sleep(wait)
-                self._tokens = 0
-            else:
-                self._tokens -= 1
+            if self._tokens <= 0:
+                # حساب وقت الانتظار
+                sleep_time = self.period - elapsed
+                if sleep_time > 0:
+                    await asyncio.sleep(sleep_time)
+                self._tokens = self.rate
+                self._last_refill = time.time()
 
-@dataclass  
+            self._tokens -= 1
+
+
+# ═══════════════════════════════════════════════════════════
+# 🔌 Circuit Breaker
+# ═══════════════════════════════════════════════════════════
 class CircuitBreaker:
-    """Circuit Breaker pattern للمصادر المتعثرة"""
-    failure_threshold: int = 5
-    recovery_timeout: float = 300  # 5 دقائق
-    half_open_max_calls: int = 3
+    """قاطع الدائرة — يمنع تكرار الطلبات الفاشلة"""
 
-    _failures: int = field(default=0, repr=False)
-    _last_failure: float = field(default=0, repr=False)
-    _state: str = field(default="closed", repr=False)  # closed, open, half-open
-    _half_open_calls: int = field(default=0, repr=False)
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    def __init__(self, fail_threshold: int = 3, reset_timeout: float = 60):
+        self.fail_threshold = fail_threshold
+        self.reset_timeout = reset_timeout
+        self._failures = 0
+        self._last_failure = 0.0
+        self._lock = asyncio.Lock()
 
-    async def call(self, fn: Callable, *args, **kwargs):
+    async def call(self, func, *args, **kwargs):
+        """تنفيذ الدالة مع Circuit Breaker"""
         async with self._lock:
-            if self._state == "open":
-                if time.time() - self._last_failure > self.recovery_timeout:
-                    self._state = "half-open"
-                    self._half_open_calls = 0
-                    log.info("🔓 Circuit breaker: half-open")
-                else:
-                    raise CircuitBreakerOpen("الدائرة مفتوحة - المصدر متعثر")
-
-            if self._state == "half-open" and self._half_open_calls >= self.half_open_max_calls:
-                raise CircuitBreakerOpen("الدائرة نصف مفتوحة - انتظار المزيد من الوقت")
-
-            if self._state == "half-open":
-                self._half_open_calls += 1
+            if self._failures >= self.fail_threshold:
+                if time.time() - self._last_failure < self.reset_timeout:
+                    raise RuntimeError(f"Circuit breaker OPEN — {self._failures} failures")
+                # إعادة تعيين بعد timeout
+                self._failures = 0
 
         try:
-            result = await fn(*args, **kwargs)
+            # إذا كانت الدالة async
+            if asyncio.iscoroutinefunction(func):
+                result = await func(*args, **kwargs)
+            else:
+                result = func(*args, **kwargs)
+            # نجاح — إعادة تعيين
             async with self._lock:
                 self._failures = 0
-                if self._state == "half-open":
-                    self._state = "closed"
-                    log.info("🔒 Circuit breaker: closed (recovered)")
             return result
         except Exception as e:
             async with self._lock:
                 self._failures += 1
                 self._last_failure = time.time()
-                if self._failures >= self.failure_threshold:
-                    self._state = "open"
-                    log.warning(f"🔴 Circuit breaker: OPEN after {self._failures} failures")
             raise
 
-class CircuitBreakerOpen(Exception):
-    pass
 
 # ═══════════════════════════════════════════════════════════
-# 📰 مصادر الأخبار (مع circuit breaker لكل مصدر)
+# الإعدادات العامة (من البيئة)
+# ═══════════════════════════════════════════════════════════
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+TIMEZONE = os.environ.get("TIMEZONE", "Africa/Algiers")
+PORT = int(os.environ.get("PORT", 10000))
+RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
+CHANNEL_LINK = os.environ.get("CHANNEL_LINK", "https://t.me/whale_signals_channel")
+CHANNEL_NAME = os.environ.get("CHANNEL_NAME", "🐋 قناة الحيتان")
+CHANNEL_ID = os.environ.get("CHANNEL_ID", "")
+SEND_TO_CHANNEL = os.environ.get("SEND_TO_CHANNEL", "false").lower() == "true"
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+log = logging.getLogger("NewsBot")
+tz = pytz.timezone(TIMEZONE)
+
+# 🔧 User-Agent مناسب
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; WhaleNewsBot/1.0; +https://github.com/whale-news)"}
+REDDIT_HEADERS = {"User-Agent": "WhaleNewsBot/1.0 by u/whale_news_bot"}
+
+# ═══════════════════════════════════════════════════════════
+# 🌐 مصادر الأخبار (RSS) — NewsSource dataclass
 # ═══════════════════════════════════════════════════════════
 @dataclass
 class NewsSource:
-    name: str
-    url: str
-    category: str
-    lang: str
-    circuit_breaker: CircuitBreaker = field(default_factory=CircuitBreaker)
-    timeout: float = 15.0
-    weight: int = 1  # أولوية المصدر (أعلى = أهم)
+    """نموذج مصدر الخبر — يدعم الوصول بالخاصّية والقاموس"""
+    name: str = ""
+    url: str = ""
+    category: str = "crypto"
+    lang: str = "en"
+    timeout: int = 15
 
-NEWS_SOURCES: Dict[str, NewsSource] = {
-    "CoinDesk": NewsSource("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml", "crypto", "en", weight=3),
-    "Cointelegraph": NewsSource("Cointelegraph", "https://cointelegraph.com/rss", "crypto", "en", weight=3),
-    "Decrypt": NewsSource("Decrypt", "https://decrypt.co/feed", "crypto", "en", weight=2),
-    "BeInCrypto": NewsSource("BeInCrypto", "https://beincrypto.com/feed/", "crypto", "en", weight=2),
-    "Crypto.News": NewsSource("Crypto.News", "https://crypto.news/feed/", "crypto", "en", weight=2),
-    "Blockworks": NewsSource("Blockworks", "https://blockworks.co/feed", "crypto", "en", weight=2),
-    "Bitcoinist": NewsSource("Bitcoinist", "https://bitcoinist.com/feed/", "crypto", "en", weight=1),
-    "Federal Reserve": NewsSource("Federal Reserve", "https://www.federalreserve.gov/feeds/press_all.xml", "fed", "en", weight=3),
-    "Google News - Crypto": NewsSource("Google News - Crypto", "https://news.google.com/rss/search?q=bitcoin+OR+ethereum+OR+cryptocurrency+OR+crypto+regulation&hl=en&gl=US&ceid=US:en", "crypto", "en", weight=1),
-    "Google News - ETF": NewsSource("Google News - ETF", "https://news.google.com/rss/search?q=bitcoin+ETF+OR+ethereum+ETF+OR+spot+ETF&hl=en&gl=US&ceid=US:en", "etf", "en", weight=2),
-    "Google News AR - Bitcoin": NewsSource("Google News AR - Bitcoin", "https://news.google.com/rss/search?q=بيتكوين+OR+العملات+الرقمية+OR+كريبتو&hl=ar&gl=EG&ceid=EG:ar", "crypto", "ar", weight=2),
-    "Google News AR - Fed": NewsSource("Google News AR - Fed", "https://news.google.com/rss/search?q=الفيدرالي+OR+أسعار+الفائدة+OR+باول&hl=ar&gl=EG&ceid=EG:ar", "fed", "ar", weight=2),
+    def __getitem__(self, key):
+        return getattr(self, key, "")
+
+    def get(self, key, default=None):
+        return getattr(self, key, default)
+
+
+_RAW_NEWS_SOURCES = {
+    # ═══════════════════════════════════════════════════════════
+    # 🪙 مصادر كريبتو إنجليزية (مباشرة وسريعة)
+    # ═══════════════════════════════════════════════════════════
+    "CoinDesk": {
+        "url": "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml",
+        "category": "crypto", "lang": "en"
+    },
+    "Cointelegraph": {
+        "url": "https://cointelegraph.com/rss",
+        "category": "crypto", "lang": "en"
+    },
+    "Decrypt": {
+        "url": "https://decrypt.co/feed",
+        "category": "crypto", "lang": "en"
+    },
+    "BeInCrypto": {
+        "url": "https://beincrypto.com/feed/",
+        "category": "crypto", "lang": "en"
+    },
+    "Crypto.News": {
+        "url": "https://crypto.news/feed/",
+        "category": "crypto", "lang": "en"
+    },
+    "CoinPedia": {
+        "url": "https://coingeek.com/feed/",
+        "category": "crypto", "lang": "en"
+    },
+    "Blockworks": {
+        "url": "https://blockworks.co/feed",
+        "category": "crypto", "lang": "en"
+    },
+    "Bitcoinist": {
+        "url": "https://bitcoinist.com/feed/",
+        "category": "crypto", "lang": "en"
+    },
+    # ═══════════════════════════════════════════════════════════
+    # 🏛️ اقتصاد كلّي (قرارات رسمية مؤثرة على الكريبتو)
+    # ═══════════════════════════════════════════════════════════
+    "Federal Reserve": {
+        "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+        "category": "fed", "lang": "en"
+    },
+    # ═══════════════════════════════════════════════════════════
+    # 🌐 مصادر عامة RSS (أخبار كريبتو مُرشّحة بالبحث)
+    # ═══════════════════════════════════════════════════════════
+    "Google News - Crypto": {
+        "url": "https://news.google.com/rss/search?q=bitcoin+OR+ethereum+OR+cryptocurrency+OR+crypto+regulation&hl=en&gl=US&ceid=US:en",
+        "category": "crypto", "lang": "en"
+    },
+    "Google News - ETF": {
+        "url": "https://news.google.com/rss/search?q=bitcoin+ETF+OR+ethereum+ETF+OR+spot+ETF&hl=en&gl=US&ceid=US:en",
+        "category": "etf", "lang": "en"
+    },
+    # ═══════════════════════════════════════════════════════════
+    # 🌐 مصادر عربية (كريبتو + فيدرالي فقط)
+    # ═══════════════════════════════════════════════════════════
+    "Google News AR - Bitcoin": {
+        "url": "https://news.google.com/rss/search?q=بيتكوين+OR+العملات+الرقمية+OR+كريبتو&hl=ar&gl=EG&ceid=EG:ar",
+        "category": "crypto", "lang": "ar"
+    },
+    "Google News AR - Fed": {
+        "url": "https://news.google.com/rss/search?q=الفيدرالي+OR+أسعار+الفائدة+OR+باول&hl=ar&gl=EG&ceid=EG:ar",
+        "category": "fed", "lang": "ar"
+    },
 }
 
+# تحويل القاموس إلى كائنات NewsSource
+NEWS_SOURCES: Dict[str, NewsSource] = {}
+for _name, _data in _RAW_NEWS_SOURCES.items():
+    NEWS_SOURCES[_name] = NewsSource(
+        name=_name,
+        url=_data.get("url", ""),
+        category=_data.get("category", "crypto"),
+        lang=_data.get("lang", "en"),
+        timeout=_data.get("timeout", 15),
+    )
+
 # ═══════════════════════════════════════════════════════════
-# 🎯 الكلمات المفتاحية (مُحسّنة مع weights)
+# 🎯 الكلمات المفتاحية
 # ═══════════════════════════════════════════════════════════
-KEYWORDS_CONFIG = {
+KEYWORDS_BREAKING = [
+    "breaking", "urgent", "alert", "just in", "developing",
+    "hack", "exploit", "stolen", "drained", "vulnerability", "flash loan", "rug pull", "breach", "cyberattack", "security breach",
+    "ban", "banned", "prohibit", "lawsuit", "sues", "sued", "crackdown", "sanction", "penalty", "fraud", "charges", "arrest", "indictment",
+    "approval", "approved", "reject", "rejected", "etf", "spot etf", "all-time high", "ath", "crash", "surge", "plunge", "pump", "dump",
+    "announce", "announces", "launches", "unveils", "reveals", "partnership", "acquisition", "merger",
+]
+
+KEYWORDS_FED = [
+    "fed", "federal reserve", "interest rate", "powell", "fomc", "rate cut", "rate hike", "rate decision", "monetary policy",
+    "inflation", "inflation data", "cpi", "core cpi", "ppi", "nonfarm payrolls", "jobless claims", "unemployment", "recession",
+    "qe", "quantitative easing", "qt", "balance sheet", "treasury", "treasury yields", "yields", "bonds", "minutes",
+    "economic data", "gdp", "consumer spending", "retail sales", "consumer price index", "job report",
+]
+
+KEYWORDS_WHALES = [
+    "elon musk", "michael saylor", "cathie wood", "whale", "whales",
+    "blackrock", "microstrategy", "satoshi", "binance", "cz", "changpeng zhao",
+    "sam bankman-fried", "sbf", "vitalik", "vitalik buterin",
+    "charles hoskinson", "brian armstrong", "coinbase ceo",
+    "institutional", "inflows", "outflows", "accumulation",
+    "gary gensler", "sec chair", "sec chief",
+    "larry fink", "blackrock ceo", "fink",
+    "jack dorsey", "square ceo", "block ceo",
+    "pro-crypto", "anti-crypto", "crypto advocate", "crypto critic",
+]
+
+KEYWORDS_TECH = [
+    "upgrade", "roadmap", "merge", "the merge", "halving", "fork", "hard fork", "soft fork",
+    "mainnet", "testnet", "layer 2", "l2", "scaling", "rollup", "zk", "zero-knowledge",
+    "smart contract", "defi", "nft", "dao", "staking", "yield", "airdrop", "tokenomics",
+    "consensus", "proof of stake", "proof of work", "pos", "pow", "validator", "node",
+    "ethereum 2.0", "serenity", "sharding", "dencun", "pectra", "purge", "verge", "lean ethereum",
+    "protocol", "blockchain", "decentralized", "ledger",
+]
+
+KEYWORDS_MARKET = [
+    "bull market", "bear market", "bullish", "bearish", "rally", "correction", "support", "resistance",
+    "liquidation", "leverage", "futures", "options", "open interest", "funding rate", "long", "short",
+    "volume", "volatility", "dominance", "market cap", "capitalization", "supply", "demand",
+    "price", "target", "forecast", "prediction", "analysis", "outlook", "sentiment",
+]
+
+KEYWORDS_ETF = [
+    "etf", "spot etf", "approval", "sec", "blackrock", "fidelity", "ark invest", "grayscale", "van eck", "franklin templeton",
+    "19b-4", "s-1", "prospectus", "issuance", "redemption", "creation", "trust", "fund flow",
+]
+
+KEYWORDS_HACK = [
+    "hack", "exploit", "stolen", "drained", "vulnerability", "flash loan", "rug pull", "breach", "cyberattack", "security breach",
+    "rekt", "drained", "empty", "compromised", "attacker", "hacker", "malicious", "phishing",
+]
+
+# 🆕 KEYWORDS_CONFIG لـ Kimi v2 (يُستخدم في filters.py NewsScorer)
+KEYWORDS_CONFIG: Dict[str, Dict] = {
     "breaking": {
-        "words": ["breaking", "urgent", "alert", "just in", "developing", "hack", "exploit", "stolen", "drained", "vulnerability", "flash loan", "rug pull", "breach", "cyberattack", "security breach", "ban", "banned", "prohibit", "lawsuit", "sues", "sued", "crackdown", "sanction", "penalty", "fraud", "charges", "arrest", "indictment", "approval", "approved", "reject", "rejected", "etf", "spot etf", "all-time high", "ath", "crash", "surge", "plunge", "pump", "dump", "announce", "announces", "launches", "unveils", "reveals", "partnership", "acquisition", "merger"],
-        "weight": 3,
+        "words": KEYWORDS_BREAKING + KEYWORDS_HACK,
+        "weight": 2.0,
     },
     "fed": {
-        "words": ["fed", "federal reserve", "interest rate", "powell", "fomc", "rate cut", "rate hike", "rate decision", "monetary policy", "inflation", "cpi", "core cpi", "ppi", "nonfarm payrolls", "jobless claims", "unemployment", "recession", "qe", "quantitative easing", "qt", "balance sheet", "treasury", "treasury yields", "yields", "bonds", "minutes", "economic data", "gdp", "consumer spending", "retail sales", "consumer price index", "job report"],
-        "weight": 2,
+        "words": KEYWORDS_FED,
+        "weight": 1.5,
     },
     "whale": {
-        "words": ["elon musk", "michael saylor", "cathie wood", "whale", "whales", "blackrock", "microstrategy", "satoshi", "binance", "cz", "changpeng zhao", "sam bankman-fried", "sbf", "vitalik", "vitalik buterin", "charles hoskinson", "brian armstrong", "coinbase ceo", "institutional", "inflows", "outflows", "accumulation", "gary gensler", "sec chair", "sec chief", "larry fink", "blackrock ceo", "fink", "jack dorsey", "square ceo", "block ceo", "pro-crypto", "anti-crypto", "crypto advocate", "crypto critic"],
-        "weight": 2,
+        "words": KEYWORDS_WHALES,
+        "weight": 1.0,
     },
     "tech": {
-        "words": ["upgrade", "roadmap", "merge", "the merge", "halving", "fork", "hard fork", "soft fork", "mainnet", "testnet", "layer 2", "l2", "scaling", "rollup", "zk", "zero-knowledge", "smart contract", "defi", "nft", "dao", "staking", "yield", "airdrop", "tokenomics", "consensus", "proof of stake", "proof of work", "pos", "pow", "validator", "node", "ethereum 2.0", "serenity", "sharding", "dencun", "pectra", "purge", "verge", "lean ethereum", "protocol", "blockchain", "decentralized", "ledger"],
-        "weight": 1,
+        "words": KEYWORDS_TECH,
+        "weight": 0.8,
     },
     "market": {
-        "words": ["bull market", "bear market", "bullish", "bearish", "rally", "correction", "support", "resistance", "liquidation", "leverage", "futures", "options", "open interest", "funding rate", "long", "short", "volume", "volatility", "dominance", "market cap", "capitalization", "supply", "demand", "price", "target", "forecast", "prediction", "analysis", "outlook", "sentiment"],
-        "weight": 1,
+        "words": KEYWORDS_MARKET,
+        "weight": 0.5,
     },
     "etf": {
-        "words": ["etf", "spot etf", "approval", "sec", "blackrock", "fidelity", "ark invest", "grayscale", "van eck", "franklin templeton", "19b-4", "s-1", "prospectus", "issuance", "redemption", "creation", "trust", "fund flow"],
-        "weight": 2,
-    },
-    "hack": {
-        "words": ["hack", "exploit", "stolen", "drained", "vulnerability", "flash loan", "rug pull", "breach", "cyberattack", "security breach", "rekt", "drained", "empty", "compromised", "attacker", "hacker", "malicious", "phishing"],
-        "weight": 3,
+        "words": KEYWORDS_ETF,
+        "weight": 1.5,
     },
 }
 
-# ═══════════════════════════════════════════════════════════
-# 🪙 العملات (مع metadata)
-# ═══════════════════════════════════════════════════════════
-COIN_MAP = {
-    "bitcoin": "BTC", "btc": "BTC",
+# 🆕 COIN_MAP — خريطة العملات
+COIN_MAP: Dict[str, str] = {
+    # عملات رئيسية
+    "bitcoin": "BTC", "btc": "BTC", "bitcoin cash": "BCH",
     "ethereum": "ETH", "eth": "ETH", "ether": "ETH",
     "solana": "SOL", "sol": "SOL",
-    "ripple": "XRP", "xrp": "XRP",
+    "xrp": "XRP", "ripple": "XRP",
     "cardano": "ADA", "ada": "ADA",
     "dogecoin": "DOGE", "doge": "DOGE",
     "avalanche": "AVAX", "avax": "AVAX",
-    "polygon": "MATIC", "matic": "MATIC",
-    "chainlink": "LINK",
     "polkadot": "DOT", "dot": "DOT",
+    "chainlink": "LINK", "link": "LINK",
+    "polygon": "POL", "matic": "POL", "pol": "POL",
     "litecoin": "LTC", "ltc": "LTC",
-    "binance": "BNB", "bnb": "BNB",
-    "tether": "USDT", "usdt": "USDT",
+    "tron": "TRX", "trx": "TRX",
+    "uniswap": "UNI", "aave": "AAVE",
+    "near protocol": "NEAR", "near": "NEAR",
     "aptos": "APT", "apt": "APT",
     "arbitrum": "ARB", "arb": "ARB",
-    "optimism": "OP",
-    "sui": "SUI", "sei": "SEI", "toncoin": "TON",
-    "tron": "TRX", "trx": "TRX",
-    "near": "NEAR", "fantom": "FTM", "ftm": "FTM",
+    "optimism": "OP", "op": "OP",
+    "sui": "SUI", "sei": "SEI",
+    "pepe": "PEPE", "shiba inu": "SHIB", "shib": "SHIB",
+    "toncoin": "TON", "ton": "TON",
+    "fantom": "FTM", "ftm": "FTM",
+    "cosmos": "ATOM", "atom": "ATOM",
     "stellar": "XLM", "xlm": "XLM",
     "hedera": "HBAR", "hbar": "HBAR",
-    "pepe": "PEPE", "shiba": "SHIB", "memecoin": "MEME",
+    "binance coin": "BNB", "bnb": "BNB",
+    "usdt": "USDT", "tether": "USDT",
+    "usdc": "USDC",
+    "dai": "DAI",
+    # ملاحظة: "op" قد يتعارض مع كلمات أخرى، لكنه مطلوب
 }
 
 # ═══════════════════════════════════════════════════════════
-# 🌍 السياق والرفض
+# 🎯 كلمات مفتاحية إضافية (تُصدَّر للفلاتر)
 # ═══════════════════════════════════════════════════════════
 CRYPTO_CONTEXT_KEYWORDS = [
+    # عملات رئيسية
     "bitcoin", "btc", "ethereum", "eth", "ether", "crypto", "cryptocurrency",
     "blockchain", "altcoin", "stablecoin", "defi", "nft", "token", "coin",
     "binance", "coinbase", "tether", "usdt", "usdc", "xrp", "ripple",
@@ -259,15 +386,19 @@ CRYPTO_CONTEXT_KEYWORDS = [
     "polkadot", "dot", "avalanche", "avax", "chainlink", "link",
     "web3", "wallet", "staking", "mining", "halving", "smart contract",
     "decentralized", "dex", "cex", "ledger", "satoshi",
+    # مؤسسات كريبتو مؤثرة
     "sec", "gensler", "spot etf", "blackrock bitcoin", "fidelity crypto",
     "grayscale", "microstrategy", "saylor", "cz", "vitalik",
+    # عملات إضافية شائعة
     "litecoin", "ltc", "tron", "trx", "toncoin", "ton",
     "stellar", "xlm", "hedera", "hbar", "near protocol", "aptos", "apt",
-    "arbitrum", "arb", "optimism", "op", "sei", "sui",
+    "arbitrum", "arb", "optimism", "sei", "sui",
     "pepe", "shiba", "memecoin", "shitcoin",
+    # مصطلحات DeFi وبروتوكولات
     "aave", "uniswap", "compound", "makerdao", "lido", "rocket pool",
     "restaking", "ethereum etf", "bitcoin etf",
     "on-chain", "token burn", "airdrop", "ico", "ieo",
+    # عربية
     "بيتكوين", "إيثيريوم", "كريبتو", "عملة رقمية", "عملة مشفرة", "بلوكتشين",
     "بايننس", "كوين بيس", "توكين", "تعدين", "محفظة",
     "تيثر", "سولانا", "ريبل", "ألبتكوين", "عملات مستقرة",
@@ -310,18 +441,29 @@ AR_REJECTION_KEYWORDS = [
 ]
 
 # ═══════════════════════════════════════════════════════════
-# ⚙️ إعدادات التشغيل
+# 🔧 إعدادات التشغيل
 # ═══════════════════════════════════════════════════════════
-ALERT_COOLDOWN = 21600  # 6 ساعات
 MAX_NEWS_PER_SCAN = 40
-MAX_NEWS_AGE = 10800    # 3 ساعات
-SCAN_INTERVAL = 300     # 5 دقائق
+MAX_NEWS_AGE = 10800  # 3 ساعات
+SCAN_INTERVAL = 300   # 5 دقائق
 SUMMARY_HOUR = 23
-SUMMARY_MINUTE = 58
+SUMMARY_MINUTE = 59
 
 # ═══════════════════════════════════════════════════════════
-# 📂 التخزين الدائم (Gist + Local)
+# المتغيرات العامة
 # ═══════════════════════════════════════════════════════════
+_cache = {}
+_started = False
+last_id = 0
+_user_state = {}
+ALERT_COOLDOWN = 21600  # 6 ساعات بين تنبيهين لنفس الخبر
+last_alerts_hashes = {}
+_GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+_GIST_ID_SETTINGS = os.environ.get("GIST_ID_SETTINGS", "")
+_GIST_ID_SENT_NEWS = os.environ.get("GIST_ID_SENT_NEWS", "")
+_GIST_ID_ALLOWED = os.environ.get("GIST_ID_ALLOWED", "")
+
+# 🔧 مسار التخزين
 if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("RUN_MODE") == "oneshot":
     _PERSISTENT_DIR = os.getcwd()
 else:
@@ -331,126 +473,364 @@ SENT_NEWS_FILE = os.path.join(_PERSISTENT_DIR, "sent_news.json")
 SETTINGS_FILE_LOCAL = os.path.join(_PERSISTENT_DIR, "news_settings.json")
 ALLOWED_FILE_LOCAL = os.path.join(_PERSISTENT_DIR, "allowed_users.json")
 
-# ═══════════════════════════════════════════════════════════
-# 🌐 Headers
-# ═══════════════════════════════════════════════════════════
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; WhaleNewsBot/2.0; +https://github.com/whale-news)"}
-REDDIT_HEADERS = {"User-Agent": "WhaleNewsBot/2.0 by u/whale_news_bot"}
+# 🆕 ذاكرة الأخبار المُرسلة — ستُربط بـ BotState.sent_news_hashes
+sent_news_hashes = set()
+_sent_news_dirty = False
+_last_sent_news_save = 0
+_backup_hashes_loaded = False
+_backup_hashes = set()
 
 # ═══════════════════════════════════════════════════════════
-# 🕐 Timezone
+# دوال GitHub Gist
 # ═══════════════════════════════════════════════════════════
-tz = pytz.timezone(os.environ.get("TIMEZONE", "Africa/Algiers"))
-
-# ═══════════════════════════════════════════════════════════
-# 📊 إعدادات التنبيهات (mutable - تُحمّل/تُحفظ)
-# ═══════════════════════════════════════════════════════════
-class BotState:
-    """حالة البوت القابلة للتبديل"""
-    def __init__(self):
-        self.auto_alerts_enabled: bool = True
-        self.alert_categories: Dict[str, bool] = {
-            "crypto": True, "macro": True, "breaking": True, 
-            "tech": True, "market": True
-        }
-        self.channel_enabled: Optional[bool] = None
-        self.bot_shutdown: bool = False
-        self.daily_summary_enabled: bool = True
-        self.bot_resume_time: float = 0.0
-        self._skip_old_news_once: bool = False
-        self.sent_news_hashes: Set[str] = set()
-        self.last_alerts_hashes: Dict[str, float] = {}
-        self.allowed_users: Set[int] = set()
-
-    def is_channel_enabled(self, config: BotConfig) -> bool:
-        if self.channel_enabled is not None:
-            return self.channel_enabled and bool(config.CHANNEL_ID)
-        return config.SEND_TO_CHANNEL and bool(config.CHANNEL_ID)
-
-# ═══════════════════════════════════════════════════════════
-# 🗄️ Gist Manager (async)
-# ═══════════════════════════════════════════════════════════
-class GistManager:
-    """مدير Gist مع batching و caching"""
-    def __init__(self, token: str):
-        self.token = token
-        self._cache: Dict[str, Any] = {}
-        self._cache_ttl: Dict[str, float] = {}
-        self._pending_writes: Dict[str, str] = {}
-        self._write_lock = asyncio.Lock()
-        self._batch_task: Optional[asyncio.Task] = None
-
-    async def _request(self, method: str, url: str, **kwargs) -> Any:
-        """طلب HTTP مع retry"""
-        import aiohttp
-        headers = {
-            "Authorization": f"token {self.token}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-        for attempt in range(3):
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.request(method, url, headers=headers, **kwargs, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                        if resp.status == 200:
-                            return await resp.json()
-                        elif resp.status == 403:
-                            retry_after = int(resp.headers.get("X-RateLimit-Reset", time.time() + 60)) - int(time.time())
-                            log.warning(f"Gist rate limited, waiting {retry_after}s")
-                            await asyncio.sleep(min(retry_after, 60))
-                        else:
-                            log.warning(f"Gist HTTP {resp.status}")
-                            return None
-            except Exception as e:
-                log.warning(f"Gist request attempt {attempt+1} failed: {e}")
-                await asyncio.sleep(2 ** attempt)
+def _gist_get(gist_id, filename):
+    """جلب محتوى ملف من Gist"""
+    if not _GITHUB_TOKEN or not gist_id:
         return None
-
-    async def get(self, gist_id: str, filename: str) -> Optional[str]:
-        """جلب محتوى ملف من Gist مع caching"""
-        cache_key = f"{gist_id}:{filename}"
-        now = time.time()
-        if cache_key in self._cache and now - self._cache_ttl.get(cache_key, 0) < 60:
-            return self._cache[cache_key]
-
-        data = await self._request("GET", f"https://api.github.com/gists/{gist_id}")
-        if data:
+    try:
+        r = requests.get(
+            f"https://api.github.com/gists/{gist_id}",
+            headers={
+                "Authorization": f"token {_GITHUB_TOKEN}",
+                "Accept": "application/vnd.github.v3+json"
+            },
+            timeout=10
+        )
+        if r.status_code == 200:
+            data = r.json()
             files = data.get("files", {})
             if filename in files:
-                content = files[filename].get("content", "")
-                self._cache[cache_key] = content
-                self._cache_ttl[cache_key] = now
-                return content
+                return files[filename].get("content", "")
+        return None
+    except Exception as e:
+        log.warning(f"gist_get err: {e}")
         return None
 
-    async def set(self, gist_id: str, filename: str, content: str):
-        """حفظ محتوى في Gist مع batching"""
-        async with self._write_lock:
-            self._pending_writes[cache_key] = content
-            if self._batch_task is None or self._batch_task.done():
-                self._batch_task = asyncio.create_task(self._flush_writes(gist_id, filename))
+def _gist_set(gist_id, filename, content):
+    """حفظ محتوى ملف في Gist"""
+    if not _GITHUB_TOKEN or not gist_id:
+        return False
+    try:
+        r = requests.patch(
+            f"https://api.github.com/gists/{gist_id}",
+            headers={
+                "Authorization": f"token {_GITHUB_TOKEN}",
+                "Accept": "application/vnd.github.v3+json"
+            },
+            json={"files": {filename: {"content": content}}},
+            timeout=10
+        )
+        return r.status_code == 200
+    except Exception as e:
+        log.warning(f"gist_set err: {e}")
+        return False
 
-    async def _flush_writes(self, gist_id: str, filename: str):
-        """تفريغ الكتابات المجمعة"""
-        await asyncio.sleep(30)  # انتظر 30 ثانية لتجميع الكتابات
-        async with self._write_lock:
-            if not self._pending_writes:
-                return
-            content = self._pending_writes.pop(cache_key, None)
-            if content:
-                await self._request("PATCH", f"https://api.github.com/gists/{gist_id}",
-                                   json={"files": {filename: {"content": content}}})
+def load_sent_news():
+    """تحميل الأخبار المُرسلة سابقاً — يجمع من كل المصادر المتاحة"""
+    global sent_news_hashes, _backup_hashes, _backup_hashes_loaded
+    all_hashes = set()
+
+    # (1) محاولة من Gist
+    if _GIST_ID_SENT_NEWS:
+        content = _gist_get(_GIST_ID_SENT_NEWS, "sent_news.json")
+        if content:
+            try:
+                data = json.loads(content)
+                hashes = set(data.get("hashes", []))
+                if hashes:
+                    all_hashes.update(hashes)
+                    log.info(f"✅ Gist: {len(hashes)} hashes")
+            except Exception as e:
+                log.warning(f"Gist parse err: {e}")
+
+    # (2) محاولة من الملف المحلي
+    try:
+        with open(SENT_NEWS_FILE, "r") as f:
+            data = json.load(f)
+            hashes = set(data.get("hashes", []))
+            if hashes:
+                all_hashes.update(hashes)
+                log.info(f"✅ Local file: {len(hashes)} hashes")
+    except Exception:
+        pass
+
+    # (3) محاولة من ملف commit في الريبو (GitHub Actions)
+    repo_file = os.path.join(os.getcwd(), "sent_news.json")
+    if os.path.exists(repo_file) and repo_file != SENT_NEWS_FILE:
+        try:
+            with open(repo_file, "r") as f:
+                data = json.load(f)
+                hashes = set(data.get("hashes", []))
+                if hashes:
+                    all_hashes.update(hashes)
+                    log.info(f"✅ Repo file: {len(hashes)} hashes")
+        except Exception:
+            pass
+
+    # الدمج النهائي
+    if all_hashes:
+        sent_news_hashes = all_hashes
+    else:
+        log.warning("⚠️ No sent hashes found from ANY source — starting fresh")
+
+    # حفظ نسخة احتياطية
+    if not _backup_hashes_loaded:
+        _backup_hashes = set(sent_news_hashes)
+        _backup_hashes_loaded = True
+
+    log.info(f"📊 Total loaded: {len(sent_news_hashes)} sent news hashes")
+
+def save_sent_news(force=False):
+    """حفظ الأخبار المُرسلة — فوري في الملف المحلي، مجمّع في Gist"""
+    global _sent_news_dirty, _last_sent_news_save
+    _sent_news_dirty = True
+    now = time.time()
+
+    # حفظ فوري في الملف المحلي
+    try:
+        content = json.dumps({"hashes": list(sent_news_hashes)[-500:]})
+        with open(SENT_NEWS_FILE, "w") as f:
+            f.write(content)
+    except Exception:
+        pass
+
+    # Gist: مجمّع كل 60 ثانية أو عند الإجبار
+    if not force and (now - _last_sent_news_save) < 60:
+        return
+    _sent_news_dirty = False
+    _last_sent_news_save = now
+    content = json.dumps({"hashes": list(sent_news_hashes)[-500:]})
+    if _GIST_ID_SENT_NEWS:
+        if _gist_set(_GIST_ID_SENT_NEWS, "sent_news.json", content):
+            log.info(f"💾 Saved {len(sent_news_hashes)} hashes to Gist")
+        else:
+            log.warning("⚠️ Failed to save sent_news to Gist")
+
+# 🔔 إعدادات التنبيهات
+auto_alerts_enabled = True
+alert_categories = {"crypto": True, "macro": True, "breaking": True, "tech": True, "market": True}
+SETTINGS_FILE = os.path.join(_PERSISTENT_DIR, "news_settings.json")
+channel_enabled = None
+bot_shutdown = False
+daily_summary_enabled = True
+bot_resume_time = 0
+_skip_old_news_once = False
+
+def load_settings():
+    """تحميل الإعدادات من Gist (مع fallback محلي)"""
+    global auto_alerts_enabled, alert_categories, channel_enabled, bot_shutdown, bot_resume_time, daily_summary_enabled
+    loaded = False
+    if _GIST_ID_SETTINGS:
+        content = _gist_get(_GIST_ID_SETTINGS, "news_settings.json")
+        if content:
+            try:
+                s = json.loads(content)
+                auto_alerts_enabled = s.get("auto_alerts_enabled", True)
+                alert_categories = s.get("alert_categories", {"crypto": True, "macro": True, "breaking": True, "tech": True, "market": True})
+                channel_enabled = s.get("channel_enabled", None)
+                bot_shutdown = s.get("bot_shutdown", False)
+                bot_resume_time = s.get("bot_resume_time", 0)
+                daily_summary_enabled = s.get("daily_summary_enabled", True)
+                log.info(f"✅ Loaded settings from Gist (channel={channel_enabled}, shutdown={bot_shutdown}, summary={daily_summary_enabled})")
+                loaded = True
+            except Exception as e:
+                log.warning(f"gist settings parse err: {e}")
+    if not loaded:
+        try:
+            with open(SETTINGS_FILE_LOCAL, "r") as f:
+                s = json.load(f)
+                auto_alerts_enabled = s.get("auto_alerts_enabled", True)
+                alert_categories = s.get("alert_categories", {"crypto": True, "macro": True, "breaking": True, "tech": True, "market": True})
+                channel_enabled = s.get("channel_enabled", None)
+                bot_shutdown = s.get("bot_shutdown", False)
+                bot_resume_time = s.get("bot_resume_time", 0)
+                daily_summary_enabled = s.get("daily_summary_enabled", True)
+                log.info(f"✅ Loaded settings from local file")
+        except Exception:
+            pass
+
+def save_settings():
+    """حفظ الإعدادات في Gist + محلي"""
+    content = json.dumps({
+        "auto_alerts_enabled": auto_alerts_enabled,
+        "alert_categories": alert_categories,
+        "channel_enabled": channel_enabled,
+        "bot_shutdown": bot_shutdown,
+        "bot_resume_time": bot_resume_time,
+        "daily_summary_enabled": daily_summary_enabled,
+    }, ensure_ascii=False, indent=2)
+    if _GIST_ID_SETTINGS:
+        if _gist_set(_GIST_ID_SETTINGS, "news_settings.json", content):
+            log.info("💾 Settings saved to Gist")
+        else:
+            log.warning("⚠️ Failed to save settings to Gist")
+    try:
+        os.makedirs(os.path.dirname(SETTINGS_FILE_LOCAL), exist_ok=True)
+        with open(SETTINGS_FILE_LOCAL, "w") as f:
+            f.write(content)
+    except Exception:
+        pass
+
+def is_channel_enabled():
+    """يعيد True إذا كان الإرسال للقناة مفعّل"""
+    global channel_enabled
+    if channel_enabled is not None:
+        result = channel_enabled and bool(CHANNEL_ID)
+        log.info(f"📢 is_channel_enabled: channel_enabled={channel_enabled}, result={result}")
+        return result
+    result = SEND_TO_CHANNEL and bool(CHANNEL_ID)
+    log.info(f"📢 is_channel_enabled: using env fallback SEND_TO_CHANNEL={SEND_TO_CHANNEL}, result={result}")
+    return result
+
+# 🔒 القائمة البيضاء
+ALLOWED_FILE = ALLOWED_FILE_LOCAL
+
+def load_dynamic_allowed():
+    """تحميل القائمة البيضاء من Gist (مع fallback محلي)"""
+    if _GIST_ID_ALLOWED:
+        content = _gist_get(_GIST_ID_ALLOWED, "allowed_users.json")
+        if content:
+            try:
+                return set(json.loads(content).get("users", []))
+            except Exception as e:
+                log.warning(f"gist allowed parse err: {e}")
+    try:
+        with open(ALLOWED_FILE_LOCAL, "r") as f:
+            return set(json.load(f).get("users", []))
+    except Exception:
+        return set()
+
+def save_dynamic_allowed(users_set):
+    """حفظ القائمة البيضاء في Gist + محلي"""
+    content = json.dumps({"users": list(users_set)})
+    if _GIST_ID_ALLOWED:
+        if not _gist_set(_GIST_ID_ALLOWED, "allowed_users.json", content):
+            log.warning("⚠️ Failed to save allowed_users to Gist")
+    try:
+        os.makedirs(os.path.dirname(ALLOWED_FILE_LOCAL), exist_ok=True)
+        with open(ALLOWED_FILE_LOCAL, "w") as f:
+            f.write(content)
+    except Exception:
+        pass
+
+_dynamic_allowed = load_dynamic_allowed()
+
+def _parse_allowed_users():
+    allowed = set()
+    raw = os.environ.get("ALLOWED_USERS", "")
+    for part in raw.replace(";", ",").replace(" ", ",").split(","):
+        part = part.strip()
+        if part.isdigit():
+            allowed.add(int(part))
+    if CHAT_ID and CHAT_ID.isdigit():
+        allowed.add(int(CHAT_ID))
+    allowed.update(_dynamic_allowed)
+    return allowed
+
+ALLOWED_USERS = _parse_allowed_users()
+
+def refresh_allowed():
+    global ALLOWED_USERS, _dynamic_allowed
+    _dynamic_allowed = load_dynamic_allowed()
+    ALLOWED_USERS = _parse_allowed_users()
+
+def add_user(cid_to_add):
+    global _dynamic_allowed
+    try:
+        cid_int = int(cid_to_add)
+    except (TypeError, ValueError):
+        return False
+    if cid_int in _dynamic_allowed:
+        return False
+    _dynamic_allowed.add(cid_int)
+    save_dynamic_allowed(_dynamic_allowed)
+    refresh_allowed()
+    return True
+
+def remove_user(cid_to_remove):
+    global _dynamic_allowed
+    try:
+        cid_int = int(cid_to_remove)
+    except (TypeError, ValueError):
+        return False
+    if CHAT_ID and cid_int == int(CHAT_ID):
+        return False
+    if cid_int not in _dynamic_allowed:
+        return False
+    _dynamic_allowed.discard(cid_int)
+    save_dynamic_allowed(_dynamic_allowed)
+    refresh_allowed()
+    return True
+
+def is_owner(cid):
+    if not cid or not CHAT_ID:
+        return False
+    try:
+        return int(cid) == int(CHAT_ID)
+    except (TypeError, ValueError):
+        return False
+
+def is_allowed(cid):
+    if not cid:
+        return False
+    try:
+        cid_int = int(cid)
+    except (TypeError, ValueError):
+        return False
+    return cid_int in ALLOWED_USERS
 
 # ═══════════════════════════════════════════════════════════
-# 📦 إنشاء instances
+# الكاش
 # ═══════════════════════════════════════════════════════════
-config = BotConfig()
-state = BotState()
-gist_manager = GistManager(config.GITHUB_TOKEN) if config.GITHUB_TOKEN else None
+def get_cached(key, ttl=120):
+    if key in _cache and time.time() - _cache[key][0] < ttl:
+        return _cache[key][1]
+    return None
 
-# Rate limiters
-TELEGRAM_RATE_LIMITER = RateLimiter(rate=30, burst=30)  # 30 msg/sec
-FARSIDE_RATE_LIMITER = RateLimiter(rate=0.5, burst=2)   # 2 req/sec
+def set_cached(key, data):
+    _cache[key] = (time.time(), data)
 
-# Circuit breakers
-TELEGRAM_CB = CircuitBreaker(failure_threshold=10, recovery_timeout=60)
-FARSIDE_CB = CircuitBreaker(failure_threshold=5, recovery_timeout=300)
+# ═══════════════════════════════════════════════════════════
+# 🏗️ إنشاء النسخ المفردة (Singletons)
+# ═══════════════════════════════════════════════════════════
+#Rate limiters و circuit breakers
+TELEGRAM_RATE_LIMITER = RateLimiter(25, 60)
+TELEGRAM_CB = CircuitBreaker(fail_threshold=5, reset_timeout=120)
+FARSIDE_RATE_LIMITER = RateLimiter(2, 60)
+FARSIDE_CB = CircuitBreaker(fail_threshold=3, reset_timeout=300)
+
+# إنشاء config و state — يجب أن يأتيا AFTER تعريف الدوال
+config = BotConfig(
+    TOKEN=TOKEN,
+    CHAT_ID=CHAT_ID,
+    CHANNEL_ID=CHANNEL_ID,
+    CHANNEL_NAME=CHANNEL_NAME,
+    CHANNEL_LINK=CHANNEL_LINK,
+    SEND_TO_CHANNEL=SEND_TO_CHANNEL,
+    RENDER_URL=RENDER_URL,
+    PORT=PORT,
+    TIMEZONE=TIMEZONE,
+    GITHUB_ACTIONS=os.environ.get("GITHUB_ACTIONS") == "true",
+    RUN_MODE=os.environ.get("RUN_MODE", "polling"),
+    GEMINI_API_KEY=os.environ.get("GEMINI_API_KEY", ""),
+    GROQ_API_KEY=os.environ.get("GROQ_API_KEY", ""),
+    OPENROUTER_API_KEY=os.environ.get("OPENROUTER_API_KEY", ""),
+    GITHUB_TOKEN=_GITHUB_TOKEN,
+    GIST_ID_SETTINGS=_GIST_ID_SETTINGS,
+    GIST_ID_SENT_NEWS=_GIST_ID_SENT_NEWS,
+    GIST_ID_ALLOWED=_GIST_ID_ALLOWED,
+)
+
+# ربط sent_news_hashes بمستوى الوحدة مع state.sent_news_hashes
+# نعطي state نفس مرجع set
+state = BotState(
+    sent_news_hashes=sent_news_hashes,
+    last_alerts_hashes=last_alerts_hashes,
+    auto_alerts_enabled=auto_alerts_enabled,
+    daily_summary_enabled=daily_summary_enabled,
+    bot_shutdown=bot_shutdown,
+    channel_enabled=channel_enabled,
+    bot_resume_time=bot_resume_time,
+    allowed_users=ALLOWED_USERS,
+    _skip_old_news_once=_skip_old_news_once,
+)

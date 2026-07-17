@@ -1,22 +1,8 @@
-# 🐋 Whale News Bot - Dependencies
-# =====================================
-
-# Core Async
 aiohttp>=3.9.0
-aiohttp-socks>=0.8.0
-
-# Data & Time
+google-generativeai>=0.8.0
 pytz>=2024.1
-python-dateutil>=2.8.2
-
-# Image Processing
-Pillow>=10.0.0
-
-# AI/ML (Gemini)
-google-generativeai>=0.7.0
-
-# Web Framework (للـ webhook)
+requests>=2.31.0
 flask>=3.0.0
-
-# Utilities
+Pillow>=10.0.0
 python-dotenv>=1.0.0
+gunicorn>=21.2.0

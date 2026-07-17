@@ -1,25 +1,15 @@
 version: "3.8"
 
 services:
-  whale-news-bot:
+  news-bot:
     build: .
-    container_name: whale-news
+    container_name: whale-news-bot
     restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - PYTHONUNBUFFERED=1
-      - PYTHONDONTWRITEBYTECODE=1
+    env_file: .env
+    ports:
+      - "${PORT:-10000}:10000"
     volumes:
-      - ./data:/app/data
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:10000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+      - bot-data:/tmp
+
+volumes:
+  bot-data:

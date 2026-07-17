@@ -152,11 +152,11 @@ class NewsScorer:
     def _compile_patterns(self) -> Dict[str, List[Tuple[re.Pattern, int]]]:
         """تجميع أنماط الكلمات المفتاحية"""
         patterns = {}
-        for category, config in KEYWORDS_CONFIG.items():
+        for category, cfg in KEYWORDS_CONFIG.items():
             patterns[category] = []
-            for word in config["words"]:
+            for word in cfg["words"]:
                 pattern = re.compile(r'\b' + re.escape(word) + r'\b', re.IGNORECASE)
-                patterns[category].append((pattern, config["weight"]))
+                patterns[category].append((pattern, cfg["weight"]))
         return patterns
 
     def score(self, item: NewsItem) -> Tuple[float, List[str]]:
@@ -286,7 +286,6 @@ def process_news_item(item: NewsItem) -> Optional[NewsItem]:
     # (2) فحص السياق الكريبتوي
     if not has_crypto_context(text):
         return None
-
     # (3) فحص كلمات الرفض
     if has_rejection_keywords(text):
         return None
@@ -320,3 +319,25 @@ def filter_news_items(items: List[NewsItem], min_score: float = 1.5) -> List[New
     # ترتيب حسب الدرجة (الأعلى أولاً) ثم الوقت
     processed.sort(key=lambda x: (-x.score, -x.timestamp))
     return processed
+
+
+# ═══════════════════════════════════════════════════════════
+# 🔄 التوافق مع الكود القديم (backward compat)
+# ═══════════════════════════════════════════════════════════
+def news_hash(title: str, source: str = "") -> str:
+    """hash بسيط للخبر — للتوافق مع الكود القديم"""
+    title_norm = re.sub(r'[^\w\s]', '', title.lower())
+    title_norm = re.sub(r'\s+', ' ', title_norm).strip()[:60]
+    return hashlib.md5(title_norm.encode()).hexdigest()[:12]
+
+def deduplicate_news(items: list) -> list:
+    """إزالة التكرار البسيط — للتوافق مع الكود القديم"""
+    seen = set()
+    result = []
+    for item in items:
+        title = item.get("title", "") if isinstance(item, dict) else getattr(item, "title", "")
+        h = news_hash(title)
+        if h not in seen:
+            seen.add(h)
+            result.append(item)
+    return result

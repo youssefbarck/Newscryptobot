@@ -18,7 +18,7 @@ from config import (
 from filters import (
     classify_news, get_coin_keywords, time_ago, is_category_allowed,
     CRYPTO_CONTEXT_KEYWORDS, REJECTION_KEYWORDS,
-    AR_CRITICAL_KEYWORDS, AR_REJECTION_KEYWORDS, is_complete_news,
+    AR_CRITICAL_KEYWORDS, AR_REJECTION_KEYWORDS,
 )
 from rss import (
     get_all_news, deduplicate_news, news_hash, clean_html,
@@ -362,10 +362,10 @@ def scan_news_loop():
                 last_alerts_hashes[h] = now
                 # ترجمة الخبر قبل الإرسال
                 translate_news_item(item)
-                # 🔧 فحص اكتمال الخبر المترجم (تجنب أخبار مقطوعة)
+                # 🔧 فحص اكتمال الترجمة (translate_to_arabic تعيد None للمقطوع)
                 title_ar = item.get("title_ar", "")
-                if not is_complete_news(title_ar):
-                    log.info(f"   ⏭️ Skipping (incomplete): {item.get('title', '')[:60]}")
+                if not title_ar:
+                    log.info(f"   ⏭️ Skipping (translation None): {item.get('title', '')[:60]}")
                     continue
                 # إرسال للجميع - التنسيق المبسط
                 msg = fmt_news_item(item, show_summary=True, translate=True)

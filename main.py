@@ -111,6 +111,12 @@ if __name__ == "__main__":
                 # ترجمة الخبر قبل الإرسال
                 translate_news_item(item)
 
+                # فحص اكتمال الترجمة (translate_to_arabic تعيد None للمقطوع)
+                title_ar = item.get("title_ar", "")
+                if not title_ar:
+                    print(f"  ⏭️ Skipping (translation None): {item.get('title', '')[:60]}...")
+                    continue
+
                 # إرسال للقناة والمستخدمين
                 msg = fmt_news_item(item, show_summary=True, translate=True)
                 if not msg:

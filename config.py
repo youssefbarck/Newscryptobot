@@ -170,6 +170,7 @@ class NewsSource:
     category: str = "crypto"
     lang: str = "en"
     timeout: int = 15
+    circuit_breaker: Any = None
 
     def __getitem__(self, key):
         return getattr(self, key, "")
@@ -254,6 +255,7 @@ for _name, _data in _RAW_NEWS_SOURCES.items():
         category=_data.get("category", "crypto"),
         lang=_data.get("lang", "en"),
         timeout=_data.get("timeout", 15),
+        circuit_breaker=CircuitBreaker(fail_threshold=3, reset_timeout=300),
     )
 
 # ═══════════════════════════════════════════════════════════

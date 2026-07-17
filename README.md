@@ -1,4 +1,4 @@
-# 🐋 Whale News Bot v2.0
+# 🐋 Whale News Bot
 
 بوت أخبار العملات الرقمية المتقدم — بنية async مع queues و circuit breaker.
 
@@ -18,10 +18,10 @@
 
 ```bash
 # تثبيت المتطلبات
-pip install -r requirements_v2.txt
+pip install -r requirements.txt
 
 # تشغيل
-python main_v2.py
+python main.py
 
 # أو وضع GitHub Actions
-RUN_MODE=oneshot python main_v2.py
+RUN_MODE=oneshot python main.py

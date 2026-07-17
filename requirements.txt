@@ -1,4 +1,4 @@
-# 🐋 Whale News Bot v2.0 - Dependencies
+# 🐋 Whale News Bot - Dependencies
 # =====================================
 
 # Core Async

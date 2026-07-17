@@ -3,7 +3,7 @@ version: "3.8"
 services:
   whale-news-bot:
     build: .
-    container_name: whale-news-v2
+    container_name: whale-news
     restart: unless-stopped
     env_file:
       - .env

@@ -6,6 +6,7 @@
 
 import os, re, hashlib, time, asyncio
 from typing import Optional, Tuple, Dict, List
+from dataclasses import dataclass
 
 import aiohttp
 
@@ -13,7 +14,7 @@ from config import log, BotConfig
 
 
 # ═══════════════════════════════════════════════════════════
-# 💾 Translation Cache (ذاكرة مؤقتة)
+# 💾 Translation Cache (ذاكرة دائمة + ذاكرة مؤقتة)
 # ═══════════════════════════════════════════════════════════
 class TranslationCache:
     """Cache ذكي للترجمة مع TTL"""
@@ -147,7 +148,7 @@ def _protect_entities(text: str) -> Tuple[str, Dict[str, Tuple[str, Optional[str
         pattern = re.compile(re.escape(term), re.IGNORECASE)
         match = pattern.search(protected)
         if match:
-            placeholder = f"\u00a7\u00a7{counter:03d}\u00a7\u00a7"
+            placeholder = f"§§{counter:03d}§§"
             protected = pattern.sub(placeholder, protected, count=1)
             restore_map[placeholder] = (match.group(0), trans)
             counter += 1
@@ -172,11 +173,11 @@ def _restore_entities(text: str, restore_map: Dict) -> str:
         num = int(placeholder[2:5])
         patterns = [
             re.escape(placeholder),
-            re.escape(f"\u00a7\u00a7{num}\u00a7\u00a7"),
-            re.escape(f"\u00a7 {num} \u00a7"),
+            re.escape(f"§§{num}§§"),
+            re.escape(f"§ {num} §"),
             re.escape(f"({num})"),
             re.escape(f"[{num}]"),
-            re.escape(f"\u00ab{num}\u00bb"),
+            re.escape(f"«{num}»"),
         ]
 
         for pat in patterns:
@@ -186,7 +187,7 @@ def _restore_entities(text: str, restore_map: Dict) -> str:
                 break
 
     # تنظيف أي placeholders متبقية
-    result = re.sub(r"\u00a7\u00a7\d{3}\u00a7\u00a7", "", result)
+    result = re.sub(r"§§\d{3}§§", "", result)
     return result
 
 
@@ -196,19 +197,24 @@ def _restore_entities(text: str, restore_map: Dict) -> str:
 class GeminiTranslator:
     """مترجم Gemini مع إدارة النماذج"""
 
-    _SYSTEM_PROMPT = """أنت محرر صحفي عربي محترف متخصص في أخبار العملات الرقمية.
+    _SYSTEM_PROMPT = """أنت محرر أخبار متخصص في العملات الرقمية، ولست مترجمًا أو ملخصًا آليًا.
+مهمتك هي إعادة صياغة الخبر ليبدو وكأنه كُتب بواسطة صحفي محترف لقناة إخبارية على تيليجرام.
 
-قواعد صارمة:
-1. العربية الفصحى السهلة والواضحة فقط
-2. إعادة صياغة احترافية وليست ترجمة حرفية
-3. حافظ على جميع المعلومات والأرقام دون إضافة
-4. اترك أسماء العملات والشركات بالإنجليزية: Bitcoin, Ethereum, Binance, SEC, ETF
-5. ترجم المصطلحات: hack=اختراق, exploit=ثغرة, crash=انهيار, surge=قفزة
-6. تجاهل اسم المصدر في النهاية
-7. لا إيموجي أو مقدمات
-8. أكمل كل جملة
-9. العنوان: جذاب ومختصر (≤ 90 حرف)
-10. الخبر: 50-120 كلمة
+القواعد:
+- لا تترجم الخبر حرفيًا.
+- اكتب بأسلوب خبري طبيعي، وليس وصفيًا أو روبوتيًا.
+- ابدأ دائمًا بالحدث أو المعلومة الأهم، وليس بعبارات مثل: "تشهد..." "يشهد..." "وسط..." "في ظل..." "بالتزامن مع..." "مع استمرار..." "مما يعزز..." "وهو ما قد..."
+- لا تستخدم قالبًا ثابتًا في جميع الأخبار، بل غيّر أسلوب البداية باستمرار.
+- استخدم أفعالًا صحفية متنوعة مثل: أعلن، كشف، أظهر، سجل، اقترب، تلقى، عاد، واصل، عزز، نجح، فشل، يستعد، يترقب، جذب، أثار، دعم، دفع، رفع، خفض، أنهى.
+- إذا كان الخبر يعتمد على تحليل فني أو توقع، انسبه بوضوح إلى التحليل أو المحللين، ولا تقدمه كحقيقة مؤكدة.
+- إذا كان الخبر يتعلق بالسعر أو الحركة الفنية، ركز على الحدث أولًا ثم أضف السياق الفني بإيجاز.
+- اجعل النص قصيرًا ومباشرًا، بين 25 و60 كلمة.
+- لا تضف رأيك الشخصي أو نصائح استثمارية.
+- لا تستخدم عبارات مبالغًا فيها مثل: "انفجار سعري" "إلى القمر" "فرصة لا تعوض" "صعود مؤكد".
+- استخدم لغة عربية فصحى سهلة ومناسبة للنشر الفوري.
+- اجعل كل خبر مختلفًا في الصياغة حتى لو كانت الأخبار متشابهة.
+- حافظ على جميع الأسماء الإنجليزية للعملات والشركات: Bitcoin, Ethereum, Binance, SEC, ETF.
+- لا إيموجي أو مقدمات.
 
 التنسيق المطلوب:
 العنوان:
@@ -304,9 +310,7 @@ class GeminiTranslator:
                     }
                 )
                 if response and response.text:
-                    # 🔧 إصلاح: إزالة علامات الاقتباس المتداخلة
-                    result = response.text.strip()
-                    result = result.strip('"').strip("'").strip("`")
+                    result = response.text.strip().strip('"'`')
                     title, body = self._parse_output(result)
                     if title:
                         log.info(f"✅ Gemini ({model_name}): translation success")
@@ -321,47 +325,46 @@ class GeminiTranslator:
         text_len = len(text)
         sent_count = "2" if text_len < 150 else "2-3" if text_len < 400 else "3-4"
 
-        prompt = f"""أعد صياغة الخبر التالي بالعربية الفصحى بأسلوب صحفي احترافي.
+        prompt = f"""أعد صياغة الخبر التالي بأسلوب صحفي مباشر.
 
-الشروط:
-- اكتب من {sent_count} جمل حسب طول الخبر
-- حافظ على جميع أسماء العملات والشركات والأرقام
-- لا تحذف أي اسم عملة أو شركة
-- لا تستبدل الأسماء بكلمات عامة
-- لا تضف معلومات غير موجودة
-- أخرج النص العربي النهائي فقط
+- العنوان: جذاب ومختصر (≤ 90 حرف)، يبدأ بفعل صحفي أو بالمعلومة الأهم.
+- الخبر: بين 25 و60 كلمة، ابدأ بالحدث مباشرة.
+- حافظ على جميع أسماء العملات والشركات والأرقام دون تحريف.
+- لا تحذف أي اسم عملة أو شركة.
+- لا تضف معلومات غير موجودة في الخبر الأصلي.
+- أخرج النص العربي النهائي فقط.
 """
         if missing_names:
-            prompt += f"""
+            prompt += f"
 🔴 تنبيه: هذه الأسماء اختفت في المحاولة السابقة: {', '.join(missing_names)}. يجب أن تظهر كلها.
-"""
+"
 
-        prompt += f"""
+        prompt += f"
 الخبر:
 
-{text}"""
+{text}"
         return prompt
 
     def _parse_output(self, text: str) -> Tuple[Optional[str], str]:
-        """استخراج العنوان والخبر — 🔧 إصلاح: raw strings صحيحة"""
+        """استخراج العنوان والخبر"""
         if not text:
             return None, ""
 
-        # 🔧 إصلاح حرج: استخدام raw strings مع \n الحقيقي (ليس newline حرفي)
-        # البحث عن "الخبر:" مع فاصل سطر
-        parts = re.split(r'\n\s*الخبر\s*:\s*', text, maxsplit=1)
+        # البحث عن التنسيق
+        parts = re.split(r'
+\s*الخبر\s*:\s*', text, maxsplit=1)
         if len(parts) == 2:
             header = parts[0].strip()
             body = parts[1].strip()
-            # البحث عن "العنوان:" مع فاصل سطر
-            title_match = re.split(r'\n\s*العنوان\s*:\s*', header, maxsplit=1)
+            title_match = re.split(r'
+\s*العنوان\s*:\s*', header, maxsplit=1)
             if len(title_match) == 2:
                 title = title_match[1].strip()
             else:
                 title = header
 
-            title = title.strip(" .,\u060c:;\u061b-")
-            body = body.strip(" .,\u060c:;\u061b-")
+            title = title.strip(" .,،:؛-")
+            body = body.strip(" .,،:؛-")
 
             if len(title) > 3 and (len(body) > 10 or not body):
                 return title, body
@@ -386,7 +389,7 @@ class GroqTranslator:
                     json={
                         "model": "llama-3.3-70b-versatile",
                         "messages": [
-                            {"role": "system", "content": "أعد صياغة الخبر الإنجليزي بالعربية الفصحى بأسلوب صحفي. حافظ على الأسماء الإنجليزية."},
+                            {"role": "system", "content": "أنت محرر أخبار متخصص في العملات الرقمية. أعد صياغة الخبر بالعربية بأسلوب صحفي مباشر. ابدأ بالحدث أو الفعل الأهم. استخدم أفعالًا صحفية متنوعة (أعلن، كشف، سجل، رفع، خفض...). لا تترجم حرفيًا. حافظ على الأسماء الإنجليزية للعملات والشركات. 25-60 كلمة. لا إيموجي."},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,
@@ -423,7 +426,7 @@ class OpenRouterTranslator:
                     json={
                         "model": "qwen/qwen-2.5-72b-instruct",
                         "messages": [
-                            {"role": "system", "content": "أعد صياغة الخبر الإنجليزي بالعربية الفصحى. حافظ على الأسماء الإنجليزية."},
+                            {"role": "system", "content": "أنت محرر أخبار متخصص في العملات الرقمية. أعد صياغة الخبر بالعربية بأسلوب صحفي مباشر. ابدأ بالحدث أو الفعل الأهم. استخدم أفعالًا صحفية متنوعة (أعلن، كشف، سجل، رفع، خفض...). لا تترجم حرفيًا. حافظ على الأسماء الإنجليزية للعملات والشركات. 25-60 كلمة. لا إيموجي."},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,
@@ -551,12 +554,12 @@ class TranslationManager:
         if not text:
             return False
         trimmed = text.strip()
-        bad_endings = ("\u0639\u0644\u0649", "\u0641\u064a", "\u0645\u0646", "\u0625\u0644\u0649", "\u0639\u0646", "\u0645\u0639", "\u062d\u062a\u0649", "\u062e\u0644\u0627\u0644",
-                       "\u0628\u0639\u062f", "\u0642\u0628\u0644", "\u0628\u064a\u0646", "\u0636\u062f", "\u0639\u0628\u0631", "\u0646\u062d\u0648", "\u0644\u062f\u0649", "\u0628\u0633\u0628\u0628",
-                       "\u2709\ufe0f", "...", "\u060c", ":")
+        bad_endings = ("على", "في", "من", "إلى", "عن", "مع", "حتى", "خلال",
+                       "بعد", "قبل", "بين", "ضد", "عبر", "نحو", "لدى", "بسبب",
+                       "✉️", "...", "،", ":")
         if trimmed.endswith(bad_endings):
             return False
-        if len(trimmed) >= 250 and not re.search(r'[.!?\u061f?!]$', trimmed):
+        if len(trimmed) >= 250 and not re.search(r'[.!؟?!]$', trimmed):
             return False
         return True
 
@@ -591,7 +594,7 @@ class TranslationManager:
         protected_text, restore_map = _protect_entities(text)
         entities = self._extract_entities(text)
         if entities:
-            log.info(f"   \U0001f4cb Entities: {entities}")
+            log.info(f"   📋 Entities: {entities}")
 
         # ═══ الطبقة 1: Gemini ═══
         if self.gemini:
@@ -606,7 +609,7 @@ class TranslationManager:
                     ok, missing = self._verify_entities(text, check_text)
 
                     if not ok:
-                        log.warning(f"   \U0001f504 Gemini retry \u2014 missing: {missing}")
+                        log.warning(f"   🔄 Gemini retry — missing: {missing}")
                         retry = await self.gemini.translate(protected_text, missing_names=missing)
                         if retry:
                             title, body = retry
@@ -648,7 +651,7 @@ class TranslationManager:
                 await translation_cache.set(cache_key, result)
                 return result
 
-        log.warning("   \u274c All translation methods failed")
+        log.warning("   ❌ All translation methods failed")
         return None
 
     async def translate_item(self, item) -> None:
@@ -670,112 +673,6 @@ class TranslationManager:
                     item.summary_ar = summary_ar
                 else:
                     item['summary_ar'] = summary_ar
-
-
-# ═══════════════════════════════════════════════════════════
-# 📊 ETF Flow Report (Async — مُعاد من النسخة القديمة)
-# ═══════════════════════════════════════════════════════════
-_ETF_FLOW_REPORT_PROMPT = """أنت محلل مالي متخصص في صناديق ETF الخاصة بالعملات الرقمية.
-
-ستستلم بيانات صافي التدفقات اليومية بعد إغلاق جلسة التداول الأمريكية.
-
-المطلوب:
-
-1. أنشئ تقريراً عربياً احترافياً ومختصراً.
-2. ابدأ بعنوان مناسب يوضح أن التقرير خاص بإغلاق الجلسة.
-3. اعرض جميع الصناديق بنفس الترتيب الوارد في البيانات.
-4. لا تغيّر أي رقم أو قيمة.
-5. احتفظ بالإشارات (+) و(-).
-6. استخدم:
-   \u2197\ufe0f للتدفقات الموجبة.
-   \U0001f4c9 للتدفقات السالبة.
-   \u2796 عندما تكون القيمة صفر.
-7. في النهاية اكتب فقرة قصيرة بعنوان:
-   \U0001f4ca الخلاصة
-8. يجب أن تعتمد الخلاصة على الأرقام فقط دون أي توقعات أو نصائح استثمارية.
-9. إذا كانت معظم التدفقات موجبة فاذكر أن الجلسة شهدت تدفقات إيجابية.
-10. إذا كانت معظمها سالبة فاذكر أن الجلسة شهدت ضغوط بيع.
-11. إذا كانت متباينة فاذكر أن التدفقات كانت مختلطة.
-12. إذا كانت جميع القيم صفراً فاذكر أنه لم تُسجل تدفقات تُذكر.
-13. لا تخترع أي معلومة غير موجودة.
-14. لا تذكر أسعار العملات أو توقعات السوق.
-15. أخرج التقرير النهائي فقط دون أي مقدمات أو تعليقات."""
-
-
-async def generate_etf_flow_report(etf_data: str, config_obj: BotConfig) -> Optional[str]:
-    """يولّد تقرير تدفقات ETF اليومي باستخدام LLM (async)
-    etf_data: نص يحتوي بيانات التدفقات
-    Returns: التقرير العربي أو None إذا فشل
-    """
-    if not etf_data:
-        return None
-
-    user_prompt = f"بيانات التدفقات:\n\n{etf_data}\n\nأعد التقرير:"
-
-    # تجربة Gemini أولاً
-    if config_obj.GEMINI_API_KEY:
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=config_obj.GEMINI_API_KEY)
-
-            model_names = [
-                "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest",
-                "gemini-2.5-pro", "gemini-2.0-pro",
-            ]
-
-            for model_name in model_names:
-                try:
-                    model = genai.GenerativeModel(model_name, system_instruction=_ETF_FLOW_REPORT_PROMPT)
-                    response = await asyncio.to_thread(
-                        model.generate_content,
-                        _ETF_FLOW_REPORT_PROMPT + "\n\n" + user_prompt,
-                        generation_config={
-                            "temperature": 0.2, "top_p": 0.8, "top_k": 40,
-                            "max_output_tokens": 1200,
-                        }
-                    )
-                    if response and response.text:
-                        result = response.text.strip().strip('"\'`')
-                        if len(result) > 20:
-                            log.info("   \u2705 ETF report generated (Gemini)")
-                            return result
-                except Exception as e:
-                    log.info(f"   \u23ed\ufe0f Gemini ETF report failed: {str(e)[:60]}")
-                    continue
-        except Exception as e:
-            log.warning(f"Gemini ETF init err: {e}")
-
-    # Fallback: Groq (async)
-    if config_obj.GROQ_API_KEY:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    json={
-                        "model": "llama-3.3-70b-versatile",
-                        "messages": [
-                            {"role": "system", "content": _ETF_FLOW_REPORT_PROMPT},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "temperature": 0.2,
-                        "max_tokens": 1200,
-                    },
-                    headers={
-                        "Authorization": f"Bearer {config_obj.GROQ_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=aiohttp.ClientTimeout(total=30),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        result = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-                        if result and len(result) > 20:
-                            log.info("   \u2705 ETF report generated (Groq)")
-                            return result
-        except Exception as e:
-            log.warning(f"Groq ETF report err: {e}")
-
-    return None
 
 
 # ═══════════════════════════════════════════════════════════

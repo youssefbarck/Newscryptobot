@@ -287,7 +287,7 @@ def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]
         coins_str = " ".join([f"#{c}" for c in item.coins[:5]])
         msg += f"\n{coins_str}"
 
-    msg += "\n\n✉️"
+    msg += "\n\n✉️ @newscrypto1m"
 
     return msg
 
@@ -313,7 +313,7 @@ def format_etf_flows(etf_data: Dict) -> str:
     eth_parts = [f"{t} {v:+.1f}M" for t, v in top_eth if v != 0]
     if eth_parts:
         msg += f"  ({', '.join(eth_parts)})"
-    msg += "\n\n✉️"
+    msg += "\n\n✉️ @newscrypto1m"
 
     return msg
 
@@ -524,7 +524,7 @@ def build_daily_summary() -> str:
                 msg += f"   {icon} {cat}: {count}\n"
 
     msg += "\n━━━━━━━━━━━━━━━━━━\n"
-    msg += "🤖 <i>تم إنشاء هذا الملخص تلقائياً</i>"
+    msg += "🤖 <i>تم إنشاء هذا الملخص تلقائياً</i>\n@newscrypto1m"
     return msg
 
 

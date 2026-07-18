@@ -310,7 +310,7 @@ class GeminiTranslator:
                     }
                 )
                 if response and response.text:
-                    result = response.text.strip().strip('"'`')
+                    result = response.text.strip().strip('"\'`')
                     title, body = self._parse_output(result)
                     if title:
                         log.info(f"✅ Gemini ({model_name}): translation success")

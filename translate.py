@@ -335,14 +335,9 @@ class GeminiTranslator:
 - أخرج النص العربي النهائي فقط.
 """
         if missing_names:
-            prompt += f"
-🔴 تنبيه: هذه الأسماء اختفت في المحاولة السابقة: {', '.join(missing_names)}. يجب أن تظهر كلها.
-"
+            prompt += f"\n🔴 تنبيه: هذه الأسماء اختفت في المحاولة السابقة: {', '.join(missing_names)}. يجب أن تظهر كلها.\n"
 
-        prompt += f"
-الخبر:
-
-{text}"
+        prompt += f"\nالخبر:\n\n{text}"
         return prompt
 
     def _parse_output(self, text: str) -> Tuple[Optional[str], str]:
@@ -351,13 +346,11 @@ class GeminiTranslator:
             return None, ""
 
         # البحث عن التنسيق
-        parts = re.split(r'
-\s*الخبر\s*:\s*', text, maxsplit=1)
+        parts = re.split(r'\n\s*الخبر\s*:\s*', text, maxsplit=1)
         if len(parts) == 2:
             header = parts[0].strip()
             body = parts[1].strip()
-            title_match = re.split(r'
-\s*العنوان\s*:\s*', header, maxsplit=1)
+            title_match = re.split(r'\n\s*العنوان\s*:\s*', header, maxsplit=1)
             if len(title_match) == 2:
                 title = title_match[1].strip()
             else:

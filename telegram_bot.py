@@ -16,8 +16,8 @@ from config import (
     log, BotConfig, BotState, TELEGRAM_RATE_LIMITER, TELEGRAM_CB,
     MAX_NEWS_PER_SCAN, MAX_NEWS_AGE, SCAN_INTERVAL,
     SUMMARY_HOUR, SUMMARY_MINUTE, tz,
-    load_sent_news, save_sent_news,
 )
+import dedup
 from filters import NewsItem, filter_news_items, is_complete_news, time_ago
 from rss import fetch_all_news, fetch_etf_flows, session_manager
 from translate import TranslationManager, translate_source_name
@@ -581,10 +581,8 @@ async def run_oneshot(config: BotConfig, state: BotState):
     print("=" * 60)
 
     # تحميل الأخبار المُرسلة سابقاً
-    load_sent_news()
-    import config as _cfg
-    state.sent_news_hashes = _cfg.sent_news_hashes
-    print(f"📊 Loaded {len(state.sent_news_hashes)} sent hashes")
+    sent_hashes = dedup.load()
+    print(f"📊 Loaded {len(sent_hashes)} sent hashes")
 
     # جلب الأخبار
     news = await fetch_all_news(max_concurrent=5)
@@ -600,7 +598,7 @@ async def run_oneshot(config: BotConfig, state: BotState):
         if item.timestamp > 0 and (now - item.timestamp) > MAX_NEWS_AGE:
             continue
 
-        if item.hash in state.sent_news_hashes:
+        if dedup.is_sent(sent_hashes, item.hash):
             continue
 
         # ترجمة
@@ -617,7 +615,7 @@ async def run_oneshot(config: BotConfig, state: BotState):
             continue
 
         # إرسال
-        state.sent_news_hashes.add(item.hash)
+        dedup.mark_sent(sent_hashes, item.hash)
 
         if state.is_channel_enabled(config):
             await send_telegram_message(config.CHANNEL_ID, msg, item.image, config.TOKEN)
@@ -632,8 +630,8 @@ async def run_oneshot(config: BotConfig, state: BotState):
         etf = await fetch_etf_flows()
         if etf:
             etf_hash = f"etf_{etf['date']}"
-            if etf_hash not in state.sent_news_hashes:
-                state.sent_news_hashes.add(etf_hash)
+            if not dedup.is_sent(sent_hashes, etf_hash):
+                dedup.mark_sent(sent_hashes, etf_hash)
                 msg = format_etf_flows(etf)
                 if state.is_channel_enabled(config):
                     await send_telegram_message(config.CHANNEL_ID, msg, None, config.TOKEN)
@@ -642,10 +640,9 @@ async def run_oneshot(config: BotConfig, state: BotState):
     except Exception as e:
         print(f"  ⚠️ ETF error: {e}")
 
-    # حفظ الأخبار المُرسلة — مزامنة مع config ثم حفظ
-    _cfg.sent_news_hashes = state.sent_news_hashes
-    save_sent_news(force=True)
-    print(f"💾 Saved {len(state.sent_news_hashes)} hashes")
+    # حفظ الهاشات (محلي + commit للريبو)
+    dedup.save_to_repo(sent_hashes)
+    print(f"💾 Saved {len(sent_hashes)} hashes")
 
     print("=" * 60)
     print(f"📊 Results: {len(news)} fetched, {len(filtered)} important, {alerts_sent} sent")

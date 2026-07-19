@@ -21,6 +21,7 @@ import dedup
 from filters import NewsItem, filter_news_items, is_complete_news, time_ago
 from rss import fetch_all_news, fetch_etf_flows, session_manager
 from translate import TranslationManager, translate_source_name
+import daily_report
 
 
 # ═══════════════════════════════════════════════════════════
@@ -553,6 +554,7 @@ async def run_bot(config: BotConfig, state: BotState):
         asyncio.create_task(message_consumer(config, state)),
         asyncio.create_task(scan_news_loop(config, state, translator)),
         asyncio.create_task(daily_summary_loop(config, state)),
+        asyncio.create_task(daily_report.daily_report_loop(config, state)),
     ]
 
     try:

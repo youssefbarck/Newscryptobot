@@ -595,8 +595,16 @@ async def run_oneshot(config: BotConfig, state: BotState):
     filtered = filter_news_items(news, min_score=1.5)
     now = time.time()
     alerts_sent = 0
+    _oneshot_start = now
+    _oneshot_max_runtime = 20 * 60  # أقصى مدة تشغيل: 20 دقيقة (لتجنب timeout)
+    _oneshot_news_delay = 5 * 60    # 5 دقائق بين كل خبر وآخر
 
     for item in filtered[:MAX_NEWS_PER_SCAN]:
+        # تجاوز الحد الزمني
+        if time.time() - _oneshot_start > _oneshot_max_runtime:
+            print(f"  ⏱️ Reached max runtime, {len(filtered) - alerts_sent} news deferred to next run")
+            break
+
         if item.timestamp > 0 and (now - item.timestamp) > MAX_NEWS_AGE:
             continue
 
@@ -625,7 +633,13 @@ async def run_oneshot(config: BotConfig, state: BotState):
 
         alerts_sent += 1
         print(f"  ✉️ {item.title[:60]}...")
-        await asyncio.sleep(1.5)
+
+        # تأخير 5 دقائق بين الأخبار (ما عدا الأول)
+        if alerts_sent > 0:
+            remaining = _oneshot_max_runtime - (time.time() - _oneshot_start)
+            if remaining > _oneshot_news_delay:
+                print(f"  ⏳ Waiting 5 min before next news...")
+                await asyncio.sleep(_oneshot_news_delay)
 
     # ETF
     try:
@@ -641,6 +655,12 @@ async def run_oneshot(config: BotConfig, state: BotState):
                 print(f"  📊 ETF flows: {etf['date']}")
     except Exception as e:
         print(f"  ⚠️ ETF error: {e}")
+
+    # التقرير اليومي (إن كان ضمن النافذة 3:00-3:30)
+    try:
+        await daily_report.send_report_if_due(config, state)
+    except Exception as e:
+        print(f"  ⚠️ Daily report error: {e}")
 
     # حفظ الهاشات (محلي + commit للريبو)
     dedup.save_to_repo(sent_hashes)

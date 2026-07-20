@@ -19,6 +19,7 @@ from config import log, BotConfig, BotState, tz, HEADERS
 # ═══════════════════════════════════════════════════════════
 REPORT_HOUR = 15          # 03:00 مساءً
 REPORT_MINUTE = 0
+REPORT_WINDOW_MINUTES = 30  # نافذة السماح: 3:00 - 3:30
 REPORT_PAUSE_SECONDS = 60 # إيقاف الأخبار لمدة دقيقة
 _STATE_FILE = "daily_report_state.json"
 COHERE_API_URL = "https://api.cohere.com/v2/chat"
@@ -439,14 +440,58 @@ def build_report(data: Dict) -> str:
     return "\n".join(lines)
 
 
+def _in_report_window() -> bool:
+    """هل الوقت الحالي ضمن نافذة الإرسال (3:00 - 3:30)؟"""
+    now = datetime.now(tz)
+    if now.hour != REPORT_HOUR:
+        return False
+    return REPORT_MINUTE <= now.minute < (REPORT_MINUTE + REPORT_WINDOW_MINUTES)
+
+
+async def _generate_and_send(config: BotConfig, state: BotState) -> bool:
+    """توليد التقرير وإرساله — يُستخدم في polling و oneshot"""
+    from telegram_bot import message_queue, QueuedMessage, send_telegram_message
+
+    log.info("\U0001f4ca Generating daily crypto report...")
+
+    # ═══ المرحلة 1: Cohere (طلب واحد + بحث ويب) ═══
+    data = await fetch_all_via_cohere()
+
+    # ═══ المرحلة 2: Fallback بالمصادر المجانية ═══
+    if not data:
+        log.info("\U0001f4ca Cohere failed, using fallback APIs...")
+        data = {}
+        fg = await fetch_fear_greed_fallback()
+        if fg:
+            data["fear_greed"] = fg
+        mkt = await fetch_market_fallback()
+        if mkt:
+            data["market"] = mkt
+
+    msg = build_report(data)
+    if not msg or len(msg) < 50:
+        log.warning("\U0001f4ca Report was empty, skipping")
+        return False
+
+    sent = False
+    if state.is_channel_enabled(config):
+        await message_queue.put(QueuedMessage(text=msg, chat_id=config.CHANNEL_ID, priority=5))
+        sent = True
+    await message_queue.put(QueuedMessage(text=msg, chat_id=config.CHAT_ID, priority=5))
+    sent = True
+
+    if sent:
+        report_state.mark_sent()
+        log.info("\U0001f4ca Daily report sent and state saved")
+    return sent
+
+
 # ═══════════════════════════════════════════════════════════
-# ⏰ حلقة الجدولة
+# ⏰ حلقة الجدولة (polling mode)
 # ═══════════════════════════════════════════════════════════
 async def daily_report_loop(config: BotConfig, state: BotState):
-    """حلقة التقرير اليومي — مستقلة عن نظام الأخبار"""
-    from telegram_bot import message_queue, QueuedMessage
+    """حلقة التقرير اليومي — مستقلة عن نظام الأخبار (polling mode)"""
 
-    # تحميل الحالة السابقة
     report_state.load()
     log.info(f"\U0001f4ca Daily Report module started \u2014 last sent: {report_state._last_date or 'never'}")
 
@@ -456,69 +501,11 @@ async def daily_report_loop(config: BotConfig, state: BotState):
                 await asyncio.sleep(60)
                 continue
 
-            now = datetime.now(tz)
-
-            # فحص الوقت
-            if now.hour == REPORT_HOUR and now.minute >= REPORT_MINUTE:
-                if report_state.already_sent_today():
-                    await asyncio.sleep(60)
-                    continue
-
-                log.info("\U0001f4ca Generating daily crypto report...")
-
+            if _in_report_window() and not report_state.already_sent_today():
                 # إيقاف الأخبار مؤقتاً
                 state.bot_resume_time = time.time() + REPORT_PAUSE_SECONDS
-                log.info("\U0001f4ca Pausing news for 60s to send daily report")
                 await asyncio.sleep(REPORT_PAUSE_SECONDS)
-
-                # ═══ المرحلة 1: Cohere (طلب واحد + بحث ويب) ═══
-                data = await fetch_all_via_cohere()
-
-                # ═══ المرحلة 2: Fallback بالمصادر المجانية ═══
-                if not data:
-                    log.info("\U0001f4ca Cohere failed, using fallback APIs...")
-                    data = {}
-
-                    # Fear & Greed
-                    fg = await fetch_fear_greed_fallback()
-                    if fg:
-                        data["fear_greed"] = fg
-
-                    # Market overview
-                    mkt = await fetch_market_fallback()
-                    if mkt:
-                        data["market"] = mkt
-
-                # بناء التقرير
-                msg = build_report(data)
-
-                if not msg or len(msg) < 50:
-                    log.warning("\U0001f4ca Report was empty, skipping")
-                    await asyncio.sleep(120)
-                    continue
-
-                # إرسال التقرير
-                sent = False
-
-                if state.is_channel_enabled(config):
-                    await message_queue.put(QueuedMessage(
-                        text=msg,
-                        chat_id=config.CHANNEL_ID,
-                        priority=5,
-                    ))
-                    sent = True
-
-                await message_queue.put(QueuedMessage(
-                    text=msg,
-                    chat_id=config.CHAT_ID,
-                    priority=5,
-                ))
-                sent = True
-
-                if sent:
-                    report_state.mark_sent()
-                    log.info("\U0001f4ca Daily report sent and state saved")
-
+                await _generate_and_send(config, state)
                 await asyncio.sleep(120)
                 continue
 
@@ -527,3 +514,21 @@ async def daily_report_loop(config: BotConfig, state: BotState):
         except Exception as e:
             log.error(f"\U0001f4ca Daily report loop error: {e}\n{traceback.format_exc()[-300:]}")
             await asyncio.sleep(60)
+
+
+# ═══════════════════════════════════════════════════════════
+# 🔄 One-shot Mode (GitHub Actions)
+# ═══════════════════════════════════════════════════════════
+async def send_report_if_due(config: BotConfig, state: BotState):
+    """إرسال التقرير إن كان الوقت ضمن النافذة — يُستدعى من run_oneshot"""
+    report_state.load()
+
+    if not _in_report_window():
+        log.info(f"\U0001f4ca Not in report window (needs {REPORT_HOUR}:{REPORT_MINUTE:02d}-{REPORT_HOUR}:{REPORT_MINUTE + REPORT_WINDOW_MINUTES:02d})")
+        return
+
+    if report_state.already_sent_today():
+        log.info("\U0001f4ca Report already sent today, skipping")
+        return
+
+    await _generate_and_send(config, state)

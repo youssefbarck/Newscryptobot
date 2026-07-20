@@ -204,7 +204,7 @@ _RAW_NEWS_SOURCES = {
         "category": "crypto", "lang": "en"
     },
     "CoinPedia": {
-        "url": "https://coingeek.com/feed/",
+        "url": "https://coinpedia.org/feed/",
         "category": "crypto", "lang": "en"
     },
     "Blockworks": {

@@ -291,7 +291,7 @@ async def fetch_market_fallback() -> Optional[Dict]:
             for c in sorted_by_change[:3]:
                 chg = c.get("price_change_percentage_24h", 0) or 0
                 symbol = c.get("symbol", "?").upper()
-                result["gainers"].append({"symbol": symbol, "change": f"+{chg:.1f}%"})
+                result["gainers"].append({"symbol": symbol, "change": f"{chg:+.1f}%"})
 
             result["losers"] = []
             for c in sorted_by_change[-3:][::-1]:
@@ -474,11 +474,16 @@ async def _generate_and_send(config: BotConfig, state: BotState) -> bool:
         return False
 
     sent = False
-    if state.is_channel_enabled(config):
+    if state.is_channel_enabled(config) and config.CHANNEL_ID:
         await message_queue.put(QueuedMessage(text=msg, chat_id=config.CHANNEL_ID, priority=5))
         sent = True
-    await message_queue.put(QueuedMessage(text=msg, chat_id=config.CHAT_ID, priority=5))
-    sent = True
+    if config.CHAT_ID:
+        await message_queue.put(QueuedMessage(text=msg, chat_id=config.CHAT_ID, priority=5))
+        sent = True
+
+    if not sent:
+        log.warning("\U0001f4ca Report not queued (no chat_id)")
+        return False
 
     if sent:
         report_state.mark_sent()

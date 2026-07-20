@@ -373,6 +373,14 @@ def _parse_farside_table(html: str, etf_type: str = "btc") -> Optional[Dict]:
     return {"date": latest_date, "total": net_total, "funds": funds}
 
 
+def _farside_day(date_str: str) -> int:
+    """استخراج رقم اليوم من تاريخ مثل '9 Jul 2025' للمقارنة الصحيحة"""
+    try:
+        return int(date_str.strip().split()[0])
+    except (ValueError, IndexError, AttributeError):
+        return 0
+
+
 async def fetch_etf_flows() -> Optional[Dict]:
     """جلب بيانات ETF بشكل async"""
     result = {"date": None, "btc_total": 0.0, "eth_total": 0.0, "btc_funds": {}, "eth_funds": {}}
@@ -405,7 +413,7 @@ async def fetch_etf_flows() -> Optional[Dict]:
                     html = await resp.text()
                     eth_data = _parse_farside_table(html, "eth")
                     if eth_data:
-                        if eth_data["date"] and (not result["date"] or eth_data["date"] >= result["date"]):
+                        if eth_data["date"] and (not result["date"] or _farside_day(eth_data["date"]) >= _farside_day(result["date"])):
                             result["date"] = eth_data["date"]
                         result["eth_total"] = eth_data["total"]
                         result["eth_funds"] = eth_data["funds"]

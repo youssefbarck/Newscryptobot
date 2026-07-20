@@ -17,9 +17,6 @@ from config import log, BotConfig, BotState, tz, HEADERS
 # ═══════════════════════════════════════════════════════════
 # ⚙️ إعدادات التقرير
 # ═══════════════════════════════════════════════════════════
-REPORT_HOUR = 15          # 03:00 مساءً
-REPORT_MINUTE = 0
-REPORT_WINDOW_MINUTES = 30  # نافذة السماح: 3:00 - 3:30
 REPORT_PAUSE_SECONDS = 60 # إيقاف الأخبار لمدة دقيقة
 _STATE_FILE = "daily_report_state.json"
 COHERE_API_URL = "https://api.cohere.com/v2/chat"
@@ -76,23 +73,25 @@ _KIMI_SYSTEM_PROMPT = """أنت أداة لجمع بيانات السوق الم
 {
   "etf": {
     "funds": [
-      {"symbol": "BTC", "flow": "+132.3M$", "positive": true},
-      {"symbol": "ETH", "flow": "+36.7M$", "positive": true},
-      {"symbol": "IBIT", "flow": "+85.2M$", "positive": true}
+      {"symbol": "IBIT", "flow": "+85.2M$", "positive": true},
+      {"symbol": "FBTC", "flow": "+62.1M$", "positive": true},
+      {"symbol": "GBTC", "flow": "-18.3M$", "positive": false},
+      {"symbol": "ARKB", "flow": "+22.7M$", "positive": true},
+      {"symbol": "BITB", "flow": "+15.4M$", "positive": true},
+      {"symbol": "EZBC", "flow": "+8.9M$", "positive": true},
+      {"symbol": "HODL", "flow": "+6.1M$", "positive": true},
+      {"symbol": "BTCW", "flow": "+3.2M$", "positive": true},
+      {"symbol": "ETHA", "flow": "+36.7M$", "positive": true},
+      {"symbol": "FETH", "flow": "+12.8M$", "positive": true},
+      {"symbol": "ETHE", "flow": "-45.2M$", "positive": false},
+      {"symbol": "ETHX", "flow": "+4.5M$", "positive": true}
     ]
-  },
-  "fear_greed": {
-    "value": 72,
-    "label": "Greed"
   },
   "liquidations": {
     "long": "$523.4M",
     "short": "$312.1M"
   },
   "market": {
-    "btc_dominance": "64.8%",
-    "market_cap": "3.91T$",
-    "volume": "185B$",
     "gainers": [
       {"symbol": "PEPE", "change": "+18.2%"},
       {"symbol": "WIF", "change": "+12.5%"},
@@ -103,10 +102,7 @@ _KIMI_SYSTEM_PROMPT = """أنت أداة لجمع بيانات السوق الم
       {"symbol": "AAVE", "change": "-5.1%"},
       {"symbol": "RENDER", "change": "-4.2%"}
     ]
-  },
-  "whale": [
-    {"symbol": "BTC", "value": "$1.2B", "from": "مجهول", "to": "Coinbase"}
-  ]
+  }
 }
 
 القواعد:
@@ -114,9 +110,8 @@ _KIMI_SYSTEM_PROMPT = """أنت أداة لجمع بيانات السوق الم
 - الأرقام فقط، لا تحليل ولا رأي.
 - إن لم تجد بيانات قسم معين، ضع null.
 - لعملات top gainers/losers: اختر من بين أكبر 100 عملة بحسب الحجم.
-- لتدفقات ETF: BTC و ETH الإجمالية + أكبر صندوق فردي لكل منهما.
+- لتدفقات ETF: اذكر كل صناديق Bitcoin ETF و Ethereum ETF المتداولة (IBIT, FBTC, GBTC, ARKB, BITB, EZBC, HODL, BTCW, BRRR, BTCO للبيتكوين) و (ETHA, FETH, ETHE, ETHX, CETH, EZET للإيثريوم). اذكر أكبر عدد ممكن من الصناديق مع تدفقاتها اليومية. إن وجدت صناديق أخرى (SOL, LTC, XRP) أضفها أيضاً.
 - للتصفيات: إجمالي 24 ساعة لكل من Long و Short.
-- لحركات الحيتان: أكبر 3 تحويلات اليوم بقيمة 5M+ دولار.
 - أخرج JSON صالح فقط."""
 
 
@@ -128,7 +123,7 @@ async def fetch_all_via_cohere() -> Optional[Dict]:
         return None
 
     today = datetime.now(tz).strftime("%Y-%m-%d")
-    user_msg = f"Search for today's crypto market data ({today}): ETF flows, Fear & Greed index, 24h liquidations, Bitcoin dominance, total market cap, 24h trading volume, top 3 gainers, top 3 losers, and largest whale transactions. Return ONLY valid JSON matching the required format."
+    user_msg = f"Search for today's crypto ETF flows data ({today}): Get daily flows for ALL spot Bitcoin ETFs (IBIT, FBTC, GBTC, ARKB, BITB, EZBC, HODL, BTCW, BRRR, BTCO) and ALL spot Ethereum ETFs (ETHA, FETH, ETHE, ETHX, CETH, EZET) and any other crypto ETFs (SOL, LTC, XRP). Also get 24h liquidations (long vs short), top 3 gainers and top 3 losers from top 100 coins by volume. Return ONLY valid JSON matching the required format."
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -237,47 +232,8 @@ async def _fetch_json(url: str, timeout: int = 15) -> Optional[Any]:
     return None
 
 
-async def fetch_fear_greed_fallback() -> Optional[Dict]:
-    """مؤشر الخوف والطمع — alternative.me"""
-    data = await _fetch_json("https://api.alternative.me/fng/?limit=1")
-    if data and "data" in data and len(data["data"]) > 0:
-        d = data["data"][0]
-        return {
-            "value": int(d.get("value", 0)),
-            "label": d.get("value_classification", ""),
-        }
-    return None
-
-
 async def fetch_market_fallback() -> Optional[Dict]:
-    """القيمة السوقية، الحجم، الهيمنة، أفضل/أسوأ عملات — CoinGecko"""
-    data = await _fetch_json("https://api.coingecko.com/api/v3/global", timeout=20)
-    if not data or "data" not in data:
-        return None
-
-    gd = data["data"]
-    result: Dict[str, Any] = {}
-
-    mcap = gd.get("total_market_cap", {}) or {}
-    usd_mcap = mcap.get("usd", 0)
-    if usd_mcap:
-        if usd_mcap >= 1e12:
-            result["market_cap"] = f"{usd_mcap / 1e12:.2f}T$"
-        elif usd_mcap >= 1e9:
-            result["market_cap"] = f"{usd_mcap / 1e9:.2f}B$"
-
-    vol = gd.get("total_volume", {}) or {}
-    usd_vol = vol.get("usd", 0)
-    if usd_vol:
-        if usd_vol >= 1e12:
-            result["volume"] = f"{usd_vol / 1e12:.2f}T$"
-        elif usd_vol >= 1e9:
-            result["volume"] = f"{usd_vol / 1e9:.1f}B$"
-
-    btc_dom = gd.get("market_cap_percentage", {}) or {}
-    if "btc" in btc_dom:
-        result["btc_dominance"] = f"{btc_dom['btc']:.1f}%"
-
+    """أفضل/أسوأ عملات — CoinGecko"""
     try:
         top_data = await _fetch_json(
             "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h",
@@ -287,21 +243,21 @@ async def fetch_market_fallback() -> Optional[Dict]:
             sorted_by_change = sorted(
                 top_data, key=lambda c: (c.get("price_change_percentage_24h") or 0), reverse=True
             )
+            result: Dict[str, Any] = {}
             result["gainers"] = []
             for c in sorted_by_change[:3]:
                 chg = c.get("price_change_percentage_24h", 0) or 0
                 symbol = c.get("symbol", "?").upper()
                 result["gainers"].append({"symbol": symbol, "change": f"{chg:+.1f}%"})
-
             result["losers"] = []
             for c in sorted_by_change[-3:][::-1]:
                 chg = c.get("price_change_percentage_24h", 0) or 0
                 symbol = c.get("symbol", "?").upper()
                 result["losers"].append({"symbol": symbol, "change": f"{chg:.1f}%"})
+            return result
     except Exception as e:
         log.warning(f"📊 Gainers/losers fallback error: {str(e)[:80]}")
-
-    return result if result else None
+    return None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -315,20 +271,6 @@ def _fmt_section(title: str, icon: str, content: str) -> Optional[str]:
     if not content or not content.strip():
         return None
     return f"{icon} {title}\n\n{content.strip()}"
-
-
-def _fng_emoji(value: int) -> str:
-    """لون مؤشر الخوف والطمع"""
-    if value <= 25:
-        return "\U0001f534"
-    elif value <= 45:
-        return "\U0001f7e1"
-    elif value <= 55:
-        return "\U0001f7e1"
-    elif value <= 75:
-        return "\U0001f7e2"
-    else:
-        return "\U0001f7e2"
 
 
 def build_report(data: Dict) -> str:
@@ -358,16 +300,6 @@ def build_report(data: Dict) -> str:
         if sec:
             sections.append(sec)
 
-    # ─── Fear & Greed ───
-    fg = data.get("fear_greed")
-    if fg and fg.get("value"):
-        v = fg["value"]
-        label = fg.get("label", "")
-        icon = _fng_emoji(v)
-        sec = _fmt_section("\u0645\u0624\u0634\u0631 \u0627\u0644\u062e\u0648\u0641 \u0648\u0627\u0644\u0637\u0645\u0639", "\U0001f628", f"{icon} {v} | {label}")
-        if sec:
-            sections.append(sec)
-
     # ─── Liquidations ───
     liq = data.get("liquidations")
     if liq and (liq.get("long") or liq.get("short")):
@@ -380,26 +312,8 @@ def build_report(data: Dict) -> str:
         if sec:
             sections.append(sec)
 
-    # ─── BTC Dominance ───
-    mkt = data.get("market")
-    if mkt and mkt.get("btc_dominance"):
-        sec = _fmt_section("\u0647\u064a\u0645\u0646\u0629 \u0628\u064a\u062a\u0643\u0648\u064a\u0646", "\u20bf", mkt["btc_dominance"])
-        if sec:
-            sections.append(sec)
-
-    # ─── Market Cap ───
-    if mkt and mkt.get("market_cap"):
-        sec = _fmt_section("\u0627\u0644\u0642\u064a\u0645\u0629 \u0627\u0644\u0633\u0648\u0642\u064a\u0629", "\U0001f4b0", mkt["market_cap"])
-        if sec:
-            sections.append(sec)
-
-    # ─── Volume ───
-    if mkt and mkt.get("volume"):
-        sec = _fmt_section("\u062d\u062c\u0645 \u0627\u0644\u062a\u062f\u0627\u0648\u0644", "\U0001f4ca", mkt["volume"])
-        if sec:
-            sections.append(sec)
-
     # ─── Top Gainers ───
+    mkt = data.get("market")
     if mkt and mkt.get("gainers"):
         g_lines = []
         medals = ["\U0001f947", "\U0001f948", "\U0001f949"]
@@ -418,16 +332,6 @@ def build_report(data: Dict) -> str:
         if sec:
             sections.append(sec)
 
-    # ─── Whale Transactions ───
-    whale = data.get("whale")
-    if whale and isinstance(whale, list):
-        w_lines = []
-        for w in whale[:3]:
-            w_lines.append(f"{w.get('symbol', '?')} \u2014 {w.get('value', '?')} ({w.get('from', '?')} \u2192 {w.get('to', '?')})")
-        sec = _fmt_section("\u0623\u0643\u0628\u0631 \u062d\u0631\u0643\u0629 \u0644\u0644\u062d\u064a\u062a\u0627\u0646", "\U0001f40b", "\n".join(w_lines))
-        if sec:
-            sections.append(sec)
-
     # تجميع الأقسام مع الفواصل
     for i, section in enumerate(sections):
         lines.append(section)
@@ -435,17 +339,9 @@ def build_report(data: Dict) -> str:
             lines.append(SEP)
 
     lines.append(SEP)
-    lines.append("\U0001f4cc Daily Crypto Report")
+    lines.append("@newscrypto1m")
 
     return "\n".join(lines)
-
-
-def _in_report_window() -> bool:
-    """هل الوقت الحالي ضمن نافذة الإرسال (3:00 - 3:30)؟"""
-    now = datetime.now(tz)
-    if now.hour != REPORT_HOUR:
-        return False
-    return REPORT_MINUTE <= now.minute < (REPORT_MINUTE + REPORT_WINDOW_MINUTES)
 
 
 async def _generate_and_send(config: BotConfig, state: BotState) -> bool:
@@ -461,9 +357,6 @@ async def _generate_and_send(config: BotConfig, state: BotState) -> bool:
     if not data:
         log.info("\U0001f4ca Cohere failed, using fallback APIs...")
         data = {}
-        fg = await fetch_fear_greed_fallback()
-        if fg:
-            data["fear_greed"] = fg
         mkt = await fetch_market_fallback()
         if mkt:
             data["market"] = mkt
@@ -506,8 +399,7 @@ async def daily_report_loop(config: BotConfig, state: BotState):
                 await asyncio.sleep(60)
                 continue
 
-            if _in_report_window() and not report_state.already_sent_today():
-                # إيقاف الأخبار مؤقتاً
+            if not report_state.already_sent_today():
                 state.bot_resume_time = time.time() + REPORT_PAUSE_SECONDS
                 await asyncio.sleep(REPORT_PAUSE_SECONDS)
                 await _generate_and_send(config, state)
@@ -525,12 +417,8 @@ async def daily_report_loop(config: BotConfig, state: BotState):
 # 🔄 One-shot Mode (GitHub Actions)
 # ═══════════════════════════════════════════════════════════
 async def send_report_if_due(config: BotConfig, state: BotState):
-    """إرسال التقرير إن كان الوقت ضمن النافذة — يُستدعى من run_oneshot"""
+    """إرسال التقرير — يُستدعى من run_oneshot (يرسل فوراً إن لم يُرسل اليوم)"""
     report_state.load()
-
-    if not _in_report_window():
-        log.info(f"\U0001f4ca Not in report window (needs {REPORT_HOUR}:{REPORT_MINUTE:02d}-{REPORT_HOUR}:{REPORT_MINUTE + REPORT_WINDOW_MINUTES:02d})")
-        return
 
     if report_state.already_sent_today():
         log.info("\U0001f4ca Report already sent today, skipping")

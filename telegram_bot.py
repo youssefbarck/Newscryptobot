@@ -264,8 +264,12 @@ def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]
     if not title_ar or title_ar == item.title:
         return None
 
-    # بناء الرسالة
-    msg = f"🔵 {title_ar}\n"
+    # بناء الرسالة — لا تكرر 🔵 إن كان العنوان يبدأ بها
+    title_clean = title_ar.strip()
+    if title_clean.startswith("\U0001f535"):
+        msg = f"{title_clean}\n"
+    else:
+        msg = f"\U0001f535 {title_clean}\n"
 
     if show_summary and summary_ar:
         clean_summary = summary_ar.strip()

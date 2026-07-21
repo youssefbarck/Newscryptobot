@@ -197,31 +197,41 @@ def _restore_entities(text: str, restore_map: Dict) -> str:
 class GeminiTranslator:
     """مترجم Gemini مع إدارة النماذج"""
 
-    _SYSTEM_PROMPT = """أنت محرر أخبار متخصص في العملات الرقمية، ولست مترجمًا أو ملخصًا آليًا.
-مهمتك هي إعادة صياغة الخبر ليبدو وكأنه كُتب بواسطة صحفي محترف لقناة إخبارية على تيليجرام.
+    _SYSTEM_PROMPT = """You are a senior crypto news editor writing for a professional Telegram channel similar to CoinDesk, The Block, or Bloomberg Crypto.
 
-القواعد:
-- لا تترجم الخبر حرفيًا.
-- اكتب بأسلوب خبري طبيعي، وليس وصفيًا أو روبوتيًا.
-- ابدأ دائمًا بالحدث أو المعلومة الأهم، وليس بعبارات مثل: "تشهد..." "يشهد..." "وسط..." "في ظل..." "بالتزامن مع..." "مع استمرار..." "مما يعزز..." "وهو ما قد..."
-- لا تستخدم قالبًا ثابتًا في جميع الأخبار، بل غيّر أسلوب البداية باستمرار.
-- استخدم أفعالًا صحفية متنوعة مثل: أعلن، كشف، أظهر، سجل، اقترب، تلقى، عاد، واصل، عزز، نجح، فشل، يستعد، يترقب، جذب، أثار، دعم، دفع، رفع، خفض، أنهى.
-- إذا كان الخبر يعتمد على تحليل فني أو توقع، انسبه بوضوح إلى التحليل أو المحللين، ولا تقدمه كحقيقة مؤكدة.
-- إذا كان الخبر يتعلق بالسعر أو الحركة الفنية، ركز على الحدث أولًا ثم أضف السياق الفني بإيجاز.
-- اجعل النص قصيرًا ومباشرًا، بين 25 و60 كلمة.
-- لا تضف رأيك الشخصي أو نصائح استثمارية.
-- لا تستخدم عبارات مبالغًا فيها مثل: "انفجار سعري" "إلى القمر" "فرصة لا تعوض" "صعود مؤكد".
-- استخدم لغة عربية فصحى سهلة ومناسبة للنشر الفوري.
-- اجعل كل خبر مختلفًا في الصياغة حتى لو كانت الأخبار متشابهة.
-- حافظ على جميع الأسماء الإنجليزية للعملات والشركات: Bitcoin, Ethereum, Binance, SEC, ETF.
-- لا إيموجي أو مقدمات.
+Your task is to rewrite every news item into professional Arabic.
 
-التنسيق المطلوب:
-العنوان:
-...
+IMPORTANT:
+- The input may be in English or Arabic.
+- The final output MUST ALWAYS be in Arabic.
+- If the source is in English, understand it first, then rewrite it in fluent Arabic.
+- Never perform a literal translation.
+- Never output English sentences unless they are official names, company names, product names, ticker symbols, or direct quotes.
+- The final response must be ready for immediate publication on an Arabic Telegram channel.
 
-الخبر:
-..."""
+Editorial rules:
+- Write like a human financial journalist, not an AI.
+- Do NOT add information that is not present in the source.
+- Do NOT speculate or exaggerate.
+- Remove unnecessary filler.
+- Avoid generic AI phrases such as:
+  - "مما عزز ثقة المستثمرين"
+  - "في ظل التطورات الحالية"
+  - "خلال الفترة الحالية"
+  - "في خطوة تعكس..."
+  - "وسط تزايد الاهتمام..."
+- Keep the news between 40 and 80 words.
+- Start with the main event immediately.
+- End naturally without generic conclusions.
+- Preserve all prices, dates, percentages, company names, blockchain names, and ticker symbols exactly.
+
+Output format:
+
+🔵 <عنوان عربي قصير وجذاب>
+
+<فقرة خبرية احترافية باللغة العربية>
+
+#<Ticker if provided>"""
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -325,13 +335,11 @@ class GeminiTranslator:
         text_len = len(text)
         sent_count = "2" if text_len < 150 else "2-3" if text_len < 400 else "3-4"
 
-        prompt = f"""أعد صياغة الخبر التالي بأسلوب صحفي مباشر.
+        prompt = f"""أعد كتابة الخبر التالي بالعربية بأسلوب صحفي مباشر.
 
-- العنوان: جذاب ومختصر (≤ 90 حرف)، يبدأ بفعل صحفي أو بالمعلومة الأهم.
-- الخبر: بين 25 و60 كلمة، ابدأ بالحدث مباشرة.
+- ابدأ بالحدث الأهم مباشرة دون مقدمات.
 - حافظ على جميع أسماء العملات والشركات والأرقام دون تحريف.
-- لا تحذف أي اسم عملة أو شركة.
-- لا تضف معلومات غير موجودة في الخبر الأصلي.
+- لا تضف معلومات غير موجودة في الأصل.
 - أخرج النص العربي النهائي فقط.
 """
         if missing_names:
@@ -341,11 +349,25 @@ class GeminiTranslator:
         return prompt
 
     def _parse_output(self, text: str) -> Tuple[Optional[str], str]:
-        """استخراج العنوان والخبر"""
+        """استخراج العنوان والخبر من التنسيق الجديد أو القديم"""
         if not text:
             return None, ""
 
-        # البحث عن التنسيق
+        # التنسيق الجديد: 🔵 <عنوان>\n\n<فقرة>\n\n#<ticker>
+        blue_match = re.split(r'\n\n+', text.strip(), maxsplit=2)
+        if blue_match and blue_match[0].startswith("\U0001f535"):
+            title = blue_match[0].replace("\U0001f535", "").strip().lstrip(" -")
+            body = ""
+            if len(blue_match) > 1:
+                # الفقرة هي الجزء الثاني (قد يحتوي #ticker في نهايته)
+                paragraph = blue_match[1].strip()
+                # إزالة سطر #ticker إن وُجد
+                ticker_match = re.match(r'^(.+?)\n*#.*$', paragraph, re.DOTALL)
+                body = ticker_match.group(1).strip() if ticker_match else paragraph
+            if title and len(title) > 3:
+                return title.strip(" .,،:؛-"), body.strip(" .,،:؛-")
+
+        # التنسيق القديم: العنوان:...\nالخبر:...
         parts = re.split(r'\n\s*الخبر\s*:\s*', text, maxsplit=1)
         if len(parts) == 2:
             header = parts[0].strip()
@@ -382,7 +404,7 @@ class GroqTranslator:
                     json={
                         "model": "llama-3.3-70b-versatile",
                         "messages": [
-                            {"role": "system", "content": "أنت محرر أخبار متخصص في العملات الرقمية. أعد صياغة الخبر بالعربية بأسلوب صحفي مباشر. ابدأ بالحدث أو الفعل الأهم. استخدم أفعالًا صحفية متنوعة (أعلن، كشف، سجل، رفع، خفض...). لا تترجم حرفيًا. حافظ على الأسماء الإنجليزية للعملات والشركات. 25-60 كلمة. لا إيموجي."},
+                            {"role": "system", "content": "You are a senior crypto news editor for a professional Arabic Telegram channel. Rewrite the news into professional Arabic. Never translate literally. Output ONLY in Arabic (except official names/tickers). 40-80 words. Start with the main event. No AI filler phrases. No speculation. Preserve all prices, dates, percentages, and names exactly. Format:\n\n🔵 <Arabic title>\n\n<News paragraph>\n\n#<Ticker if provided>"},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,
@@ -419,7 +441,7 @@ class OpenRouterTranslator:
                     json={
                         "model": "qwen/qwen-2.5-72b-instruct",
                         "messages": [
-                            {"role": "system", "content": "أنت محرر أخبار متخصص في العملات الرقمية. أعد صياغة الخبر بالعربية بأسلوب صحفي مباشر. ابدأ بالحدث أو الفعل الأهم. استخدم أفعالًا صحفية متنوعة (أعلن، كشف، سجل، رفع، خفض...). لا تترجم حرفيًا. حافظ على الأسماء الإنجليزية للعملات والشركات. 25-60 كلمة. لا إيموجي."},
+                            {"role": "system", "content": "You are a senior crypto news editor for a professional Arabic Telegram channel. Rewrite the news into professional Arabic. Never translate literally. Output ONLY in Arabic (except official names/tickers). 40-80 words. Start with the main event. No AI filler phrases. No speculation. Preserve all prices, dates, percentages, and names exactly. Format:\n\n🔵 <Arabic title>\n\n<News paragraph>\n\n#<Ticker if provided>"},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,

@@ -20,7 +20,7 @@ from config import (
 import dedup
 from filters import NewsItem, filter_news_items, is_complete_news, time_ago
 from rss import fetch_all_news, fetch_etf_flows, session_manager
-from translate import TranslationManager, translate_source_name
+from translate import TranslationManager, translate_source_name, translation_cache
 import daily_report
 
 
@@ -256,7 +256,7 @@ async def message_consumer(config: BotConfig, state: BotState):
 # 📝 News Formatting
 # ═══════════════════════════════════════════════════════════
 def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]:
-    """تنسيق الخبر للإرسال — JSON format: headline + body نظيف"""
+    """تنسيق الخبر للإرسال — يستخدم news_format و importance من JSON"""
     title_ar = item.title_ar or item.title
     summary_ar = item.summary_ar or item.summary
 
@@ -264,29 +264,42 @@ def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]
     if not title_ar or title_ar == item.title:
         return None
 
-    # بناء الرسالة — العنوان النظيف من JSON (بدون 🔵)
-    msg = f"🔵 {title_ar.strip()}\n"
+    # رمز الأهمية
+    importance = getattr(item, 'importance', 'medium') or 'medium'
+    emoji_map = {"breaking": "🚨", "high": "🔴", "medium": "🔵", "low": "⚪"}
+    emoji = emoji_map.get(importance, "🔵")
 
-    if show_summary and summary_ar:
-        clean_summary = summary_ar.strip()
-        if is_complete_news(clean_summary):
-            if len(clean_summary) > 800:
-                cut_at = clean_summary[:800].rfind(".")
-                if cut_at > 200:
-                    clean_summary = clean_summary[:cut_at + 1]
-                else:
-                    cut_at = clean_summary[:800].rfind(" ")
+    # نوع التنسيق
+    news_format = getattr(item, 'news_format', 'standard') or 'standard'
+
+    # بناء الرسالة حسب نوع التنسيق
+    if news_format == "economic" and summary_ar:
+        prefix = "🚨" if importance == "breaking" else "📊"
+        msg = f"{prefix} {title_ar.strip()}\n\n{summary_ar.strip()}"
+    elif news_format == "bullets" and summary_ar:
+        msg = f"{emoji} {title_ar.strip()}\n\n{summary_ar.strip()}"
+    else:
+        msg = f"{emoji} {title_ar.strip()}"
+        if show_summary and summary_ar:
+            clean_summary = summary_ar.strip()
+            if is_complete_news(clean_summary):
+                if len(clean_summary) > 800:
+                    cut_at = clean_summary[:800].rfind(".")
                     if cut_at > 200:
-                        clean_summary = clean_summary[:cut_at] + "..."
+                        clean_summary = clean_summary[:cut_at + 1]
                     else:
-                        clean_summary = clean_summary[:800] + "..."
-            if clean_summary:
-                msg += f"\n{clean_summary}\n"
+                        cut_at = clean_summary[:800].rfind(" ")
+                        if cut_at > 200:
+                            clean_summary = clean_summary[:cut_at] + "..."
+                        else:
+                            clean_summary = clean_summary[:800] + "..."
+                if clean_summary:
+                    msg += f"\n\n{clean_summary}"
 
-    # إضافة العملات إن وُجدت (الهاشتاغ من JSON مُضاف هنا)
+    # إضافة العملات إن وُجدت
     if item.coins:
         coins_str = " ".join([f"#{c}" for c in item.coins[:5]])
-        msg += f"\n{coins_str}"
+        msg += f"\n\n{coins_str}"
 
     msg += "\n\n✉️ @newscrypto1m"
 
@@ -390,7 +403,7 @@ async def scan_news_loop(config: BotConfig, state: BotState, translator: Transla
                         text=msg,
                         image_url=item.image,
                         chat_id=config.CHANNEL_ID,
-                        priority=3 if "breaking" in item.categories or "hack" in item.categories else 2,
+                        priority=3 if ("breaking" in (item.categories or []) or "hack" in (item.categories or []) or getattr(item, 'importance', '') == "breaking") else 2,
                     ))
 
                 # للمالك
@@ -398,7 +411,7 @@ async def scan_news_loop(config: BotConfig, state: BotState, translator: Transla
                     text=msg,
                     image_url=item.image,
                     chat_id=config.CHAT_ID,
-                    priority=3 if "breaking" in item.categories or "hack" in item.categories else 2,
+                    priority=3 if ("breaking" in (item.categories or []) or "hack" in (item.categories or []) or getattr(item, 'importance', '') == "breaking") else 2,
                 ))
 
                 alerts_sent += 1
@@ -563,6 +576,7 @@ async def run_bot(config: BotConfig, state: BotState):
         log.info("🛑 Bot shutting down...")
     finally:
         await session_manager.close()
+        translation_cache.flush()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -625,7 +639,6 @@ async def run_oneshot(config: BotConfig, state: BotState):
 
         alerts_sent += 1
         print(f"  ✉️ {item.title[:60]}...")
-        await asyncio.sleep(1.5)
 
     # ETF
     try:
@@ -657,3 +670,4 @@ async def run_oneshot(config: BotConfig, state: BotState):
     print("=" * 60)
 
     await session_manager.close()
+    translation_cache.flush()

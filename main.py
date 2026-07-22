@@ -17,6 +17,7 @@ import os, asyncio, traceback
 
 from config import config, state, log, save_sent_news
 from telegram_bot import run_bot, run_oneshot
+from translate import translation_cache
 
 
 async def main():
@@ -36,6 +37,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         log.info("🛑 Interrupted by user")
         save_sent_news(force=True)
+        translation_cache.flush()
     except Exception as e:
         log.error(f"Fatal error: {e}\n{traceback.format_exc()}")
         save_sent_news(force=True)
+        translation_cache.flush()

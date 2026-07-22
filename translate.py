@@ -1,12 +1,18 @@
 """
-🌐 Whale News Bot v2.0 - نظام الترجمة المتقدم
+🌐 Whale News Bot v2.0 - نظام الترجمة المتقدم (مُحسّن)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ترجمة async مع caching ذكي، verification، و fallback متعدد
+ترجمة async مع persistent caching، verification، و fallback متعدد
+
+التغييرات v2.1:
+- System Prompt مُصغّر (~100 سطر بدل ~170)
+- مكالمة Gemini واحدة بدل اثنتين (توفير 50% من التكلفة)
+- Cache دائم (ملف JSON) بدل ذاكرة فقط
+- _parse_output() نظيف — JSON فقط بدون dead code
+- translate_item() يملأ news_format و importance مباشرة
 """
 
-import os, re, hashlib, time, asyncio, json
+import os, re, hashlib, time, asyncio, json, threading
 from typing import Optional, Tuple, Dict, List
-from dataclasses import dataclass
 
 import aiohttp
 
@@ -14,34 +20,84 @@ from config import log, BotConfig
 
 
 # ═══════════════════════════════════════════════════════════
-# 💾 Translation Cache (ذاكرة دائمة + ذاكرة مؤقتة)
+# 💾 Persistent Translation Cache (ملف JSON + ذاكرة مؤقتة)
 # ═══════════════════════════════════════════════════════════
 class TranslationCache:
-    # Cache ذكي للترجمة مع TTL
+    """ذاكرة ترجمة دائمة — تحفظ في ملف JSON وتحمل عند البدء"""
 
-    def __init__(self, ttl: int = 86400):  # 24 ساعة
-        self._memory: Dict[str, Tuple[str, float]] = {}
-        self._ttl = ttl
-        self._lock = asyncio.Lock()
+    CACHE_FILE = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "translation_cache.json"
+    )
+    MAX_ENTRIES = 5000
+    DEFAULT_TTL = 86400  # 24 ساعة
 
-    async def get(self, key: str) -> Optional[str]:
-        async with self._lock:
+    def __init__(self, ttl: int = None):
+        self._memory: Dict[str, Dict] = {}
+        self._ttl = ttl or self.DEFAULT_TTL
+        self._lock = threading.Lock()
+        self._dirty = False
+        self._save_counter = 0
+        self._load()
+
+    def _load(self):
+        """تحميل الكاش من الملف عند البدء"""
+        try:
+            if os.path.exists(self.CACHE_FILE):
+                with open(self.CACHE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                now = time.time()
+                loaded = 0
+                for key, entry in data.items():
+                    if isinstance(entry, dict) and now - entry.get("timestamp", 0) < self._ttl * 2:
+                        self._memory[key] = entry
+                        loaded += 1
+                log.info(f"💾 Translation cache: {loaded} entries loaded from disk")
+        except Exception as e:
+            log.warning(f"Cache load error: {e}")
+
+    def _save(self):
+        """حفظ الكاش في الملف"""
+        try:
+            with open(self.CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(self._memory, f, ensure_ascii=False, separators=(',', ':'))
+        except Exception as e:
+            log.warning(f"Cache save error: {e}")
+
+    async def get(self, key: str) -> Optional[Dict]:
+        with self._lock:
             if key in self._memory:
-                value, timestamp = self._memory[key]
-                if time.time() - timestamp < self._ttl:
-                    return value
+                entry = self._memory[key]
+                if time.time() - entry.get("timestamp", 0) < self._ttl:
+                    return entry.get("result")
                 del self._memory[key]
+                self._dirty = True
             return None
 
-    async def set(self, key: str, value: str):
-        async with self._lock:
-            self._memory[key] = (value, time.time())
+    async def set(self, key: str, value: Dict):
+        with self._lock:
+            self._memory[key] = {"result": value, "timestamp": time.time()}
+            self._dirty = True
+            self._save_counter += 1
+
             # تنظيف القديم
-            if len(self._memory) > 1000:
+            if len(self._memory) > self.MAX_ENTRIES:
                 now = time.time()
-                old_keys = [k for k, (_, ts) in self._memory.items() if now - ts > self._ttl]
-                for k in old_keys:
+                old = [k for k, v in self._memory.items()
+                       if now - v.get("timestamp", 0) > self._ttl]
+                for k in old:
                     del self._memory[k]
+
+            # حفظ تلقائي كل 20 إضافة
+            if self._save_counter >= 20:
+                self._save()
+                self._save_counter = 0
+
+    def flush(self):
+        """حفظ فوري للكاش — متزامن، آمن الاستدعاء من finally"""
+        with self._lock:
+            if self._dirty:
+                self._save()
+                self._dirty = False
 
     def _hash_key(self, text: str) -> str:
         return hashlib.md5(text.encode()).hexdigest()[:12]
@@ -129,12 +185,11 @@ GLOSSARY_AR = {
 
 
 def _protect_entities(text: str) -> Tuple[str, Dict[str, Tuple[str, Optional[str]]]]:
-    # حماية الكيانات المهمة قبل الترجمة
+    """حماية الكيانات المهمة قبل الترجمة"""
     restore_map = {}
     protected = text
     counter = 0
 
-    # دمج القائمتين
     all_terms = []
     for term, trans in GLOSSARY_AR.items():
         all_terms.append((term, trans))
@@ -146,30 +201,29 @@ def _protect_entities(text: str) -> Tuple[str, Dict[str, Tuple[str, Optional[str
 
     for term, trans in all_terms:
         pattern = re.compile(re.escape(term), re.IGNORECASE)
-        match = pattern.search(protected)
-        if match:
-            placeholder = f"§§{counter:03d}§§"
-            protected = pattern.sub(placeholder, protected, count=1)
-            restore_map[placeholder] = (match.group(0), trans)
-            counter += 1
+        matches = list(pattern.finditer(protected))
+        if matches:
+            for match in reversed(matches):  # من الآخر للحفاظ على المواقع
+                placeholder = f"§§{counter:03d}§§"
+                protected = protected[:match.start()] + placeholder + protected[match.end():]
+                restore_map[placeholder] = (match.group(0), trans)
+                counter += 1
 
     return protected, restore_map
 
 
 def _restore_entities(text: str, restore_map: Dict) -> str:
-    # استعادة الكيانات بعد الترجمة
+    """استعادة الكيانات بعد الترجمة"""
     if not restore_map:
         return text
 
     result = text
-    # ترتيب عكسي لتجنب التداخل
     sorted_placeholders = sorted(restore_map.keys(), key=lambda x: int(x[2:5]), reverse=True)
 
     for placeholder in sorted_placeholders:
         original, trans = restore_map[placeholder]
         replacement = trans if trans else original
 
-        # أنماط متعددة للبحث
         num = int(placeholder[2:5])
         patterns = [
             re.escape(placeholder),
@@ -186,10 +240,8 @@ def _restore_entities(text: str, restore_map: Dict) -> str:
                 result = new_result
                 break
 
-    # تنظيف أي placeholders متبقية
     result = re.sub(r"§§\d{3}§§", "", result)
     return result
-
 
 
 # ═══════════════════════════════════════════════════════════
@@ -294,183 +346,291 @@ def clean_news(raw: str) -> str:
 
     return "\n".join(result)
 
+
 # ═══════════════════════════════════════════════════════════
-# 🤖 Gemini Translation (Async)
+# 🤖 System Prompt — المحرر الرئيسي (مُصغّر)
 # ═══════════════════════════════════════════════════════════
-class GeminiTranslator:
-    # مترجم Gemini مع إدارة النماذج
+SYSTEM_PROMPT = """ROLE
 
-    _STEP1_PROMPT = """Extract ONLY the verified facts from the following text.
+You are the Chief Editor of a professional Arabic cryptocurrency newsroom.
 
-Ignore:
-- duplicated text
-- duplicated titles
-- RSS formatting
-- hashtags
-- opinions
-- predictions
-- broken machine translation
-- grammar mistakes
+You are NOT a translator.
 
-Return ONLY a bullet list of unique facts. Each bullet must be one verified fact.
-Do not add any explanation. Do not translate. Do not summarize.
-Use the same language as the source for each fact.
-If the source is English, keep facts in English. If Arabic, keep in Arabic.
+You are an editor.
 
-Example output:
-• Bitcoin reached a seven-week high.
-• Spot ETFs recorded inflows.
-• Investors expect regulatory clarity in Q3."""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    _SYSTEM_PROMPT = """You are a senior Arabic cryptocurrency news editor.
+MISSION
 
-TASK:
-Rewrite this news for publication on a professional Arabic Telegram crypto news channel.
+The input is already preprocessed by Python.
 
-The headline and body are already separated.
-Do NOT merge them. Do NOT repeat the headline inside the body.
-Treat the source as raw notes, not as a finished article.
-Extract the verified facts first. Ignore duplicated information.
-Ignore poor machine translation, RSS formatting, unrelated hashtags.
+Assume that:
+
+- duplicated RSS lines were removed
+- duplicated hashtags were removed
+- signatures were removed
+- obvious junk was removed
+
+Your only task is to understand the facts and publish a professional Arabic news article.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EDITORIAL PRINCIPLES
+
+Write from facts.
+
+Never write from wording.
+
 Forget the original wording completely.
-Rewrite the news from scratch in fluent professional Arabic.
 
-The source may contain:
-- English or Arabic.
-- Poor machine translation.
-- Mixed Arabic and English.
-- Duplicated titles or paragraphs.
-- Incorrect hashtags.
-- RSS artifacts.
-- Grammar mistakes.
+Imagine the source is your private notes.
 
-Ignore all of these problems and reconstruct the news from its factual meaning only.
+Write a completely new article.
 
-Rules:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. Never translate literally.
+ABSOLUTE RULES
 
-2. Never preserve awkward wording from the source.
+Never:
 
-3. Rewrite the news completely in professional Arabic.
+- translate literally
+- repeat the headline
+- repeat information
+- repeat hashtags
+- repeat sentences
+- copy the article structure
+- copy machine translation
+- invent facts
+- speculate
+- exaggerate
+- use promotional language
 
-4. Remove duplicated titles and duplicated sentences.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-5. Remove RSS artifacts such as:
-   - Read more
-   - First appeared on...
-   - Originally published...
-   - Source:
-   - Via:
+BODY RULES
 
-6. If the source contains machine translation errors, ignore the wording completely and infer the intended meaning only from the surrounding factual context.
+The body MUST expand the headline.
 
-7. Never invent facts.
+Every sentence must introduce NEW information.
 
-8. Never speculate.
+If two sentences express the same idea,
+keep only the stronger one.
 
-9. Never exaggerate.
+Use concise financial journalism.
 
-10. Preserve all:
-- prices
-- percentages
-- dates
-- company names
-- blockchain names
-- protocol names
-- token symbols
+Avoid AI filler.
 
-11. Keep official names in English:
-Bitcoin
-Ethereum
-Solana
-Coinbase
-BlackRock
-Franklin Templeton
-Binance
+Forbidden examples:
 
-12. Translate technical terms naturally.
+- وسط ترقب الأسواق
+- مما يعزز الزخم
+- في خطوة تعكس
+- خلال الفترة الحالية
+- التطبيق القاتل
+- غير قواعد اللعبة
 
-Examples:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-killer app -> \u0623\u0628\u0631\u0632 \u062a\u0637\u0628\u064a\u0642
-game changer -> \u0646\u0642\u0644\u0629 \u0646\u0648\u0639\u064a\u0629
-validator -> \u0645\u062f\u0642\u0642
-mainnet -> \u0627\u0644\u0634\u0628\u0643\u0629 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629
-stablecoin -> \u0639\u0645\u0644\u0629 \u0645\u0633\u062a\u0642\u0631\u0629
-AI Agent -> \u0648\u0643\u064a\u0644 \u0630\u0643\u0627\u0621 \u0627\u0635\u0637\u0646\u0627\u0639\u064a
-Agentic AI -> \u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064a \u0627\u0644\u0648\u0643\u064a\u0644\u064a
-exploit -> \u0627\u0633\u062a\u063a\u0644\u0627\u0644 \u062b\u063a\u0631\u0629
-hack -> \u0627\u062e\u062a\u0631\u0627\u0642
-upgrade -> \u062a\u0631\u0642\u064a\u0629
-tokenization -> \u062a\u0631\u0645\u064a\u0632 \u0627\u0644\u0623\u0635\u0648\u0644
-inflows -> \u062a\u062f\u0641\u0642\u0627\u062a \u062f\u0627\u062e\u0644\u0629
-outflows -> \u062a\u062f\u0641\u0642\u0627\u062a \u062e\u0627\u0631\u062c\u0629
+HEADLINE RULES
 
-13. Never use these AI phrases:
+Headline:
 
-- \u0641\u064a \u062e\u0637\u0648\u0629 \u062a\u0639\u0643\u0633...
-- \u062e\u0644\u0627\u0644 \u0627\u0644\u0641\u062a\u0631\u0629 \u0627\u0644\u062d\u0627\u0644\u064a\u0629...
-- \u0645\u0645\u0627 \u0639\u0632\u0632 \u062b\u0642\u0629 \u0627\u0644\u0645\u0633\u062a\u062b\u0645\u0631\u064a\u0646...
-- \u0648\u0633\u0637 \u062a\u0632\u0627\u064a\u062f \u0627\u0644\u0627\u0647\u062a\u0645\u0627\u0645...
-- \u0627\u0644\u062a\u0637\u0628\u064a\u0642 \u0627\u0644\u0642\u0627\u062a\u0644...
-- \u063a\u064a\u0651\u0631 \u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0644\u0639\u0628\u0629...
+- short
+- factual
+- informative
+- no clickbait
+- maximum 15 words
 
-14. Validate hashtags.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-- Never trust hashtags from the source.
-- Generate a hashtag only if the news is clearly related to a cryptocurrency.
-- If the news is about a company, regulation, ETF, lawsuit, security incident, or macro event, do not generate any hashtag.
+ARTICLE TYPES
 
-QUALITY CONTROL
+Automatically choose ONE format.
 
-Before returning the final news, perform these checks:
+STANDARD
+headline
+paragraph
 
-1. There must be exactly ONE headline.
+-----------------------
 
-2. There must be exactly ONE news paragraph.
+BULLET SUMMARY
+headline
+1.
+2.
+3.
+4.
 
-3. The paragraph must NOT repeat the headline.
+-----------------------
 
-4. Every sentence must introduce new information.
+ECONOMIC DATA
+indicator
+Previous
+Forecast
+Actual
+One-line explanation
 
-5. Remove all duplicated sentences.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-6. Remove duplicated headlines.
+ANALYSIS
 
-7. Remove duplicated hashtags.
+If the source is an opinion,
+prediction,
+or technical analysis,
 
-8. Never output more than one identical hashtag.
+make this explicit.
 
-9. If the news is about a company, regulation, lawsuit, ETF, macroeconomics, or AI, do not generate a crypto ticker unless a specific cryptocurrency is the main subject.
+Use:
 
-10. If the news is an analysis, prediction, or opinion, make that explicit using phrases such as:
 - بحسب تحليل...
 - وفقاً لتقرير...
 - يرى محللون...
-- تشير التقديرات...
-Never present analysis as confirmed fact.
 
-11. If the article contains fewer than two factual points, expand it naturally using ONLY information already present in the source. Never invent facts.
+Never present opinions as facts.
 
-12. Remove generic filler such as:
-- وسط ترقب الأسواق
-- مما يعزز الزخم
-- خلال الفترة الحالية
-- في خطوة تعكس
-unless explicitly supported by the source.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-13. Keep the article between 50 and 90 words.
+HASHTAGS
 
-14. Return ONLY valid JSON.
+Generate at most ONE hashtag.
 
-JSON format:
+Never trust the source hashtag.
+
+If no cryptocurrency is the main subject,
+
+return an empty hashtag.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OUTPUT
+
+Return ONLY JSON.
 
 {
   "headline": "",
   "body": "",
-  "hashtag": ""
-}"""
+  "format": "standard | bullets | economic",
+  "hashtag": "",
+  "importance": "low | medium | high | breaking"
+}
+
+Never return markdown.
+Never return explanations.
+Never return anything outside JSON."""
+
+
+# ═══════════════════════════════════════════════════════════
+# 🔧 JSON Output Parser (مشترك — يستخدمه كل المترجمين)
+# ═══════════════════════════════════════════════════════════
+def parse_json_output(text: str) -> Optional[Dict[str, str]]:
+    """تحليل مخرجات JSON من أي مترجم.
+
+    يدعم:
+    - JSON نقي
+    - JSON داخل ```json ... ```
+    - JSON مضمن داخل نص آخر
+
+    لا يدعم:
+    - التنسيقات القديمة (العنوان: / الخبر:)
+    - النص العادي بدون JSON
+    """
+    if not text:
+        return None
+
+    cleaned = text.strip()
+
+    # إزالة ```json ... ``` wrapper
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r'^```(?:json)?\n?', '', cleaned)
+        cleaned = re.sub(r'\n?```\s*$', '', cleaned)
+        cleaned = cleaned.strip()
+
+    # محاولة 1: JSON مباشر
+    try:
+        data = json.loads(cleaned)
+        return _validate_result(data)
+    except (json.JSONDecodeError, AttributeError, KeyError):
+        pass
+
+    # محاولة 2: استخراج JSON من نص مختلط — أوجد أول { وآخر }
+    start = cleaned.find('{')
+    if start >= 0:
+        depth = 0
+        end = -1
+        for i in range(start, len(cleaned)):
+            if cleaned[i] == '{':
+                depth += 1
+            elif cleaned[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end > start:
+            try:
+                data = json.loads(cleaned[start:end + 1])
+                return _validate_result(data)
+            except (json.JSONDecodeError, AttributeError, KeyError):
+                pass
+
+    return None
+
+
+def _validate_result(data: Dict) -> Optional[Dict[str, str]]:
+    """فحص صحة نتيجة JSON"""
+    if not isinstance(data, dict):
+        return None
+
+    headline = (data.get("headline") or "").strip()
+    if not headline or len(headline) < 3:
+        return None
+
+    body = (data.get("body") or "").strip()
+    fmt = (data.get("format") or "standard").strip()
+    if fmt not in ("standard", "bullets", "economic"):
+        fmt = "standard"
+
+    hashtag = (data.get("hashtag") or "").strip().lstrip("#")
+    if hashtag:
+        hashtag = "#" + hashtag
+
+    importance = (data.get("importance") or "medium").strip()
+    if importance not in ("low", "medium", "high", "breaking"):
+        importance = "medium"
+
+    return {
+        "headline": headline,
+        "body": body,
+        "format": fmt,
+        "hashtag": hashtag,
+        "importance": importance,
+    }
+
+
+def _parse_raw_as_fallback(text: str) -> Optional[Dict[str, str]]:
+    """تحويل نص عادي (من Google Translate) إلى dict"""
+    if not text or len(text) < 5:
+        return None
+
+    parts = text.split("\n", 1)
+    headline = parts[0].strip()
+    body = parts[1].strip() if len(parts) > 1 else ""
+
+    if not headline or len(headline) < 3:
+        return None
+
+    return {
+        "headline": headline,
+        "body": body,
+        "format": "standard",
+        "hashtag": "",
+        "importance": "medium",
+    }
+
+
+# ═══════════════════════════════════════════════════════════
+# 🤖 Gemini Translation (Async — مكالمة واحدة)
+# ═══════════════════════════════════════════════════════════
+class GeminiTranslator:
+    """مترجم Gemini — مكالمة واحدة مع System Prompt محسّن"""
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -495,7 +655,7 @@ JSON format:
 
                 for model_name in candidates:
                     try:
-                        model = genai.GenerativeModel(model_name, system_instruction=self._SYSTEM_PROMPT)
+                        model = genai.GenerativeModel(model_name, system_instruction=SYSTEM_PROMPT)
                         test = await asyncio.to_thread(
                             model.generate_content,
                             "test",
@@ -508,14 +668,13 @@ JSON format:
                         continue
 
                 if not self._models:
-                    # محاولة اكتشاف تلقائي
                     try:
                         models_list = list(genai.list_models())
                         for m in models_list:
                             name = m if isinstance(m, str) else getattr(m, 'name', str(m))
                             if name and ("flash" in name.lower() or "pro" in name.lower()):
                                 try:
-                                    model = genai.GenerativeModel(name, system_instruction=self._SYSTEM_PROMPT)
+                                    model = genai.GenerativeModel(name, system_instruction=SYSTEM_PROMPT)
                                     test = await asyncio.to_thread(
                                         model.generate_content,
                                         "test",
@@ -532,10 +691,10 @@ JSON format:
                 self._initialized = True
             except Exception as e:
                 log.warning(f"Gemini init failed: {e}")
-                self._initialized = True  # لا نعيد المحاولة
+                self._initialized = True
 
-    async def translate(self, text: str, missing_names: Optional[List[str]] = None) -> Optional[Tuple[str, str, str]]:
-        # ترجمة باستخدام Gemini - نظام خطوتين
+    async def translate(self, text: str, missing_names: Optional[List[str]] = None) -> Optional[Dict[str, str]]:
+        """مكالمة واحدة: clean → Gemini → parse JSON"""
         await self._init()
         if not self._models:
             return None
@@ -544,127 +703,43 @@ JSON format:
 
         for model_name in self._models:
             try:
-                # تنظيف النص الخام قبل المرحلة الأولى
+                # تنظيف النص قبل الإرسال
                 cleaned_text = clean_news(text)
                 if not cleaned_text or len(cleaned_text) < 15:
-                    cleaned_text = text  # fallback to original
+                    cleaned_text = text
 
-                # === المرحلة الأولى: استخراج الحقائق ===
-                step1_model = genai.GenerativeModel(model_name, system_instruction=self._STEP1_PROMPT)
-                step1_response = await asyncio.to_thread(
-                    step1_model.generate_content,
-                    cleaned_text,
+                # إضافة تنبيه أسماء مفقودة إن وُجدت
+                user_content = cleaned_text
+                if missing_names:
+                    user_content += (
+                        f"\n\nREMINDER: The following names MUST appear"
+                        f" in the output: {', '.join(missing_names)}"
+                    )
+
+                model = genai.GenerativeModel(model_name, system_instruction=SYSTEM_PROMPT)
+                response = await asyncio.to_thread(
+                    model.generate_content,
+                    user_content,
                     generation_config={
-                        "temperature": 0.1,
+                        "temperature": 0.3,
                         "top_p": 0.8,
                         "top_k": 40,
-                        "max_output_tokens": 500,
+                        "max_output_tokens": 800,
                     }
                 )
-                if not step1_response or not step1_response.text:
-                    log.info(f"⏭️ Gemini ({model_name}) step 1 failed: no response")
-                    continue
 
-                facts = step1_response.text.strip().strip('"\'`')
-                if not facts or len(facts) < 10:
-                    log.info(f"⏭️ Gemini ({model_name}) step 1: facts too short ({len(facts)} chars)")
-                    continue
+                if response and response.text:
+                    result = parse_json_output(response.text.strip())
+                    if result:
+                        log.info(f"✅ Gemini ({model_name}): translation success"
+                                 f" [{result['format']}/{result['importance']}]")
+                        return result
 
-                log.info(f"✅ Gemini ({model_name}) step 1: extracted {len(facts)} chars of facts")
-
-                # === المرحلة الثانية: كتابة الخبر من الحقائق ===
-                # فصل الحقائق إلى عنوان (أول سطر) وجسم (البقية)
-                fact_lines = [l.strip() for l in facts.split("\n") if l.strip() and l.strip().startswith(("•", "-", "*"))]
-                if len(fact_lines) >= 2:
-                    step_headline = fact_lines[0].lstrip("•-* ")
-                    step_body = "\n".join(l.lstrip("•-* ") for l in fact_lines[1:])
-                else:
-                    step_headline = ""
-                    step_body = facts
-                step2_prompt = self._build_prompt(step_headline, step_body, missing_names)
-                step2_model = genai.GenerativeModel(model_name, system_instruction=self._SYSTEM_PROMPT)
-                step2_response = await asyncio.to_thread(
-                    step2_model.generate_content,
-                    step2_prompt,
-                    generation_config={
-                        "temperature": 0.2 if missing_names else 0.3,
-                        "top_p": 0.8,
-                        "top_k": 40,
-                        "max_output_tokens": 1000,
-                    }
-                )
-                if step2_response and step2_response.text:
-                    result = step2_response.text.strip().strip('"\'`')
-                    headline, body, hashtag = self._parse_output(result)
-                    if headline:
-                        hashtag = hashtag or ""
-                        log.info(f"✅ Gemini ({model_name}): step 2 translation success")
-                        return headline, body, hashtag
             except Exception as e:
                 log.info(f"⏭️ Gemini ({model_name}) failed: {str(e)[:60]}")
                 continue
 
         return None
-
-    def _build_prompt(self, headline: str, body: str, missing_names: Optional[List[str]] = None) -> str:
-        # بناء البرومبت للمرحلة الثانية - يرسل headline و body كمتغيرين منفصلين
-        prompt = f"HEADLINE:\n{headline}\n\nBODY:\n{body}\n"
-        if missing_names:
-            prompt += f"\nWARNING: These names must appear: {', '.join(missing_names)}.\n"
-        return prompt
-
-    def _parse_output(self, text: str) -> Tuple[Optional[str], str, str]:
-        # تحليل JSON output من Gemini: {headline, body, hashtag}
-        if not text:
-            return None, "", ""
-
-        # محاولة تحليل JSON مباشرة
-        try:
-            # تنظيف النص من ```json ... ``` إن وُجد
-            cleaned = text.strip()
-            if cleaned.startswith("```"):
-                cleaned = re.sub(r'^```(?:json)?\n?', '', cleaned)
-                cleaned = re.sub(r'\n?```$', '', cleaned)
-                cleaned = cleaned.strip()
-
-            data = json.loads(cleaned)
-            headline = (data.get("headline") or "").strip()
-            body = (data.get("body") or "").strip()
-            hashtag = (data.get("hashtag") or "").strip().lstrip("#")
-            if hashtag:
-                hashtag = "#" + hashtag
-
-            if headline and len(headline) > 3:
-                return headline, body, hashtag
-        except (json.JSONDecodeError, AttributeError, KeyError):
-            pass
-
-        # Fallback: محاولة استخراج JSON من نص مختلط
-        json_match = re.search(r'\{[^}]+\}', text, re.DOTALL)
-        if json_match:
-            try:
-                data = json.loads(json_match.group())
-                headline = (data.get("headline") or "").strip()
-                body = (data.get("body") or "").strip()
-                hashtag = (data.get("hashtag") or "").strip().lstrip("#")
-                if hashtag:
-                    hashtag = "#" + hashtag
-                if headline and len(headline) > 3:
-                    return headline, body, hashtag
-            except (json.JSONDecodeError, AttributeError, KeyError):
-                pass
-
-        # Fallback أخير: التنسيق القديم
-        parts = re.split(r'\n\s*الخبر\s*:\s*', text, maxsplit=1)
-        if len(parts) == 2:
-            header = parts[0].strip()
-            body = parts[1].strip()
-            title_match = re.split(r'\n\s*العنوان\s*:\s*', header, maxsplit=1)
-            title = title_match[1].strip() if len(title_match) == 2 else header
-            if len(title.strip(" .,،:؛-")) > 3:
-                return title.strip(" .,،:؛-"), body.strip(" .,،:؛-"), ""
-
-        return None, "", ""
 
 
 # ═══════════════════════════════════════════════════════════
@@ -676,7 +751,7 @@ class GroqTranslator:
     def __init__(self, api_key: str):
         self.api_key = api_key
 
-    async def translate(self, text: str) -> Optional[str]:
+    async def translate(self, text: str) -> Optional[Dict[str, str]]:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -684,7 +759,7 @@ class GroqTranslator:
                     json={
                         "model": "llama-3.3-70b-versatile",
                         "messages": [
-                            {"role": "system", "content": "You are a senior Arabic crypto news editor. NOT a translator. Rewrite from meaning, not wording. Remove duplicates, RSS artifacts (Read more, Source, Via), broken translation, incorrect hashtags. Never translate literally. Never invent facts, speculate, or exaggerate. Preserve prices, percentages, dates, names. Keep official names in English. Terms: killer app=أبرز تطبيق, game changer=نقلة نوعية, validator=مدقق, mainnet=الشبكة الرئيسية, stablecoin=عملة مستقرة, AI Agent=وكيل ذكاء اصطناعي, exploit=استغلال ثغرة, hack=اختراق, upgrade=ترقية, inflows=تدفقات داخلة, outflows=تدفقات خارجة, ETF=صندوق متداول, staking=الرهن, DeFi=التمويل اللامركزي. BANNED phrases: في خطوة تعكس, خلال الفترة الحالية, مما عزز ثقة المستثمرين, وسط تزايد الاهتمام, التطبيق القاتل, غيّر قواعد اللعبة, وسط ترقب الأسواق, مما يعزز الزخم, خلال الفترة الحالية, في خطوة تعكس. QUALITY CONTROL: exactly one headline and one body. Body must NOT repeat headline. Every sentence adds new info. Remove duplicates. No duplicate hashtags. Company/regulation/ETF/lawsuit/macro/AI news = no ticker hashtag unless specific crypto is main subject. Analysis/prediction must use: بحسب تحليل / وفقاً لتقرير / يرى محللون / تشير التقديرات. If fewer than 2 facts, expand from source only. 50-90 words. Return ONLY valid JSON: Return ONLY valid JSON with keys: headline, body, hashtag"},
+                            {"role": "system", "content": SYSTEM_PROMPT},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,
@@ -698,10 +773,15 @@ class GroqTranslator:
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        result = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-                        if result and len(result) > 5:
-                            log.info("✅ Groq translation success")
-                            return result
+                        result_text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                        if result_text and len(result_text) > 5:
+                            result = parse_json_output(result_text)
+                            if result:
+                                log.info("✅ Groq translation success")
+                                return result
+                            # fallback: treat as raw text
+                            log.info("✅ Groq: using raw text fallback")
+                            return _parse_raw_as_fallback(result_text)
         except Exception as e:
             log.warning(f"Groq translation failed: {e}")
         return None
@@ -713,7 +793,7 @@ class OpenRouterTranslator:
     def __init__(self, api_key: str):
         self.api_key = api_key
 
-    async def translate(self, text: str) -> Optional[str]:
+    async def translate(self, text: str) -> Optional[Dict[str, str]]:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -721,7 +801,7 @@ class OpenRouterTranslator:
                     json={
                         "model": "qwen/qwen-2.5-72b-instruct",
                         "messages": [
-                            {"role": "system", "content": "You are a senior Arabic crypto news editor. NOT a translator. Rewrite from meaning, not wording. Remove duplicates, RSS artifacts (Read more, Source, Via), broken translation, incorrect hashtags. Never translate literally. Never invent facts, speculate, or exaggerate. Preserve prices, percentages, dates, names. Keep official names in English. Terms: killer app=أبرز تطبيق, game changer=نقلة نوعية, validator=مدقق, mainnet=الشبكة الرئيسية, stablecoin=عملة مستقرة, AI Agent=وكيل ذكاء اصطناعي, exploit=استغلال ثغرة, hack=اختراق, upgrade=ترقية, inflows=تدفقات داخلة, outflows=تدفقات خارجة, ETF=صندوق متداول, staking=الرهن, DeFi=التمويل اللامركزي. BANNED phrases: في خطوة تعكس, خلال الفترة الحالية, مما عزز ثقة المستثمرين, وسط تزايد الاهتمام, التطبيق القاتل, غيّر قواعد اللعبة, وسط ترقب الأسواق, مما يعزز الزخم, خلال الفترة الحالية, في خطوة تعكس. QUALITY CONTROL: exactly one headline and one body. Body must NOT repeat headline. Every sentence adds new info. Remove duplicates. No duplicate hashtags. Company/regulation/ETF/lawsuit/macro/AI news = no ticker hashtag unless specific crypto is main subject. Analysis/prediction must use: بحسب تحليل / وفقاً لتقرير / يرى محللون / تشير التقديرات. If fewer than 2 facts, expand from source only. 50-90 words. Return ONLY valid JSON: Return ONLY valid JSON with keys: headline, body, hashtag"},
+                            {"role": "system", "content": SYSTEM_PROMPT},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,
@@ -737,21 +817,24 @@ class OpenRouterTranslator:
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        result = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-                        if result and len(result) > 5:
-                            log.info("✅ OpenRouter translation success")
-                            return result
+                        result_text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                        if result_text and len(result_text) > 5:
+                            result = parse_json_output(result_text)
+                            if result:
+                                log.info("✅ OpenRouter translation success")
+                                return result
+                            log.info("✅ OpenRouter: using raw text fallback")
+                            return _parse_raw_as_fallback(result_text)
         except Exception as e:
             log.warning(f"OpenRouter translation failed: {e}")
         return None
 
 
 class GoogleTranslator:
-    # Fallback المجاني: Google Translate
+    """Fallback المجاني: Google Translate — يُرجع نصاً عادياً"""
 
     async def translate(self, text: str) -> Optional[str]:
         try:
-            # حماية الكيانات
             protected_text, restore_map = _protect_entities(text)
 
             async with aiohttp.ClientSession() as session:
@@ -780,7 +863,6 @@ class GoogleTranslator:
                     if not result or len(result) < 3:
                         return None
 
-                    # استعادة الكيانات
                     result = _restore_entities(result, restore_map)
                     log.info("✅ Google Translate success")
                     return result
@@ -793,7 +875,7 @@ class GoogleTranslator:
 # 🏭 Translation Manager
 # ═══════════════════════════════════════════════════════════
 class TranslationManager:
-    # مدير الترجمة الموحد
+    """مدير الترجمة الموحد — يُرجع Dict أو None"""
 
     def __init__(self, config: BotConfig):
         self.config = config
@@ -803,7 +885,7 @@ class TranslationManager:
         self.google = GoogleTranslator()
 
     def _extract_entities(self, text: str) -> List[str]:
-        # استخراج الكيانات للتحقق
+        """استخراج الكيانات للتحقق"""
         text_lower = text.lower()
         found = []
         for name in sorted(CRITICAL_NAMES, key=len, reverse=True):
@@ -812,7 +894,7 @@ class TranslationManager:
         return found
 
     def _verify_entities(self, original: str, translated: str) -> Tuple[bool, List[str]]:
-        # التحقق من وجود الكيانات
+        """التحقق من وجود الكيانات"""
         if not translated:
             return False, ["(empty)"]
         entities = self._extract_entities(original)
@@ -823,7 +905,7 @@ class TranslationManager:
         return len(missing) == 0, missing
 
     def _is_quality_good(self, text: str) -> bool:
-        # التحقق من جودة النص العربي
+        """التحقق من جودة النص العربي"""
         if not text or len(text) < 5:
             return False
 
@@ -836,7 +918,7 @@ class TranslationManager:
         english_words = re.findall(r'[a-zA-Z]{4,}', text)
         allowed = {"Bitcoin", "Ethereum", "Binance", "Coinbase", "USDT", "USDC",
                    "Solana", "Cardano", "Ripple", "BlackRock", "MicroStrategy",
-                   "SEC", "ETF", "DeFi", "NFT", "Web3"}
+                   "SEC", "ETF", "DeFi", "NFT", "Web3", "Near", "Op"}
         suspicious = [w for w in english_words if w not in allowed]
         if suspicious:
             log.warning(f"Suspicious English words: {suspicious[:5]}")
@@ -844,22 +926,8 @@ class TranslationManager:
 
         return True
 
-    def _is_complete(self, text: str) -> bool:
-        # التحقق من اكتمال النص
-        if not text:
-            return False
-        trimmed = text.strip()
-        bad_endings = ("على", "في", "من", "إلى", "عن", "مع", "حتى", "خلال",
-                       "بعد", "قبل", "بين", "ضد", "عبر", "نحو", "لدى", "بسبب",
-                       "✉️", "...", "،", ":")
-        if trimmed.endswith(bad_endings):
-            return False
-        if len(trimmed) >= 250 and not re.search(r'[.!؟?!]$', trimmed):
-            return False
-        return True
-
     def _truncate(self, text: str, max_len: int = 1200) -> str:
-        # قص النص عند نهاية جملة
+        """قص النص عند نهاية جملة"""
         if len(text) <= max_len:
             return text
         chunk = text[:max_len]
@@ -872,10 +940,10 @@ class TranslationManager:
             return chunk[:last_space]
         return chunk
 
-    async def translate(self, text: str, force: bool = False) -> Optional[str]:
-        # ترجمة النص - النظام الكامل
+    async def translate(self, text: str, force: bool = False) -> Optional[Dict[str, str]]:
+        """ترجمة النص — يُرجع dict {headline, body, format, hashtag, importance} أو None"""
         if not text or len(text) < 3:
-            return text
+            return None
 
         text = self._truncate(text)
         cache_key = translation_cache._hash_key(text)
@@ -883,52 +951,43 @@ class TranslationManager:
         if not force:
             cached = await translation_cache.get(cache_key)
             if cached:
+                log.info("💾 Translation cache hit")
                 return cached
 
         # حماية الكيانات
         protected_text, restore_map = _protect_entities(text)
-        entities = self._extract_entities(text)
-        if entities:
-            log.info(f"   📋 Entities: {entities}")
 
         # ═══ الطبقة 1: Gemini ═══
         if self.gemini:
             result = await self.gemini.translate(protected_text)
             if result:
-                title, body, hashtag = result
-                title = _restore_entities(title, restore_map)
-                body = _restore_entities(body, restore_map) if body else ""
+                result["headline"] = _restore_entities(result["headline"], restore_map)
+                result["body"] = _restore_entities(result.get("body", ""), restore_map)
 
-                if self._is_quality_good(title):
-                    check_text = title + " " + body
+                if self._is_quality_good(result["headline"]):
+                    check_text = result["headline"] + " " + result.get("body", "")
                     ok, missing = self._verify_entities(text, check_text)
 
                     if not ok:
-                        log.warning(f"   🔄 Gemini retry - missing: {missing}")
+                        log.warning(f"   🔄 Gemini retry — missing: {missing}")
                         retry = await self.gemini.translate(protected_text, missing_names=missing)
                         if retry:
-                            title, body, hashtag = retry
-                            title = _restore_entities(title, restore_map)
-                            body = _restore_entities(body, restore_map) if body else ""
-                            if self._is_quality_good(title):
-                                final = title if not body else title + "\n" + body
-                                if hashtag:
-                                    final += "\n" + hashtag
-                                await translation_cache.set(cache_key, final)
-                                return final
+                            retry["headline"] = _restore_entities(retry["headline"], restore_map)
+                            retry["body"] = _restore_entities(retry.get("body", ""), restore_map)
+                            if self._is_quality_good(retry["headline"]):
+                                await translation_cache.set(cache_key, retry)
+                                return retry
                     else:
-                        final = title if not body else title + "\n" + body
-                        if hashtag:
-                            final += "\n" + hashtag
-                        await translation_cache.set(cache_key, final)
-                        return final
+                        await translation_cache.set(cache_key, result)
+                        return result
 
         # ═══ الطبقة 2: Groq ═══
         if self.groq:
             result = await self.groq.translate(protected_text)
             if result:
-                result = _restore_entities(result, restore_map)
-                if self._is_quality_good(result):
+                result["headline"] = _restore_entities(result["headline"], restore_map)
+                result["body"] = _restore_entities(result.get("body", ""), restore_map)
+                if self._is_quality_good(result["headline"]):
                     await translation_cache.set(cache_key, result)
                     return result
 
@@ -936,72 +995,56 @@ class TranslationManager:
         if self.openrouter:
             result = await self.openrouter.translate(protected_text)
             if result:
-                result = _restore_entities(result, restore_map)
-                if self._is_quality_good(result):
+                result["headline"] = _restore_entities(result["headline"], restore_map)
+                result["body"] = _restore_entities(result.get("body", ""), restore_map)
+                if self._is_quality_good(result["headline"]):
                     await translation_cache.set(cache_key, result)
                     return result
 
-        # ═══ الطبقة 4: Google Translate ═══
-        result = await self.google.translate(text)  # يحتوي على حماية داخلية
-        if result:
-            result = _restore_entities(result, restore_map)
-            arabic_chars = sum(1 for c in result if '\u0600' <= c <= '\u06FF')
-            if len(result) > 20 and arabic_chars / len(result) >= 0.15:
-                await translation_cache.set(cache_key, result)
-                return result
+        # ═══ الطبقة 4: Google Translate (يُرجع نصاً عادياً) ═══
+        raw = await self.google.translate(text)
+        if raw:
+            raw = _restore_entities(raw, restore_map)
+            arabic_chars = sum(1 for c in raw if '\u0600' <= c <= '\u06FF')
+            if len(raw) > 20 and arabic_chars / len(raw) >= 0.15:
+                fallback = _parse_raw_as_fallback(raw)
+                if fallback:
+                    await translation_cache.set(cache_key, fallback)
+                    return fallback
 
         log.warning("   ❌ All translation methods failed")
         return None
 
     async def translate_item(self, item) -> None:
-        # Combine title + summary into one translation call
-        title = getattr(item, 'title', '') or item.get('title', '')
-        summary = getattr(item, 'summary', '') or item.get('summary', '')
+        """ترجمة خبر كامل — يملأ حقول item مباشرة"""
+        title = getattr(item, 'title', '') or ''
+        summary = getattr(item, 'summary', '') or ''
 
-        # دمج العنوان والملخص في نص واحد
-        combined = ""
-        if title:
-            combined += title
-        if summary:
-            combined += "\n" + summary
-
-        if not combined.strip():
+        # دمج العنوان والملخص
+        combined = (title + "\n" + summary).strip() if summary else title.strip()
+        if not combined:
             return
 
-        result = await self.translate(combined.strip())
-        if result:
-            # النتيجة تحتوي: title\nbody\n#hashtag أو title\nbody
-            parts = result.split("\n", 1)
-            headline_ar = parts[0].strip()
+        result = await self.translate(combined)
+        if not result:
+            return
 
-            if hasattr(item, 'title_ar'):
-                item.title_ar = headline_ar
-            else:
-                item['title_ar'] = headline_ar
+        # ملء حقول item مباشرة
+        item.title_ar = result["headline"]
+        item.summary_ar = result.get("body", "")
+        item.news_format = result.get("format", "standard")
+        item.importance = result.get("importance", "medium")
 
-            # استخراج الجسم والهاشتاغ
-            if len(parts) > 1:
-                remaining = parts[1].strip()
-                # إزالة سطر الهاشتاغ من النهاية
-                hashtag_match = re.match(r'^(.+?)\n(#\S+)\s*$', remaining, re.DOTALL)
-                if hashtag_match:
-                    body_ar = hashtag_match.group(1).strip()
-                    tag = hashtag_match.group(2).strip().lstrip("#")
-                    # تحديث العملات إن وُجدت
-                    if hasattr(item, 'coins') and tag:
-                        if tag.upper() not in [c.upper() for c in (item.coins or [])]:
-                            item.coins = (item.coins or []) + [tag.upper()]
-                    elif hasattr(item, 'coins'):
-                        item.coins = item.coins or []
+        # تحديث العملات من الهاشتاغ
+        hashtag = result.get("hashtag", "")
+        if hashtag:
+            tag = hashtag.lstrip("#").upper()
+            existing_lower = [c.lower() for c in (item.coins or [])]
+            if tag.lower() not in existing_lower:
+                if item.coins:
+                    item.coins = item.coins + [tag]
                 else:
-                    body_ar = remaining
-            else:
-                body_ar = ""
-
-            if hasattr(item, 'summary_ar'):
-                item.summary_ar = body_ar
-            else:
-                item['summary_ar'] = body_ar
+                    item.coins = [tag]
 
 
 # ═══════════════════════════════════════════════════════════

@@ -32,6 +32,8 @@ class NewsItem:
     # حقول الترجمة
     title_ar: str = ""
     summary_ar: str = ""
+    news_format: str = "standard"   # standard | bullets | economic
+    importance: str = "medium"       # low | medium | high | breaking
     # حقول الفلترة
     categories: List[str] = None
     coins: List[str] = None
@@ -61,6 +63,7 @@ class NewsItem:
             "image": self.image, "source": self.source, "category": self.category,
             "timestamp": self.timestamp, "date_str": self.date_str,
             "title_ar": self.title_ar, "summary_ar": self.summary_ar,
+            "news_format": self.news_format, "importance": self.importance,
             "categories": self.categories, "coins": self.coins,
             "score": self.score, "hash": self.hash, "lang": self.lang,
         }
@@ -222,7 +225,7 @@ def is_complete_news(text: str) -> bool:
         "على", "في", "من", "إلى", "عن", "مع", "حتى", "خلال",
         "بعد", "قبل", "بين", "ضد", "عبر", "نحو", "لدى", "بسبب",
         "وذلك على", "وذلك في", "وذلك من",
-        "✉️", "...", "،", ":",
+        "✉️", "...", "،",
     ]
 
     for ending in incomplete_endings:

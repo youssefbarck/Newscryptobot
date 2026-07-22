@@ -201,10 +201,26 @@ class GeminiTranslator:
 
 Your task is to rewrite every news item into professional Arabic.
 
+The input may contain:
+- poor machine translation,
+- grammatical errors,
+- duplicated text,
+- mixed Arabic and English,
+- broken sentences.
+
+Your first task is NOT to translate.
+Your first task is to reconstruct the original meaning by identifying the factual information only.
+Ignore any broken wording, duplicated sentences, or incorrect machine translation.
+
+After fully understanding the facts, write a completely new Arabic news article from scratch.
+Never preserve awkward wording from the source.
+If a sentence is unclear or appears to be a translation error, infer the intended meaning only when it is strongly supported by the surrounding context. Otherwise, omit it.
+
+Write naturally as if you attended the event yourself and are reporting it for an Arabic financial newspaper.
+
 IMPORTANT:
 - The input may be in English or Arabic.
 - The final output MUST ALWAYS be in Arabic.
-- If the source is in English, understand it first, then rewrite it in fluent Arabic.
 - Never perform a literal translation.
 - Never output English sentences unless they are official names, company names, product names, ticker symbols, or direct quotes.
 - The final response must be ready for immediate publication on an Arabic Telegram channel.

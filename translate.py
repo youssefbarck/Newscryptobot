@@ -565,13 +565,45 @@ Never present opinions as facts.
 
 HASHTAGS
 
-Generate at most ONE hashtag.
+Generate a hashtag ONLY IF:
+
+1. The cryptocurrency is the main subject.
+2. The cryptocurrency is explicitly mentioned in the source.
+3. The news is directly about that cryptocurrency.
+
+Otherwise return an empty hashtag.
+
+Never generate hashtags from verbs, adjectives,
+common English words, company names, locations,
+or ticker-like words.
 
 Never trust the source hashtag.
 
-If no cryptocurrency is the main subject,
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-return an empty hashtag.
+ENTITY VALIDATION
+
+Before mentioning any cryptocurrency, token, ticker,
+protocol, blockchain, ETF or company:
+
+Validate that it is the PRIMARY subject of the news.
+Never infer a cryptocurrency from a common English word.
+
+Examples of FALSE positives:
+"near support" "near approval" "nearly"
+are NOT references to NEAR Protocol.
+
+"op position" "op revenue" "operation"
+are NOT references to Optimism.
+
+Only identify a crypto entity if the source explicitly
+refers to it by name, ticker, or $ symbol.
+
+ENTITY CONFIDENCE RULE
+
+Never guess entity names.
+Only mention an entity if confidence is very high.
+If confidence is low, omit the entity instead of hallucinating it.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -958,13 +990,24 @@ class TranslationManager:
         self.openrouter = OpenRouterTranslator(config.OPENROUTER_API_KEY) if config.OPENROUTER_API_KEY else None
         self.google = GoogleTranslator()
 
+    # كلمات إنجليزية شائعة تُسبب false positives — تحتاج uppercase أو $ أو سياق واضح
+    _AMBIGUOUS = {"near", "op", "sol", "dot", "link", "apt", "sei", "ton",
+                  "mat", "avax", "arb", "run", "sui", "sea", "top", "fit",
+                  "meta", "atom", "one", "all", "sun", "moon", "star"}
+
     def _extract_entities(self, text: str) -> List[str]:
-        """استخراج الكيانات للتحقق"""
-        text_lower = text.lower()
+        """استخراج الكيانات — كلمات مبهمة تحتاج uppercase أو رمز"""
         found = []
         for name in sorted(CRITICAL_NAMES, key=len, reverse=True):
-            if name in text_lower and name not in found:
-                found.append(name)
+            if name in self._AMBIGUOUS:
+                # فقط كلمة مستقلة uppercase (NEAR) أو مع رمز ($NEAR, #NEAR)
+                if (re.search(rf'\b{name.upper()}\b', text)
+                    or f'${name.upper()}' in text
+                    or f'#{name.upper()}' in text):
+                    found.append(name)
+            else:
+                if name in text.lower():
+                    found.append(name)
         return found
 
     def _verify_entities(self, original: str, translated: str) -> Tuple[bool, List[str]]:

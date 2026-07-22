@@ -256,7 +256,7 @@ async def message_consumer(config: BotConfig, state: BotState):
 # 📝 News Formatting
 # ═══════════════════════════════════════════════════════════
 def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]:
-    """تنسيق الخبر للإرسال"""
+    """تنسيق الخبر للإرسال — JSON format: headline + body نظيف"""
     title_ar = item.title_ar or item.title
     summary_ar = item.summary_ar or item.summary
 
@@ -264,12 +264,8 @@ def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]
     if not title_ar or title_ar == item.title:
         return None
 
-    # بناء الرسالة — لا تكرر 🔵 إن كان العنوان يبدأ بها
-    title_clean = title_ar.strip()
-    if title_clean.startswith("\U0001f535"):
-        msg = f"{title_clean}\n"
-    else:
-        msg = f"\U0001f535 {title_clean}\n"
+    # بناء الرسالة — العنوان النظيف من JSON (بدون 🔵)
+    msg = f"🔵 {title_ar.strip()}\n"
 
     if show_summary and summary_ar:
         clean_summary = summary_ar.strip()
@@ -287,7 +283,7 @@ def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]
             if clean_summary:
                 msg += f"\n{clean_summary}\n"
 
-    # إضافة العملات إن وُجدت
+    # إضافة العملات إن وُجدت (الهاشتاغ من JSON مُضاف هنا)
     if item.coins:
         coins_str = " ".join([f"#{c}" for c in item.coins[:5]])
         msg += f"\n{coins_str}"

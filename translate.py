@@ -4,7 +4,7 @@
 ترجمة async مع caching ذكي، verification، و fallback متعدد
 """
 
-import os, re, hashlib, time, asyncio
+import os, re, hashlib, time, asyncio, json
 from typing import Optional, Tuple, Dict, List
 from dataclasses import dataclass
 
@@ -17,7 +17,7 @@ from config import log, BotConfig
 # 💾 Translation Cache (ذاكرة دائمة + ذاكرة مؤقتة)
 # ═══════════════════════════════════════════════════════════
 class TranslationCache:
-    """Cache ذكي للترجمة مع TTL"""
+    # Cache ذكي للترجمة مع TTL
 
     def __init__(self, ttl: int = 86400):  # 24 ساعة
         self._memory: Dict[str, Tuple[str, float]] = {}
@@ -129,7 +129,7 @@ GLOSSARY_AR = {
 
 
 def _protect_entities(text: str) -> Tuple[str, Dict[str, Tuple[str, Optional[str]]]]:
-    """حماية الكيانات المهمة قبل الترجمة"""
+    # حماية الكيانات المهمة قبل الترجمة
     restore_map = {}
     protected = text
     counter = 0
@@ -157,7 +157,7 @@ def _protect_entities(text: str) -> Tuple[str, Dict[str, Tuple[str, Optional[str
 
 
 def _restore_entities(text: str, restore_map: Dict) -> str:
-    """استعادة الكيانات بعد الترجمة"""
+    # استعادة الكيانات بعد الترجمة
     if not restore_map:
         return text
 
@@ -298,7 +298,7 @@ def clean_news(raw: str) -> str:
 # 🤖 Gemini Translation (Async)
 # ═══════════════════════════════════════════════════════════
 class GeminiTranslator:
-    """مترجم Gemini مع إدارة النماذج"""
+    # مترجم Gemini مع إدارة النماذج
 
     _STEP1_PROMPT = """Extract ONLY the verified facts from the following text.
 
@@ -324,9 +324,16 @@ Example output:
 
     _SYSTEM_PROMPT = """You are a senior Arabic cryptocurrency news editor.
 
-Your job is NOT to translate.
+TASK:
+Rewrite this news for publication on a professional Arabic Telegram crypto news channel.
 
-Your job is to understand the source news, extract only the verified facts, and rewrite the news from scratch in fluent, natural Arabic suitable for immediate publication on a professional Telegram crypto news channel.
+The headline and body are already separated.
+Do NOT merge them. Do NOT repeat the headline inside the body.
+Treat the source as raw notes, not as a finished article.
+Extract the verified facts first. Ignore duplicated information.
+Ignore poor machine translation, RSS formatting, unrelated hashtags.
+Forget the original wording completely.
+Rewrite the news from scratch in fluent professional Arabic.
 
 The source may contain:
 - English or Arabic.
@@ -455,15 +462,15 @@ unless explicitly supported by the source.
 
 13. Keep the article between 50 and 90 words.
 
-14. Return ONLY the final formatted news.
+14. Return ONLY valid JSON.
 
-Output format:
+JSON format:
 
-🔵 <Headline>
-
-<News paragraph>
-
-<One hashtag only if applicable>"""
+{
+  "headline": "",
+  "body": "",
+  "hashtag": ""
+}"""
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -527,8 +534,8 @@ Output format:
                 log.warning(f"Gemini init failed: {e}")
                 self._initialized = True  # لا نعيد المحاولة
 
-    async def translate(self, text: str, missing_names: Optional[List[str]] = None) -> Optional[Tuple[str, str]]:
-        """ترجمة باستخدام Gemini - نظام خطوتين"""
+    async def translate(self, text: str, missing_names: Optional[List[str]] = None) -> Optional[Tuple[str, str, str]]:
+        # ترجمة باستخدام Gemini - نظام خطوتين
         await self._init()
         if not self._models:
             return None
@@ -566,7 +573,15 @@ Output format:
                 log.info(f"✅ Gemini ({model_name}) step 1: extracted {len(facts)} chars of facts")
 
                 # === المرحلة الثانية: كتابة الخبر من الحقائق ===
-                step2_prompt = self._build_prompt(facts, missing_names)
+                # فصل الحقائق إلى عنوان (أول سطر) وجسم (البقية)
+                fact_lines = [l.strip() for l in facts.split("\n") if l.strip() and l.strip().startswith(("•", "-", "*"))]
+                if len(fact_lines) >= 2:
+                    step_headline = fact_lines[0].lstrip("•-* ")
+                    step_body = "\n".join(l.lstrip("•-* ") for l in fact_lines[1:])
+                else:
+                    step_headline = ""
+                    step_body = facts
+                step2_prompt = self._build_prompt(step_headline, step_body, missing_names)
                 step2_model = genai.GenerativeModel(model_name, system_instruction=self._SYSTEM_PROMPT)
                 step2_response = await asyncio.to_thread(
                     step2_model.generate_content,
@@ -580,61 +595,76 @@ Output format:
                 )
                 if step2_response and step2_response.text:
                     result = step2_response.text.strip().strip('"\'`')
-                    title, body = self._parse_output(result)
-                    if title:
+                    headline, body, hashtag = self._parse_output(result)
+                    if headline:
+                        hashtag = hashtag or ""
                         log.info(f"✅ Gemini ({model_name}): step 2 translation success")
-                        return title, body
+                        return headline, body, hashtag
             except Exception as e:
                 log.info(f"⏭️ Gemini ({model_name}) failed: {str(e)[:60]}")
                 continue
 
         return None
 
-    def _build_prompt(self, facts: str, missing_names: Optional[List[str]] = None) -> str:
-        """بناء البرومبت للمرحلة الثانية من الحقائق المستخرجة"""
-        prompt = f"Write one professional Arabic crypto news article from these facts.\n\nDo not repeat any fact.\n"
+    def _build_prompt(self, headline: str, body: str, missing_names: Optional[List[str]] = None) -> str:
+        # بناء البرومبت للمرحلة الثانية - يرسل headline و body كمتغيرين منفصلين
+        prompt = f"HEADLINE:\n{headline}\n\nBODY:\n{body}\n"
         if missing_names:
-            prompt += f"\n🔴 تنبيه: هذه الأسماء اختفت في المحاولة السابقة: {', '.join(missing_names)}. يجب أن تظهر كلها.\n"
-        prompt += f"\nFacts:\n\n{facts}"
+            prompt += f"\nWARNING: These names must appear: {', '.join(missing_names)}.\n"
         return prompt
 
-    def _parse_output(self, text: str) -> Tuple[Optional[str], str]:
-        """استخراج العنوان والخبر من التنسيق الجديد أو القديم"""
+    def _parse_output(self, text: str) -> Tuple[Optional[str], str, str]:
+        # تحليل JSON output من Gemini: {headline, body, hashtag}
         if not text:
-            return None, ""
+            return None, "", ""
 
-        # التنسيق الجديد: 🔵 <عنوان>\n\n<فقرة>\n\n#<ticker>
-        blue_match = re.split(r'\n\n+', text.strip(), maxsplit=2)
-        if blue_match and blue_match[0].startswith("\U0001f535"):
-            title = blue_match[0].replace("\U0001f535", "").strip().lstrip(" -")
-            body = ""
-            if len(blue_match) > 1:
-                # الفقرة هي الجزء الثاني (قد يحتوي #ticker في نهايته)
-                paragraph = blue_match[1].strip()
-                # إزالة سطر #ticker إن وُجد
-                ticker_match = re.match(r'^(.+?)\n*#.*$', paragraph, re.DOTALL)
-                body = ticker_match.group(1).strip() if ticker_match else paragraph
-            if title and len(title) > 3:
-                return title.strip(" .,،:؛-"), body.strip(" .,،:؛-")
+        # محاولة تحليل JSON مباشرة
+        try:
+            # تنظيف النص من ```json ... ``` إن وُجد
+            cleaned = text.strip()
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r'^```(?:json)?\n?', '', cleaned)
+                cleaned = re.sub(r'\n?```$', '', cleaned)
+                cleaned = cleaned.strip()
 
-        # التنسيق القديم: العنوان:...\nالخبر:...
+            data = json.loads(cleaned)
+            headline = (data.get("headline") or "").strip()
+            body = (data.get("body") or "").strip()
+            hashtag = (data.get("hashtag") or "").strip().lstrip("#")
+            if hashtag:
+                hashtag = "#" + hashtag
+
+            if headline and len(headline) > 3:
+                return headline, body, hashtag
+        except (json.JSONDecodeError, AttributeError, KeyError):
+            pass
+
+        # Fallback: محاولة استخراج JSON من نص مختلط
+        json_match = re.search(r'\{[^}]+\}', text, re.DOTALL)
+        if json_match:
+            try:
+                data = json.loads(json_match.group())
+                headline = (data.get("headline") or "").strip()
+                body = (data.get("body") or "").strip()
+                hashtag = (data.get("hashtag") or "").strip().lstrip("#")
+                if hashtag:
+                    hashtag = "#" + hashtag
+                if headline and len(headline) > 3:
+                    return headline, body, hashtag
+            except (json.JSONDecodeError, AttributeError, KeyError):
+                pass
+
+        # Fallback أخير: التنسيق القديم
         parts = re.split(r'\n\s*الخبر\s*:\s*', text, maxsplit=1)
         if len(parts) == 2:
             header = parts[0].strip()
             body = parts[1].strip()
             title_match = re.split(r'\n\s*العنوان\s*:\s*', header, maxsplit=1)
-            if len(title_match) == 2:
-                title = title_match[1].strip()
-            else:
-                title = header
+            title = title_match[1].strip() if len(title_match) == 2 else header
+            if len(title.strip(" .,،:؛-")) > 3:
+                return title.strip(" .,،:؛-"), body.strip(" .,،:؛-"), ""
 
-            title = title.strip(" .,،:؛-")
-            body = body.strip(" .,،:؛-")
-
-            if len(title) > 3 and (len(body) > 10 or not body):
-                return title, body
-
-        return text, ""
+        return None, "", ""
 
 
 # ═══════════════════════════════════════════════════════════
@@ -654,7 +684,7 @@ class GroqTranslator:
                     json={
                         "model": "llama-3.3-70b-versatile",
                         "messages": [
-                            {"role": "system", "content": "You are a senior Arabic crypto news editor. NOT a translator. Rewrite from meaning, not wording. Remove duplicates, RSS artifacts (Read more, Source, Via), broken translation, incorrect hashtags. Never translate literally. Never invent facts, speculate, or exaggerate. Preserve prices, percentages, dates, names. Keep official names in English. Terms: killer app=أبرز تطبيق, game changer=نقلة نوعية, validator=مدقق, mainnet=الشبكة الرئيسية, stablecoin=عملة مستقرة, AI Agent=وكيل ذكاء اصطناعي, exploit=استغلال ثغرة, hack=اختراق, upgrade=ترقية, inflows=تدفقات داخلة, outflows=تدفقات خارجة, ETF=صندوق متداول, staking=الرهن, DeFi=التمويل اللامركزي. BANNED phrases: في خطوة تعكس, خلال الفترة الحالية, مما عزز ثقة المستثمرين, وسط تزايد الاهتمام, التطبيق القاتل, غيّر قواعد اللعبة, وسط ترقب الأسواق, مما يعزز الزخم, خلال الفترة الحالية, في خطوة تعكس. QUALITY CONTROL: exactly one headline and one body. Body must NOT repeat headline. Every sentence adds new info. Remove duplicates. No duplicate hashtags. Company/regulation/ETF/lawsuit/macro/AI news = no ticker hashtag unless specific crypto is main subject. Analysis/prediction must use: بحسب تحليل / وفقاً لتقرير / يرى محللون / تشير التقديرات. If fewer than 2 facts, expand from source only. 50-90 words. Return ONLY final news. Format:\n\n🔵 <Arabic headline>\n\n<News paragraph>\n\n#<One hashtag if applicable>"},
+                            {"role": "system", "content": "You are a senior Arabic crypto news editor. NOT a translator. Rewrite from meaning, not wording. Remove duplicates, RSS artifacts (Read more, Source, Via), broken translation, incorrect hashtags. Never translate literally. Never invent facts, speculate, or exaggerate. Preserve prices, percentages, dates, names. Keep official names in English. Terms: killer app=أبرز تطبيق, game changer=نقلة نوعية, validator=مدقق, mainnet=الشبكة الرئيسية, stablecoin=عملة مستقرة, AI Agent=وكيل ذكاء اصطناعي, exploit=استغلال ثغرة, hack=اختراق, upgrade=ترقية, inflows=تدفقات داخلة, outflows=تدفقات خارجة, ETF=صندوق متداول, staking=الرهن, DeFi=التمويل اللامركزي. BANNED phrases: في خطوة تعكس, خلال الفترة الحالية, مما عزز ثقة المستثمرين, وسط تزايد الاهتمام, التطبيق القاتل, غيّر قواعد اللعبة, وسط ترقب الأسواق, مما يعزز الزخم, خلال الفترة الحالية, في خطوة تعكس. QUALITY CONTROL: exactly one headline and one body. Body must NOT repeat headline. Every sentence adds new info. Remove duplicates. No duplicate hashtags. Company/regulation/ETF/lawsuit/macro/AI news = no ticker hashtag unless specific crypto is main subject. Analysis/prediction must use: بحسب تحليل / وفقاً لتقرير / يرى محللون / تشير التقديرات. If fewer than 2 facts, expand from source only. 50-90 words. Return ONLY valid JSON: Return ONLY valid JSON with keys: headline, body, hashtag"},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,
@@ -691,7 +721,7 @@ class OpenRouterTranslator:
                     json={
                         "model": "qwen/qwen-2.5-72b-instruct",
                         "messages": [
-                            {"role": "system", "content": "You are a senior Arabic crypto news editor. NOT a translator. Rewrite from meaning, not wording. Remove duplicates, RSS artifacts (Read more, Source, Via), broken translation, incorrect hashtags. Never translate literally. Never invent facts, speculate, or exaggerate. Preserve prices, percentages, dates, names. Keep official names in English. Terms: killer app=أبرز تطبيق, game changer=نقلة نوعية, validator=مدقق, mainnet=الشبكة الرئيسية, stablecoin=عملة مستقرة, AI Agent=وكيل ذكاء اصطناعي, exploit=استغلال ثغرة, hack=اختراق, upgrade=ترقية, inflows=تدفقات داخلة, outflows=تدفقات خارجة, ETF=صندوق متداول, staking=الرهن, DeFi=التمويل اللامركزي. BANNED phrases: في خطوة تعكس, خلال الفترة الحالية, مما عزز ثقة المستثمرين, وسط تزايد الاهتمام, التطبيق القاتل, غيّر قواعد اللعبة, وسط ترقب الأسواق, مما يعزز الزخم, خلال الفترة الحالية, في خطوة تعكس. QUALITY CONTROL: exactly one headline and one body. Body must NOT repeat headline. Every sentence adds new info. Remove duplicates. No duplicate hashtags. Company/regulation/ETF/lawsuit/macro/AI news = no ticker hashtag unless specific crypto is main subject. Analysis/prediction must use: بحسب تحليل / وفقاً لتقرير / يرى محللون / تشير التقديرات. If fewer than 2 facts, expand from source only. 50-90 words. Return ONLY final news. Format:\n\n🔵 <Arabic headline>\n\n<News paragraph>\n\n#<One hashtag if applicable>"},
+                            {"role": "system", "content": "You are a senior Arabic crypto news editor. NOT a translator. Rewrite from meaning, not wording. Remove duplicates, RSS artifacts (Read more, Source, Via), broken translation, incorrect hashtags. Never translate literally. Never invent facts, speculate, or exaggerate. Preserve prices, percentages, dates, names. Keep official names in English. Terms: killer app=أبرز تطبيق, game changer=نقلة نوعية, validator=مدقق, mainnet=الشبكة الرئيسية, stablecoin=عملة مستقرة, AI Agent=وكيل ذكاء اصطناعي, exploit=استغلال ثغرة, hack=اختراق, upgrade=ترقية, inflows=تدفقات داخلة, outflows=تدفقات خارجة, ETF=صندوق متداول, staking=الرهن, DeFi=التمويل اللامركزي. BANNED phrases: في خطوة تعكس, خلال الفترة الحالية, مما عزز ثقة المستثمرين, وسط تزايد الاهتمام, التطبيق القاتل, غيّر قواعد اللعبة, وسط ترقب الأسواق, مما يعزز الزخم, خلال الفترة الحالية, في خطوة تعكس. QUALITY CONTROL: exactly one headline and one body. Body must NOT repeat headline. Every sentence adds new info. Remove duplicates. No duplicate hashtags. Company/regulation/ETF/lawsuit/macro/AI news = no ticker hashtag unless specific crypto is main subject. Analysis/prediction must use: بحسب تحليل / وفقاً لتقرير / يرى محللون / تشير التقديرات. If fewer than 2 facts, expand from source only. 50-90 words. Return ONLY valid JSON: Return ONLY valid JSON with keys: headline, body, hashtag"},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,
@@ -717,7 +747,7 @@ class OpenRouterTranslator:
 
 
 class GoogleTranslator:
-    """Fallback المجاني: Google Translate"""
+    # Fallback المجاني: Google Translate
 
     async def translate(self, text: str) -> Optional[str]:
         try:
@@ -763,7 +793,7 @@ class GoogleTranslator:
 # 🏭 Translation Manager
 # ═══════════════════════════════════════════════════════════
 class TranslationManager:
-    """مدير الترجمة الموحد"""
+    # مدير الترجمة الموحد
 
     def __init__(self, config: BotConfig):
         self.config = config
@@ -773,7 +803,7 @@ class TranslationManager:
         self.google = GoogleTranslator()
 
     def _extract_entities(self, text: str) -> List[str]:
-        """استخراج الكيانات للتحقق"""
+        # استخراج الكيانات للتحقق
         text_lower = text.lower()
         found = []
         for name in sorted(CRITICAL_NAMES, key=len, reverse=True):
@@ -782,7 +812,7 @@ class TranslationManager:
         return found
 
     def _verify_entities(self, original: str, translated: str) -> Tuple[bool, List[str]]:
-        """التحقق من وجود الكيانات"""
+        # التحقق من وجود الكيانات
         if not translated:
             return False, ["(empty)"]
         entities = self._extract_entities(original)
@@ -793,7 +823,7 @@ class TranslationManager:
         return len(missing) == 0, missing
 
     def _is_quality_good(self, text: str) -> bool:
-        """التحقق من جودة النص العربي"""
+        # التحقق من جودة النص العربي
         if not text or len(text) < 5:
             return False
 
@@ -815,7 +845,7 @@ class TranslationManager:
         return True
 
     def _is_complete(self, text: str) -> bool:
-        """التحقق من اكتمال النص"""
+        # التحقق من اكتمال النص
         if not text:
             return False
         trimmed = text.strip()
@@ -829,7 +859,7 @@ class TranslationManager:
         return True
 
     def _truncate(self, text: str, max_len: int = 1200) -> str:
-        """قص النص عند نهاية جملة"""
+        # قص النص عند نهاية جملة
         if len(text) <= max_len:
             return text
         chunk = text[:max_len]
@@ -843,7 +873,7 @@ class TranslationManager:
         return chunk
 
     async def translate(self, text: str, force: bool = False) -> Optional[str]:
-        """ترجمة النص - النظام الكامل"""
+        # ترجمة النص - النظام الكامل
         if not text or len(text) < 3:
             return text
 
@@ -865,7 +895,7 @@ class TranslationManager:
         if self.gemini:
             result = await self.gemini.translate(protected_text)
             if result:
-                title, body = result
+                title, body, hashtag = result
                 title = _restore_entities(title, restore_map)
                 body = _restore_entities(body, restore_map) if body else ""
 
@@ -874,18 +904,22 @@ class TranslationManager:
                     ok, missing = self._verify_entities(text, check_text)
 
                     if not ok:
-                        log.warning(f"   🔄 Gemini retry — missing: {missing}")
+                        log.warning(f"   🔄 Gemini retry - missing: {missing}")
                         retry = await self.gemini.translate(protected_text, missing_names=missing)
                         if retry:
-                            title, body = retry
+                            title, body, hashtag = retry
                             title = _restore_entities(title, restore_map)
                             body = _restore_entities(body, restore_map) if body else ""
                             if self._is_quality_good(title):
                                 final = title if not body else title + "\n" + body
+                                if hashtag:
+                                    final += "\n" + hashtag
                                 await translation_cache.set(cache_key, final)
                                 return final
                     else:
                         final = title if not body else title + "\n" + body
+                        if hashtag:
+                            final += "\n" + hashtag
                         await translation_cache.set(cache_key, final)
                         return final
 
@@ -920,24 +954,54 @@ class TranslationManager:
         return None
 
     async def translate_item(self, item) -> None:
-        """ترجمة عنصر خبر"""
+        # Combine title + summary into one translation call
         title = getattr(item, 'title', '') or item.get('title', '')
         summary = getattr(item, 'summary', '') or item.get('summary', '')
 
-        title_ar = await self.translate(title)
-        if title_ar:
-            if hasattr(item, 'title_ar'):
-                item.title_ar = title_ar
-            else:
-                item['title_ar'] = title_ar
-
+        # دمج العنوان والملخص في نص واحد
+        combined = ""
+        if title:
+            combined += title
         if summary:
-            summary_ar = await self.translate(summary)
-            if summary_ar:
-                if hasattr(item, 'summary_ar'):
-                    item.summary_ar = summary_ar
+            combined += "\n" + summary
+
+        if not combined.strip():
+            return
+
+        result = await self.translate(combined.strip())
+        if result:
+            # النتيجة تحتوي: title\nbody\n#hashtag أو title\nbody
+            parts = result.split("\n", 1)
+            headline_ar = parts[0].strip()
+
+            if hasattr(item, 'title_ar'):
+                item.title_ar = headline_ar
+            else:
+                item['title_ar'] = headline_ar
+
+            # استخراج الجسم والهاشتاغ
+            if len(parts) > 1:
+                remaining = parts[1].strip()
+                # إزالة سطر الهاشتاغ من النهاية
+                hashtag_match = re.match(r'^(.+?)\n(#\S+)\s*$', remaining, re.DOTALL)
+                if hashtag_match:
+                    body_ar = hashtag_match.group(1).strip()
+                    tag = hashtag_match.group(2).strip().lstrip("#")
+                    # تحديث العملات إن وُجدت
+                    if hasattr(item, 'coins') and tag:
+                        if tag.upper() not in [c.upper() for c in (item.coins or [])]:
+                            item.coins = (item.coins or []) + [tag.upper()]
+                    elif hasattr(item, 'coins'):
+                        item.coins = item.coins or []
                 else:
-                    item['summary_ar'] = summary_ar
+                    body_ar = remaining
+            else:
+                body_ar = ""
+
+            if hasattr(item, 'summary_ar'):
+                item.summary_ar = body_ar
+            else:
+                item['summary_ar'] = body_ar
 
 
 # ═══════════════════════════════════════════════════════════

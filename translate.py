@@ -408,10 +408,15 @@ Write a completely new article.
 
 ABSOLUTE RULES
 
-OFFICIAL NAMES
+OFFICIAL ENTITY POLICY
 
-Never translate official cryptocurrency names.
-Always use their official international spelling.
+Company names, exchange names, ETF names,
+blockchain names, protocol names,
+cryptocurrency names,
+must remain in their official English spelling.
+
+Never transliterate unknown names.
+If confidence is low, preserve the original English name.
 
 Bitcoin, Ethereum, Solana, BNB, XRP, Dogecoin,
 Tether, Circle, Coinbase, BlackRock, MicroStrategy.
@@ -435,11 +440,27 @@ Never:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+NEWSROOM FILTER
+
+Before writing, classify every source sentence.
+
+A = Verified fact. Keep.
+B = Opinion. Delete unless attributed to a person or organization.
+C = Market commentary. Delete.
+D = Generic explanation. Delete.
+E = Repeated information. Delete.
+
+Only Category A should normally remain.
+Never publish Category C or D.
+
 BODY RULES
 
 The body MUST expand the headline.
 
 Every sentence must introduce NEW information.
+Every sentence must contain at least one concrete fact.
+If a sentence contains no measurable or verifiable information, delete it.
+Never write sentences only to improve flow.
 
 If two sentences express the same idea,
 keep only the stronger one.

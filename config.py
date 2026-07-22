@@ -4,10 +4,10 @@
 يجمع بين الإعدادات القديمة والبنية الجديدة (dataclasses)
 """
 
-import os, time, json, logging, threading, re, hashlib, asyncio
+import os, time, json, logging, asyncio
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple, Any
+from typing import Dict, List, Optional, Set, Any
 import pytz, requests
 
 
@@ -418,30 +418,6 @@ REJECTION_KEYWORDS = [
     "crossposted from", "xposted from",
 ]
 
-AR_CRITICAL_KEYWORDS = [
-    "اختراق", "اخترق", "سرقة", "سُرق", "تم اختراق", "ثغرة", "احتيال",
-    "استغلال", "اختراقات", "سايبر", "هجوم إلكتروني",
-    "انهيار", "انهار", "تدهور", "هبوط حاد", "سقوط", "تراجع حاد",
-    "بيع جماعي", "تصفية", "ضغط",
-    "تدفقات", "تدفق", "استثمارات مؤسسية", "شراء كبير",
-    "مايكروستراتيجي", "بلاك روك", "مؤسسي",
-    "التنصيف", "انقسام", "تحديث الشبكة",
-    "إطلاق الشبكة", "الشبكة الرئيسية",
-    "فك توكن", "إلغاء تأمين", "حرق توكن", "حرق عملة", "إتلاف",
-    "الفائدة", "الفيدرالي", "باول", "اجتماع الفيدرالي",
-    "خفض الفائدة", "رفع الفائدة", "تثبيت الفائدة",
-    "أسعار الفائدة", "الاحتياطي الفيدرالي",
-    "موافقة", "رفض", "قانون", "تنظيم", "حظر", "عقوبات",
-    "بيتكوين", "إيثيريوم", "بايننس", "كريبتو", "عملات رقمية",
-    "عملات مشفرة", "البلوكتشين", "USDT", "USDC",
-]
-
-AR_REJECTION_KEYWORDS = [
-    "تحليل", "توقعات", "متوقع", "قد يصل", "قد يصل إلى",
-    "أفضل 10", "أفضل 5", "كيف تشتري", "شرح",
-    "دليل", "ما هي", "تعرف على",
-]
-
 # ═══════════════════════════════════════════════════════════
 # 🔧 إعدادات التشغيل
 # ═══════════════════════════════════════════════════════════
@@ -799,7 +775,6 @@ def set_cached(key, data):
 TELEGRAM_RATE_LIMITER = RateLimiter(25, 60)
 TELEGRAM_CB = CircuitBreaker(fail_threshold=5, reset_timeout=120)
 FARSIDE_RATE_LIMITER = RateLimiter(2, 60)
-FARSIDE_CB = CircuitBreaker(fail_threshold=3, reset_timeout=300)
 
 # إنشاء config و state — يجب أن يأتيا AFTER تعريف الدوال
 config = BotConfig(

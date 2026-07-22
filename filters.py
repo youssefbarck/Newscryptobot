@@ -5,13 +5,13 @@
 """
 
 import re, time, hashlib
-from typing import List, Dict, Set, Tuple, Optional
+from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from config import (
     log, KEYWORDS_CONFIG, CRYPTO_CONTEXT_KEYWORDS, REJECTION_KEYWORDS,
-    AR_CRITICAL_KEYWORDS, AR_REJECTION_KEYWORDS, COIN_MAP,
+    COIN_MAP,
 )
 
 
@@ -235,7 +235,7 @@ def is_complete_news(text: str) -> bool:
     if len(trimmed) < 250:
         return True
 
-    if len(trimmed) >= 250 and not re.search(r'[.!؟!\u06d4]$', trimmed):
+    if len(trimmed) >= 250 and not re.search(r'[.!؟!:\u06d4]$', trimmed):
         return False
 
     return True

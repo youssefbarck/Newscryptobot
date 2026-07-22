@@ -5,7 +5,7 @@
 تجلب البيانات عبر Cohere API مع بحث الويب، تنسّقها كـ Dashboard، وترسلها مرة واحدة يومياً.
 """
 
-import os, json, time, asyncio, logging, traceback
+import os, re, json, time, asyncio, traceback
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 
@@ -196,7 +196,6 @@ def _extract_json(text: str) -> Optional[Dict]:
         pass
 
     # محاولة 2: البحث عن ```json ... ```
-    import re
     match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
     if match:
         try:

@@ -4,18 +4,16 @@
 جلب متوازي، connection pooling، و parsing متقدم
 """
 
-import re, time, asyncio
+import re, asyncio
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 from xml.etree import ElementTree as ET
-from dataclasses import dataclass
-
 import aiohttp
 from aiohttp import ClientTimeout, TCPConnector
 
 from config import (
     log, NEWS_SOURCES, HEADERS, REDDIT_HEADERS, 
-    FARSIDE_RATE_LIMITER, FARSIDE_CB,
+    FARSIDE_RATE_LIMITER,
 )
 from filters import NewsItem
 

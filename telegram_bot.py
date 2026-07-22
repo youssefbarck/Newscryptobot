@@ -4,9 +4,9 @@
 بوت متقدم مع queues، rate limiting، و image processing فعال
 """
 
-import os, time, json, re, asyncio, hashlib
+import os, time, json, asyncio, hashlib
 from datetime import datetime
-from typing import Dict, List, Optional, Set, Any
+from typing import Dict, List, Optional, Set
 from dataclasses import dataclass, field
 
 import aiohttp
@@ -18,9 +18,9 @@ from config import (
     SUMMARY_HOUR, SUMMARY_MINUTE, tz,
 )
 import dedup
-from filters import NewsItem, filter_news_items, is_complete_news, time_ago
+from filters import NewsItem, filter_news_items, is_complete_news
 from rss import fetch_all_news, fetch_etf_flows, session_manager
-from translate import TranslationManager, translate_source_name, translation_cache
+from translate import TranslationManager, translation_cache
 import daily_report
 
 
@@ -296,9 +296,16 @@ def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]
                 if clean_summary:
                     msg += f"\n\n{clean_summary}"
 
-    # إضافة العملات إن وُجدت
+    # إضافة العملات إن وُجدت (فريد، case-insensitive)
     if item.coins:
-        coins_str = " ".join([f"#{c}" for c in item.coins[:5]])
+        seen = set()
+        unique_coins = []
+        for c in item.coins:
+            cl = c.lower()
+            if cl not in seen:
+                seen.add(cl)
+                unique_coins.append(c)
+        coins_str = " ".join([f"#{c}" for c in unique_coins[:5]])
         msg += f"\n\n{coins_str}"
 
     msg += "\n\n✉️ @newscrypto1m"
@@ -397,13 +404,17 @@ async def scan_news_loop(config: BotConfig, state: BotState, translator: Transla
                 state.sent_news_hashes.add(item.hash)
                 state.last_alerts_hashes[item.hash] = now
 
+                # للأولوية: importance هو المصدر الموحد
+                imp = getattr(item, 'importance', 'medium') or 'medium'
+                priority = 3 if imp in ("breaking", "high") else 2
+
                 # للقناة
                 if state.is_channel_enabled(config):
                     await message_queue.put(QueuedMessage(
                         text=msg,
                         image_url=item.image,
                         chat_id=config.CHANNEL_ID,
-                        priority=3 if ("breaking" in (item.categories or []) or "hack" in (item.categories or []) or getattr(item, 'importance', '') == "breaking") else 2,
+                        priority=priority,
                     ))
 
                 # للمالك
@@ -411,12 +422,18 @@ async def scan_news_loop(config: BotConfig, state: BotState, translator: Transla
                     text=msg,
                     image_url=item.image,
                     chat_id=config.CHAT_ID,
-                    priority=3 if ("breaking" in (item.categories or []) or "hack" in (item.categories or []) or getattr(item, 'importance', '') == "breaking") else 2,
+                    priority=priority,
                 ))
 
                 alerts_sent += 1
                 log.info(f"  ✉️ {item.title[:60]}...")
 
+            update_daily_stats(
+                alerts_sent=alerts_sent,
+                important=len([i for i in filtered[:MAX_NEWS_PER_SCAN] if i.score >= 3.0]),
+                total=len(news),
+                categories=sum([i.categories or [] for i in filtered[:MAX_NEWS_PER_SCAN]], []),
+            )
             log.info(f"📊 Scan complete: {len(news)} fetched, {len(filtered)} important, {alerts_sent} sent")
 
             # ETF flows (مرة واحدة يومياً)

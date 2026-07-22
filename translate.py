@@ -1045,39 +1045,3 @@ class TranslationManager:
                     item.coins = item.coins + [tag]
                 else:
                     item.coins = [tag]
-
-
-# ═══════════════════════════════════════════════════════════
-# 🌍 Translation Utilities
-# ═══════════════════════════════════════════════════════════
-SOURCES_AR = {
-    "CoinDesk": "كوين ديسك",
-    "Cointelegraph": "كوين تيليغراف",
-    "Decrypt": "ديكريبت",
-    "BeInCrypto": "بي إن كريبتو",
-    "Crypto.News": "كريبتو نيوز",
-    "Blockworks": "بلوك وركس",
-    "Bitcoinist": "بيتكوينيست",
-    "Federal Reserve": "الاحتياطي الفيدرالي",
-    "Google News - Crypto": "أخبار كريبتو",
-    "Google News - ETF": "أخبار ETF",
-    "Google News AR - Bitcoin": "أخبار بيتكوين",
-    "Google News AR - Fed": "أخبار الفيدرالي",
-}
-
-COINS_AR = {
-    "BTC": "بيتكوين", "ETH": "إيثيريوم", "SOL": "سولانا",
-    "XRP": "ريبل", "ADA": "كاردانو", "DOGE": "دوجكوين",
-    "AVAX": "أفالانش", "MATIC": "بوليغون", "LINK": "تشين لينك",
-    "DOT": "بولكادوت", "LTC": "لايتكوين", "BNB": "بينانس كوين",
-    "USDT": "تيثر", "APT": "أبتوس", "ARB": "أربيترم",
-    "OP": "أوبتيميزم", "SUI": "سوي", "SEI": "سي", "TON": "تونكوين",
-}
-
-
-def translate_source_name(source: str) -> str:
-    return SOURCES_AR.get(source, source)
-
-
-def translate_coin_name(symbol: str) -> str:
-    return f"{symbol} ({COINS_AR.get(symbol, symbol)})"

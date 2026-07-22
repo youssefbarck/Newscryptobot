@@ -191,6 +191,109 @@ def _restore_entities(text: str, restore_map: Dict) -> str:
     return result
 
 
+
+# ═══════════════════════════════════════════════════════════
+# 🧹 News Pre-Cleaning (before Gemini processing)
+# ═══════════════════════════════════════════════════════════
+
+BAD_LINES = [
+    "read more",
+    "first appeared",
+    "originally published",
+    "source:",
+    "via ",
+    "✉️",
+]
+
+BAD_HASHTAGS = {
+    "#near",
+    "#op",
+}
+
+
+def _normalize_text(text: str) -> str:
+    text = text.strip()
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def _is_duplicate(a: str, b: str) -> bool:
+    a = _normalize_text(a).lower()
+    b = _normalize_text(b).lower()
+    if a == b:
+        return True
+    if len(a) > 20 and a in b:
+        return True
+    if len(b) > 20 and b in a:
+        return True
+    return False
+
+
+def clean_news(raw: str) -> str:
+    """Clean raw crypto news before sending it to Gemini.
+
+    Removes: duplicates, RSS artifacts, bad hashtags, channel signature.
+    Keeps: one headline, one hashtag max, deduplicated body.
+    """
+    if not raw:
+        return ""
+
+    raw = raw.replace("\r", "")
+    lines = [x.strip() for x in raw.split("\n") if x.strip()]
+
+    result = []
+    hashtags = []
+    headline = None
+
+    for line in lines:
+        low = line.lower()
+
+        # حذف توقيع القناة
+        if "@newscrypto1m" in low:
+            continue
+
+        # حذف أسطر RSS
+        if any(x in low for x in BAD_LINES):
+            continue
+
+        # جمع الهاشتاغات
+        if line.startswith("#"):
+            tag = line.lower()
+            if tag not in BAD_HASHTAGS:
+                if tag not in hashtags:
+                    hashtags.append(line)
+            continue
+
+        # أول عنوان
+        if headline is None and line.startswith("🔵"):
+            headline = line
+            result.append(line)
+            continue
+
+        # حذف تكرار العنوان
+        if headline:
+            h = headline.replace("🔵", "").strip()
+            if _is_duplicate(h, line):
+                continue
+
+        # حذف تكرار أي سطر
+        duplicated = False
+        for old in result:
+            if _is_duplicate(old, line):
+                duplicated = True
+                break
+        if duplicated:
+            continue
+
+        result.append(line)
+
+    # إضافة هاشتاغ واحد فقط
+    if hashtags:
+        result.append("")
+        result.append(hashtags[0])
+
+    return "\n".join(result)
+
 # ═══════════════════════════════════════════════════════════
 # 🤖 Gemini Translation (Async)
 # ═══════════════════════════════════════════════════════════
@@ -312,41 +415,55 @@ outflows -> \u062a\u062f\u0641\u0642\u0627\u062a \u062e\u0627\u0631\u062c\u0629
 - Generate a hashtag only if the news is clearly related to a cryptocurrency.
 - If the news is about a company, regulation, ETF, lawsuit, security incident, or macro event, do not generate any hashtag.
 
-15. The first sentence must immediately state the main news.
+QUALITY CONTROL
 
-16. Write between 40 and 80 words.
+Before returning the final news, perform these checks:
 
-17. If the body repeats the headline, rewrite it with new factual information instead of repeating the same idea.
+1. There must be exactly ONE headline.
 
-18. Never repeat the headline inside the body.
+2. There must be exactly ONE news paragraph.
 
-19. Remove duplicated news, duplicated headlines and duplicated paragraphs.
+3. The paragraph must NOT repeat the headline.
 
-20. If the article is only a price prediction or technical analysis, clearly present it as an analyst's view rather than as a confirmed event.
+4. Every sentence must introduce new information.
 
-21. Remove generic filler such as:
+5. Remove all duplicated sentences.
+
+6. Remove duplicated headlines.
+
+7. Remove duplicated hashtags.
+
+8. Never output more than one identical hashtag.
+
+9. If the news is about a company, regulation, lawsuit, ETF, macroeconomics, or AI, do not generate a crypto ticker unless a specific cryptocurrency is the main subject.
+
+10. If the news is an analysis, prediction, or opinion, make that explicit using phrases such as:
+- بحسب تحليل...
+- وفقاً لتقرير...
+- يرى محللون...
+- تشير التقديرات...
+Never present analysis as confirmed fact.
+
+11. If the article contains fewer than two factual points, expand it naturally using ONLY information already present in the source. Never invent facts.
+
+12. Remove generic filler such as:
 - وسط ترقب الأسواق
 - مما يعزز الزخم
-- وسط تداولات متقلبة
-unless supported by explicit facts.
+- خلال الفترة الحالية
+- في خطوة تعكس
+unless explicitly supported by the source.
 
-22. Never output duplicate hashtags.
+13. Keep the article between 50 and 90 words.
 
-23. Output exactly one headline and one body.
+14. Return ONLY the final formatted news.
 
-24. If the source contains two versions of the same news, keep only the better one.
-
-25. Every sentence must introduce new information. If it doesn't, delete it.
-
-Output format exactly:
+Output format:
 
 🔵 <Headline>
 
 <News paragraph>
 
-<Hashtag if applicable, otherwise leave blank>
-
-Return ONLY the final news."""
+<One hashtag only if applicable>"""
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -420,11 +537,16 @@ Return ONLY the final news."""
 
         for model_name in self._models:
             try:
+                # تنظيف النص الخام قبل المرحلة الأولى
+                cleaned_text = clean_news(text)
+                if not cleaned_text or len(cleaned_text) < 15:
+                    cleaned_text = text  # fallback to original
+
                 # === المرحلة الأولى: استخراج الحقائق ===
                 step1_model = genai.GenerativeModel(model_name, system_instruction=self._STEP1_PROMPT)
                 step1_response = await asyncio.to_thread(
                     step1_model.generate_content,
-                    text,
+                    cleaned_text,
                     generation_config={
                         "temperature": 0.1,
                         "top_p": 0.8,
@@ -532,7 +654,7 @@ class GroqTranslator:
                     json={
                         "model": "llama-3.3-70b-versatile",
                         "messages": [
-                            {"role": "system", "content": "You are a senior Arabic crypto news editor. NOT a translator. Rewrite from meaning, not wording. Remove duplicates, RSS artifacts (Read more, Source, Via), broken translation, incorrect hashtags. Never translate literally. Never invent facts, speculate, or exaggerate. Preserve prices, percentages, dates, names. Keep official names in English. Terms: killer app=أبرز تطبيق, game changer=نقلة نوعية, validator=مدقق, mainnet=الشبكة الرئيسية, stablecoin=عملة مستقرة, AI Agent=وكيل ذكاء اصطناعي, exploit=استغلال ثغرة, hack=اختراق, upgrade=ترقية, inflows=تدفقات داخلة, outflows=تدفقات خارجة, ETF=صندوق متداول, staking=الرهن, DeFi=التمويل اللامركزي. BANNED phrases: في خطوة تعكس, خلال الفترة الحالية, مما عزز ثقة المستثمرين, وسط تزايد الاهتمام, التطبيق القاتل, غيّر قواعد اللعبة, وسط ترقب الأسواق, مما يعزز الزخم, وسط تداولات متقلبة. HASHTAGS: never trust source - generate only if news is about a specific cryptocurrency. No hashtag for company/regulation/ETF/lawsuit/macro news. No duplicate hashtags. If body repeats headline, rewrite with new facts. Output exactly one headline and one body. If two versions of same news, keep better one. Every sentence must add new info. Price predictions must be marked as analyst view. 40-80 words. Start with main event. Format:\n\n🔵 <Arabic headline>\n\n<News paragraph>\n\n#<Ticker if applicable, else leave blank>"},
+                            {"role": "system", "content": "You are a senior Arabic crypto news editor. NOT a translator. Rewrite from meaning, not wording. Remove duplicates, RSS artifacts (Read more, Source, Via), broken translation, incorrect hashtags. Never translate literally. Never invent facts, speculate, or exaggerate. Preserve prices, percentages, dates, names. Keep official names in English. Terms: killer app=أبرز تطبيق, game changer=نقلة نوعية, validator=مدقق, mainnet=الشبكة الرئيسية, stablecoin=عملة مستقرة, AI Agent=وكيل ذكاء اصطناعي, exploit=استغلال ثغرة, hack=اختراق, upgrade=ترقية, inflows=تدفقات داخلة, outflows=تدفقات خارجة, ETF=صندوق متداول, staking=الرهن, DeFi=التمويل اللامركزي. BANNED phrases: في خطوة تعكس, خلال الفترة الحالية, مما عزز ثقة المستثمرين, وسط تزايد الاهتمام, التطبيق القاتل, غيّر قواعد اللعبة, وسط ترقب الأسواق, مما يعزز الزخم, خلال الفترة الحالية, في خطوة تعكس. QUALITY CONTROL: exactly one headline and one body. Body must NOT repeat headline. Every sentence adds new info. Remove duplicates. No duplicate hashtags. Company/regulation/ETF/lawsuit/macro/AI news = no ticker hashtag unless specific crypto is main subject. Analysis/prediction must use: بحسب تحليل / وفقاً لتقرير / يرى محللون / تشير التقديرات. If fewer than 2 facts, expand from source only. 50-90 words. Return ONLY final news. Format:\n\n🔵 <Arabic headline>\n\n<News paragraph>\n\n#<One hashtag if applicable>"},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,
@@ -569,7 +691,7 @@ class OpenRouterTranslator:
                     json={
                         "model": "qwen/qwen-2.5-72b-instruct",
                         "messages": [
-                            {"role": "system", "content": "You are a senior Arabic crypto news editor. NOT a translator. Rewrite from meaning, not wording. Remove duplicates, RSS artifacts (Read more, Source, Via), broken translation, incorrect hashtags. Never translate literally. Never invent facts, speculate, or exaggerate. Preserve prices, percentages, dates, names. Keep official names in English. Terms: killer app=أبرز تطبيق, game changer=نقلة نوعية, validator=مدقق, mainnet=الشبكة الرئيسية, stablecoin=عملة مستقرة, AI Agent=وكيل ذكاء اصطناعي, exploit=استغلال ثغرة, hack=اختراق, upgrade=ترقية, inflows=تدفقات داخلة, outflows=تدفقات خارجة, ETF=صندوق متداول, staking=الرهن, DeFi=التمويل اللامركزي. BANNED phrases: في خطوة تعكس, خلال الفترة الحالية, مما عزز ثقة المستثمرين, وسط تزايد الاهتمام, التطبيق القاتل, غيّر قواعد اللعبة, وسط ترقب الأسواق, مما يعزز الزخم, وسط تداولات متقلبة. HASHTAGS: never trust source - generate only if news is about a specific cryptocurrency. No hashtag for company/regulation/ETF/lawsuit/macro news. No duplicate hashtags. If body repeats headline, rewrite with new facts. Output exactly one headline and one body. If two versions of same news, keep better one. Every sentence must add new info. Price predictions must be marked as analyst view. 40-80 words. Start with main event. Format:\n\n🔵 <Arabic headline>\n\n<News paragraph>\n\n#<Ticker if applicable, else leave blank>"},
+                            {"role": "system", "content": "You are a senior Arabic crypto news editor. NOT a translator. Rewrite from meaning, not wording. Remove duplicates, RSS artifacts (Read more, Source, Via), broken translation, incorrect hashtags. Never translate literally. Never invent facts, speculate, or exaggerate. Preserve prices, percentages, dates, names. Keep official names in English. Terms: killer app=أبرز تطبيق, game changer=نقلة نوعية, validator=مدقق, mainnet=الشبكة الرئيسية, stablecoin=عملة مستقرة, AI Agent=وكيل ذكاء اصطناعي, exploit=استغلال ثغرة, hack=اختراق, upgrade=ترقية, inflows=تدفقات داخلة, outflows=تدفقات خارجة, ETF=صندوق متداول, staking=الرهن, DeFi=التمويل اللامركزي. BANNED phrases: في خطوة تعكس, خلال الفترة الحالية, مما عزز ثقة المستثمرين, وسط تزايد الاهتمام, التطبيق القاتل, غيّر قواعد اللعبة, وسط ترقب الأسواق, مما يعزز الزخم, خلال الفترة الحالية, في خطوة تعكس. QUALITY CONTROL: exactly one headline and one body. Body must NOT repeat headline. Every sentence adds new info. Remove duplicates. No duplicate hashtags. Company/regulation/ETF/lawsuit/macro/AI news = no ticker hashtag unless specific crypto is main subject. Analysis/prediction must use: بحسب تحليل / وفقاً لتقرير / يرى محللون / تشير التقديرات. If fewer than 2 facts, expand from source only. 50-90 words. Return ONLY final news. Format:\n\n🔵 <Arabic headline>\n\n<News paragraph>\n\n#<One hashtag if applicable>"},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,

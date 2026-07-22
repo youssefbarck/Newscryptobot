@@ -202,24 +202,58 @@ class GeminiTranslator:
 Your task is to rewrite every news item into professional Arabic.
 
 The input may contain:
-- poor machine translation,
-- grammatical errors,
-- duplicated text,
-- mixed Arabic and English,
-- broken sentences.
+- poor machine translation, grammatical errors, duplicated text, mixed Arabic and English, broken sentences.
 
 Your first task is NOT to translate.
 Your first task is to reconstruct the original meaning by identifying the factual information only.
 Ignore any broken wording, duplicated sentences, or incorrect machine translation.
-
 After fully understanding the facts, write a completely new Arabic news article from scratch.
 Never preserve awkward wording from the source.
 If a sentence is unclear or appears to be a translation error, infer the intended meaning only when it is strongly supported by the surrounding context. Otherwise, omit it.
-
 Write naturally as if you attended the event yourself and are reporting it for an Arabic financial newspaper.
 
+Never translate technical idioms literally.
+Examples:
+- "killer app" -> "\u0623\u0628\u0631\u0632 \u062a\u0637\u0628\u064a\u0642" or "\u0627\u0644\u062a\u0637\u0628\u064a\u0642 \u0627\u0644\u0623\u0628\u0631\u0632"
+- "game changer" -> "\u0646\u0642\u0644\u0629 \u0646\u0648\u0639\u064a\u0629"
+- "double down" -> "\u064a\u0639\u0632\u0632 \u0627\u0644\u062a\u0632\u0627\u0645\u0647"
+- "roll out" -> "\u064a\u0637\u0631\u062d"
+- "slash" -> "\u064a\u062e\u0641\u0636"
+- "crackdown" -> "\u062a\u0634\u062f\u064a\u062f \u0627\u0644\u0625\u062c\u0631\u0627\u0621\u0627\u062a"
+
+CRYPTO STYLE GUIDE (use these translations consistently):
+
+General:
+killer app -> \u0623\u0628\u0631\u0632 \u062a\u0637\u0628\u064a\u0642 | game changer -> \u0646\u0642\u0644\u0629 \u0646\u0648\u0639\u064a\u0629 | double down -> \u064a\u0639\u0632\u0632 \u0627\u0644\u062a\u0632\u0627\u0645\u0647 | roll out -> \u064a\u0637\u0631\u062d | unveil -> \u064a\u0643\u0634\u0641 \u0639\u0646 | launch -> \u064a\u0637\u0631\u062d | expand -> \u064a\u0648\u0633\u0639 | boost -> \u064a\u0639\u0632\u0632 | surge -> \u064a\u0631\u062a\u0641\u0639 \u0628\u0642\u0648\u0629 | jump -> \u064a\u0642\u0641\u0632 | slump -> \u064a\u062a\u0631\u0627\u062c\u0639 | plunge -> \u064a\u0647\u0628\u0637 | dip -> \u064a\u0646\u062e\u0641\u0636 | rally -> \u0645\u0648\u062c\u0629 \u0635\u0639\u0648\u062f | sell-off -> \u0645\u0648\u062c\u0629 \u0628\u064a\u0639 | rebound -> \u064a\u062a\u0639\u0627\u0641\u0649 | breakout -> \u0627\u062e\u062a\u0631\u0627\u0642 \u0633\u0639\u0631\u064a | pullback -> \u062a\u0635\u062d\u064a\u062d | volatile -> \u0645\u062a\u0642\u0644\u0628 | momentum -> \u0627\u0644\u0632\u062e\u0645 | outlook -> \u0627\u0644\u062a\u0648\u0642\u0639\u0627\u062a | milestone -> \u0625\u0646\u062c\u0627\u0632 \u0645\u0647\u0645 | roadmap -> \u062e\u0627\u0631\u0637\u0629 \u0627\u0644\u0637\u0631\u064a\u0642
+
+Blockchain:
+blockchain -> \u0627\u0644\u0628\u0644\u0648\u0643\u0634\u064a\u0646 | validator -> \u0645\u062f\u0642\u0642 | node -> \u0639\u0642\u062f\u0629 | mainnet -> \u0627\u0644\u0634\u0628\u0643\u0629 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629 | testnet -> \u0627\u0644\u0634\u0628\u0643\u0629 \u0627\u0644\u062a\u062c\u0631\u064a\u0628\u064a\u0629 | hard fork -> \u0627\u0646\u0642\u0633\u0627\u0645 \u0635\u0644\u0628 | soft fork -> \u0627\u0646\u0642\u0633\u0627\u0645 \u0645\u0631\u0646 | upgrade -> \u062a\u0631\u0642\u064a\u0629 | protocol -> \u0628\u0631\u0648\u062a\u0648\u0643\u0648\u0644 | consensus -> \u0622\u0644\u064a\u0629 \u0627\u0644\u0625\u062c\u0645\u0627\u0639 | TPS -> \u0639\u062f\u062f \u0627\u0644\u0645\u0639\u0627\u0645\u0644\u0627\u062a \u0641\u064a \u0627\u0644\u062b\u0627\u0646\u064a\u0629
+
+Crypto:
+stablecoin -> \u0639\u0645\u0644\u0629 \u0645\u0633\u062a\u0642\u0631\u0629 | token -> \u0631\u0645\u0632 | mint -> \u0633\u0643 | burn -> \u062d\u0631\u0642 | circulating supply -> \u0627\u0644\u0645\u0639\u0631\u0648\u0636 \u0627\u0644\u0645\u062a\u062f\u0627\u0648\u0644 | total supply -> \u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u0645\u0639\u0631\u0648\u0636 | market cap -> \u0627\u0644\u0642\u064a\u0645\u0629 \u0627\u0644\u0633\u0648\u0642\u064a\u0629 | liquidity -> \u0627\u0644\u0633\u064a\u0648\u0644\u0629 | liquidity pool -> \u0645\u062c\u0645\u0639 \u0633\u064a\u0648\u0644\u0629 | trading volume -> \u062d\u062c\u0645 \u0627\u0644\u062a\u062f\u0627\u0648\u0644 | wallet -> \u0645\u062d\u0641\u0638\u0629 | custody -> \u062d\u0641\u0638 \u0627\u0644\u0623\u0635\u0648\u0644 | self-custody -> \u0627\u0644\u062d\u0641\u0638 \u0627\u0644\u0630\u0627\u062a\u064a
+
+DeFi:
+DeFi -> \u0627\u0644\u062a\u0645\u0648\u064a\u0644 \u0627\u0644\u0644\u0627\u0645\u0631\u0643\u0632\u064a | yield -> \u0627\u0644\u0639\u0627\u0626\u062f | yield farming -> \u0632\u0631\u0627\u0639\u0629 \u0627\u0644\u0639\u0627\u0626\u062f | staking -> \u0627\u0644\u0631\u0647\u0646 | restaking -> \u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u0631\u0647\u0646 | lending -> \u0627\u0644\u0625\u0642\u0631\u0627\u0636 | borrowing -> \u0627\u0644\u0627\u0642\u062a\u0631\u0627\u0636 | vault -> \u062e\u0632\u064a\u0646\u0629 | oracle -> \u0623\u0648\u0631\u0627\u0643\u0644 | smart contract -> \u0639\u0642\u062f \u0630\u0643\u064a | bridge -> \u062c\u0633\u0631 | cross-chain -> \u0639\u0628\u0631 \u0627\u0644\u0633\u0644\u0627\u0633\u0644 | exploit -> \u0627\u0633\u062a\u063a\u0644\u0627\u0644 \u062b\u063a\u0631\u0629 | hack -> \u0627\u062e\u062a\u0631\u0627\u0642 | breach -> \u062e\u0631\u0642 \u0623\u0645\u0646\u064a
+
+ETF & Finance:
+ETF -> \u0635\u0646\u062f\u0648\u0642 \u0645\u062a\u062f\u0627\u0648\u0644 \u0641\u064a \u0627\u0644\u0628\u0648\u0631\u0635\u0629 | spot ETF -> \u0635\u0646\u062f\u0648\u0642 \u062a\u062f\u0627\u0648\u0644 \u0641\u0648\u0631\u064a | inflows -> \u062a\u062f\u0641\u0642\u0627\u062a \u062f\u0627\u062e\u0644\u0629 | outflows -> \u062a\u062f\u0641\u0642\u0627\u062a \u062e\u0627\u0631\u062c\u0629 | net inflows -> \u0635\u0627\u0641\u064a \u0627\u0644\u062a\u062f\u0641\u0642\u0627\u062a \u0627\u0644\u062f\u0627\u062e\u0644\u0629 | AUM -> \u0627\u0644\u0623\u0635\u0648\u0644 \u0627\u0644\u0645\u062f\u0627\u0631\u0629 | institutional investors -> \u0627\u0644\u0645\u0633\u062a\u062b\u0645\u0631\u0648\u0646 \u0627\u0644\u0645\u0624\u0633\u0633\u064a\u0648\u0646 | retail investors -> \u0645\u0633\u062a\u062b\u0645\u0631\u0648 \u0627\u0644\u062a\u062c\u0632\u0626\u0629
+
+Regulation:
+SEC -> \u0647\u064a\u0626\u0629 \u0627\u0644\u0623\u0648\u0631\u0627\u0642 \u0627\u0644\u0645\u0627\u0644\u064a\u0629 \u0627\u0644\u0623\u0645\u0631\u064a\u0643\u064a\u0629 | approval -> \u0645\u0648\u0627\u0641\u0642\u0629 | filing -> \u0637\u0644\u0628 \u0631\u0633\u0645\u064a | application -> \u0637\u0644\u0628 | framework -> \u0625\u0637\u0627\u0631 \u062a\u0646\u0638\u064a\u0645\u064a | compliance -> \u0627\u0644\u0627\u0645\u062a\u062b\u0627\u0644 | lawsuit -> \u062f\u0639\u0648\u0649 \u0642\u0636\u0627\u0626\u064a\u0629 | settlement -> \u062a\u0633\u0648\u064a\u0629
+
+Price Action:
+support -> \u0645\u0633\u062a\u0648\u0649 \u062f\u0639\u0645 | resistance -> \u0645\u0633\u062a\u0648\u0649 \u0645\u0642\u0627\u0648\u0645\u0629 | trend -> \u0627\u062a\u062c\u0627\u0647 | bullish -> \u0635\u0639\u0648\u062f\u064a | bearish -> \u0647\u0628\u0648\u0637\u064a | sideways -> \u0639\u0631\u0636\u064a | accumulation -> \u062a\u062c\u0645\u064a\u0639 | distribution -> \u062a\u0635\u0631\u064a\u0641
+
+AI:
+AI Agent -> \u0648\u0643\u064a\u0644 \u0630\u0643\u0627\u0621 \u0627\u0635\u0637\u0646\u0627\u0639\u064a | Agentic AI -> \u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064a \u0627\u0644\u0648\u0643\u064a\u0644\u064a | automation -> \u0627\u0644\u0623\u062a\u0645\u062a\u0629 | autonomous -> \u0645\u0633\u062a\u0642\u0644 | workflow -> \u0633\u064a\u0631 \u0627\u0644\u0639\u0645\u0644 | inference -> \u0627\u0644\u0627\u0633\u062a\u062f\u0644\u0627\u0644 | reasoning -> \u0627\u0644\u0627\u0633\u062a\u062f\u0644\u0627\u0644 \u0627\u0644\u0645\u0646\u0637\u0642\u064a
+
+NEVER use these literal translations:
+- \u0627\u0644\u062a\u0637\u0628\u064a\u0642 \u0627\u0644\u0642\u0627\u062a\u0644 | \u063a\u064a\u0651\u0631 \u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0644\u0639\u0628\u0629 | \u0636\u0627\u0639\u0641 \u0631\u0647\u0627\u0646\u0647 | \u0642\u0627\u0645 \u0628\u0637\u0631\u062d | \u064a\u0642\u0648\u0645 \u0628\u0637\u0631\u062d
+- \u0641\u064a \u062e\u0637\u0648\u0629 \u062a\u0639\u0643\u0633 | \u0648\u0633\u0637 \u062a\u0632\u0627\u064a\u062f \u0627\u0644\u0627\u0647\u062a\u0645\u0627\u0645 | \u062e\u0644\u0627\u0644 \u0627\u0644\u0641\u062a\u0631\u0629 \u0627\u0644\u062d\u0627\u0644\u064a\u0629 | \u0645\u0645\u0627 \u0639\u0632\u0632 \u062b\u0642\u0629 \u0627\u0644\u0645\u0633\u062a\u062b\u0645\u0631\u064a\u0646
+
+Keep official names in English: Bitcoin, Ethereum, Solana, Coinbase, BlackRock, Franklin Templeton, Binance, etc.
+
 IMPORTANT:
-- The input may be in English or Arabic.
 - The final output MUST ALWAYS be in Arabic.
 - Never perform a literal translation.
 - Never output English sentences unless they are official names, company names, product names, ticker symbols, or direct quotes.
@@ -230,22 +264,19 @@ Editorial rules:
 - Do NOT add information that is not present in the source.
 - Do NOT speculate or exaggerate.
 - Remove unnecessary filler.
-- Avoid generic AI phrases such as:
-  - "مما عزز ثقة المستثمرين"
-  - "في ظل التطورات الحالية"
-  - "خلال الفترة الحالية"
-  - "في خطوة تعكس..."
-  - "وسط تزايد الاهتمام..."
 - Keep the news between 40 and 80 words.
 - Start with the main event immediately.
 - End naturally without generic conclusions.
 - Preserve all prices, dates, percentages, company names, blockchain names, and ticker symbols exactly.
+- Prefer short sentences.
+- If information is duplicated, keep it once.
+- If the source contains obvious machine translation errors, ignore the wording completely and reconstruct the news from the factual meaning only. Never attempt to repair the original sentence word by word.
 
 Output format:
 
-🔵 <عنوان عربي قصير وجذاب>
+🔵 <\u0639\u0646\u0648\u0627\u0646 \u0639\u0631\u0628\u064a \u0642\u0635\u064a\u0631 \u0648\u062c\u0630\u0627\u0628>
 
-<فقرة خبرية احترافية باللغة العربية>
+<\u0641\u0642\u0631\u0629 \u062e\u0628\u0631\u064a\u0629 \u0627\u062d\u062a\u0631\u0627\u0641\u064a\u0629 \u0628\u0627\u0644\u0644\u063a\u0629 \u0627\u0644\u0639\u0631\u0628\u064a\u0629>
 
 #<Ticker if provided>"""
 
@@ -420,7 +451,7 @@ class GroqTranslator:
                     json={
                         "model": "llama-3.3-70b-versatile",
                         "messages": [
-                            {"role": "system", "content": "You are a senior crypto news editor for a professional Arabic Telegram channel. Rewrite the news into professional Arabic. Never translate literally. Output ONLY in Arabic (except official names/tickers). 40-80 words. Start with the main event. No AI filler phrases. No speculation. Preserve all prices, dates, percentages, and names exactly. Format:\n\n🔵 <Arabic title>\n\n<News paragraph>\n\n#<Ticker if provided>"},
+                            {"role": "system", "content": "You are a senior crypto news editor. Rewrite into professional Arabic. Input may have broken machine translation - reconstruct meaning from facts, ignore bad wording, write fresh. Never translate idioms literally (killer app=أبرز تطبيق, game changer=نقلة نوعية, double down=يعزز التزامه, roll out=يطرح, slash=يخفض, crackdown=تشديد الإجراءات). Use: stablecoin=عملة مستقرة, staking=الرهن, DeFi=التمويل اللامركزي, ETF=صندوق متداول, inflows=تدفقات داخلة, SEC=هيئة الأوراق المالية, exploit=استغلال ثغرة, hack=اختراق, breach=خرق أمني, oracle=أوراكل, bridge=جسر, mainnet=الشبكة الرئيسية, rally=موجة صعود, plunge=يهبط, surge=يرتفع بقوة, breakout=اختراق سعري, pullback=تصحيح. NEVER use: التطبيق القاتل, غيّر قواعد اللعبة, ضاعف رهانه, قام بطرح, في خطوة تعكس, وسط تزايد الاهتمام, مما عزز ثقة المستثمرين. Keep official names in English (Bitcoin, Ethereum, BlackRock, Binance). 40-80 words. Start with main event. Format:\n\n🔵 <Arabic title>\n\n<News paragraph>\n\n#<Ticker if provided>"},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,
@@ -457,7 +488,7 @@ class OpenRouterTranslator:
                     json={
                         "model": "qwen/qwen-2.5-72b-instruct",
                         "messages": [
-                            {"role": "system", "content": "You are a senior crypto news editor for a professional Arabic Telegram channel. Rewrite the news into professional Arabic. Never translate literally. Output ONLY in Arabic (except official names/tickers). 40-80 words. Start with the main event. No AI filler phrases. No speculation. Preserve all prices, dates, percentages, and names exactly. Format:\n\n🔵 <Arabic title>\n\n<News paragraph>\n\n#<Ticker if provided>"},
+                            {"role": "system", "content": "You are a senior crypto news editor. Rewrite into professional Arabic. Input may have broken machine translation - reconstruct meaning from facts, ignore bad wording, write fresh. Never translate idioms literally (killer app=أبرز تطبيق, game changer=نقلة نوعية, double down=يعزز التزامه, roll out=يطرح, slash=يخفض, crackdown=تشديد الإجراءات). Use: stablecoin=عملة مستقرة, staking=الرهن, DeFi=التمويل اللامركزي, ETF=صندوق متداول, inflows=تدفقات داخلة, SEC=هيئة الأوراق المالية, exploit=استغلال ثغرة, hack=اختراق, breach=خرق أمني, oracle=أوراكل, bridge=جسر, mainnet=الشبكة الرئيسية, rally=موجة صعود, plunge=يهبط, surge=يرتفع بقوة, breakout=اختراق سعري, pullback=تصحيح. NEVER use: التطبيق القاتل, غيّر قواعد اللعبة, ضاعف رهانه, قام بطرح, في خطوة تعكس, وسط تزايد الاهتمام, مما عزز ثقة المستثمرين. Keep official names in English (Bitcoin, Ethereum, BlackRock, Binance). 40-80 words. Start with main event. Format:\n\n🔵 <Arabic title>\n\n<News paragraph>\n\n#<Ticker if provided>"},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,

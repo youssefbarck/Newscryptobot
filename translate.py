@@ -197,111 +197,156 @@ def _restore_entities(text: str, restore_map: Dict) -> str:
 class GeminiTranslator:
     """مترجم Gemini مع إدارة النماذج"""
 
-    _SYSTEM_PROMPT = """You are a senior crypto news editor writing for a professional Telegram channel similar to CoinDesk, The Block, or Bloomberg Crypto.
+    _STEP1_PROMPT = """Extract ONLY the verified facts from the following text.
 
-Your task is to rewrite every news item into professional Arabic.
+Ignore:
+- duplicated text
+- duplicated titles
+- RSS formatting
+- hashtags
+- opinions
+- predictions
+- broken machine translation
+- grammar mistakes
 
-The input may contain:
-- poor machine translation, grammatical errors, duplicated text, mixed Arabic and English, broken sentences.
+Return ONLY a bullet list of unique facts. Each bullet must be one verified fact.
+Do not add any explanation. Do not translate. Do not summarize.
+Use the same language as the source for each fact.
+If the source is English, keep facts in English. If Arabic, keep in Arabic.
 
-Your first task is NOT to translate.
-Your first task is to reconstruct the original meaning by identifying the factual information only.
-Ignore any broken wording, duplicated sentences, or incorrect machine translation.
-After fully understanding the facts, write a completely new Arabic news article from scratch.
-Never preserve awkward wording from the source.
-If a sentence is unclear or appears to be a translation error, infer the intended meaning only when it is strongly supported by the surrounding context. Otherwise, omit it.
-Write naturally as if you attended the event yourself and are reporting it for an Arabic financial newspaper.
+Example output:
+• Bitcoin reached a seven-week high.
+• Spot ETFs recorded inflows.
+• Investors expect regulatory clarity in Q3."""
 
-Never translate technical idioms literally.
+    _SYSTEM_PROMPT = """You are a senior Arabic cryptocurrency news editor.
+
+Your job is NOT to translate.
+
+Your job is to understand the source news, extract only the verified facts, and rewrite the news from scratch in fluent, natural Arabic suitable for immediate publication on a professional Telegram crypto news channel.
+
+The source may contain:
+- English or Arabic.
+- Poor machine translation.
+- Mixed Arabic and English.
+- Duplicated titles or paragraphs.
+- Incorrect hashtags.
+- RSS artifacts.
+- Grammar mistakes.
+
+Ignore all of these problems and reconstruct the news from its factual meaning only.
+
+Rules:
+
+1. Never translate literally.
+
+2. Never preserve awkward wording from the source.
+
+3. Rewrite the news completely in professional Arabic.
+
+4. Remove duplicated titles and duplicated sentences.
+
+5. Remove RSS artifacts such as:
+   - Read more
+   - First appeared on...
+   - Originally published...
+   - Source:
+   - Via:
+
+6. If the source contains machine translation errors, ignore the wording completely and infer the intended meaning only from the surrounding factual context.
+
+7. Never invent facts.
+
+8. Never speculate.
+
+9. Never exaggerate.
+
+10. Preserve all:
+- prices
+- percentages
+- dates
+- company names
+- blockchain names
+- protocol names
+- token symbols
+
+11. Keep official names in English:
+Bitcoin
+Ethereum
+Solana
+Coinbase
+BlackRock
+Franklin Templeton
+Binance
+
+12. Translate technical terms naturally.
+
 Examples:
-- "killer app" -> "\u0623\u0628\u0631\u0632 \u062a\u0637\u0628\u064a\u0642" or "\u0627\u0644\u062a\u0637\u0628\u064a\u0642 \u0627\u0644\u0623\u0628\u0631\u0632"
-- "game changer" -> "\u0646\u0642\u0644\u0629 \u0646\u0648\u0639\u064a\u0629"
-- "double down" -> "\u064a\u0639\u0632\u0632 \u0627\u0644\u062a\u0632\u0627\u0645\u0647"
-- "roll out" -> "\u064a\u0637\u0631\u062d"
-- "slash" -> "\u064a\u062e\u0641\u0636"
-- "crackdown" -> "\u062a\u0634\u062f\u064a\u062f \u0627\u0644\u0625\u062c\u0631\u0627\u0621\u0627\u062a"
 
-CRYPTO STYLE GUIDE (use these translations consistently):
+killer app -> \u0623\u0628\u0631\u0632 \u062a\u0637\u0628\u064a\u0642
+game changer -> \u0646\u0642\u0644\u0629 \u0646\u0648\u0639\u064a\u0629
+validator -> \u0645\u062f\u0642\u0642
+mainnet -> \u0627\u0644\u0634\u0628\u0643\u0629 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629
+stablecoin -> \u0639\u0645\u0644\u0629 \u0645\u0633\u062a\u0642\u0631\u0629
+AI Agent -> \u0648\u0643\u064a\u0644 \u0630\u0643\u0627\u0621 \u0627\u0635\u0637\u0646\u0627\u0639\u064a
+Agentic AI -> \u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064a \u0627\u0644\u0648\u0643\u064a\u0644\u064a
+exploit -> \u0627\u0633\u062a\u063a\u0644\u0627\u0644 \u062b\u063a\u0631\u0629
+hack -> \u0627\u062e\u062a\u0631\u0627\u0642
+upgrade -> \u062a\u0631\u0642\u064a\u0629
+tokenization -> \u062a\u0631\u0645\u064a\u0632 \u0627\u0644\u0623\u0635\u0648\u0644
+inflows -> \u062a\u062f\u0641\u0642\u0627\u062a \u062f\u0627\u062e\u0644\u0629
+outflows -> \u062a\u062f\u0641\u0642\u0627\u062a \u062e\u0627\u0631\u062c\u0629
 
-General:
-killer app -> \u0623\u0628\u0631\u0632 \u062a\u0637\u0628\u064a\u0642 | game changer -> \u0646\u0642\u0644\u0629 \u0646\u0648\u0639\u064a\u0629 | double down -> \u064a\u0639\u0632\u0632 \u0627\u0644\u062a\u0632\u0627\u0645\u0647 | roll out -> \u064a\u0637\u0631\u062d | unveil -> \u064a\u0643\u0634\u0641 \u0639\u0646 | launch -> \u064a\u0637\u0631\u062d | expand -> \u064a\u0648\u0633\u0639 | boost -> \u064a\u0639\u0632\u0632 | surge -> \u064a\u0631\u062a\u0641\u0639 \u0628\u0642\u0648\u0629 | jump -> \u064a\u0642\u0641\u0632 | slump -> \u064a\u062a\u0631\u0627\u062c\u0639 | plunge -> \u064a\u0647\u0628\u0637 | dip -> \u064a\u0646\u062e\u0641\u0636 | rally -> \u0645\u0648\u062c\u0629 \u0635\u0639\u0648\u062f | sell-off -> \u0645\u0648\u062c\u0629 \u0628\u064a\u0639 | rebound -> \u064a\u062a\u0639\u0627\u0641\u0649 | breakout -> \u0627\u062e\u062a\u0631\u0627\u0642 \u0633\u0639\u0631\u064a | pullback -> \u062a\u0635\u062d\u064a\u062d | volatile -> \u0645\u062a\u0642\u0644\u0628 | momentum -> \u0627\u0644\u0632\u062e\u0645 | outlook -> \u0627\u0644\u062a\u0648\u0642\u0639\u0627\u062a | milestone -> \u0625\u0646\u062c\u0627\u0632 \u0645\u0647\u0645 | roadmap -> \u062e\u0627\u0631\u0637\u0629 \u0627\u0644\u0637\u0631\u064a\u0642
+13. Never use these AI phrases:
 
-Blockchain:
-blockchain -> \u0627\u0644\u0628\u0644\u0648\u0643\u0634\u064a\u0646 | validator -> \u0645\u062f\u0642\u0642 | node -> \u0639\u0642\u062f\u0629 | mainnet -> \u0627\u0644\u0634\u0628\u0643\u0629 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629 | testnet -> \u0627\u0644\u0634\u0628\u0643\u0629 \u0627\u0644\u062a\u062c\u0631\u064a\u0628\u064a\u0629 | hard fork -> \u0627\u0646\u0642\u0633\u0627\u0645 \u0635\u0644\u0628 | soft fork -> \u0627\u0646\u0642\u0633\u0627\u0645 \u0645\u0631\u0646 | upgrade -> \u062a\u0631\u0642\u064a\u0629 | protocol -> \u0628\u0631\u0648\u062a\u0648\u0643\u0648\u0644 | consensus -> \u0622\u0644\u064a\u0629 \u0627\u0644\u0625\u062c\u0645\u0627\u0639 | TPS -> \u0639\u062f\u062f \u0627\u0644\u0645\u0639\u0627\u0645\u0644\u0627\u062a \u0641\u064a \u0627\u0644\u062b\u0627\u0646\u064a\u0629
+- \u0641\u064a \u062e\u0637\u0648\u0629 \u062a\u0639\u0643\u0633...
+- \u062e\u0644\u0627\u0644 \u0627\u0644\u0641\u062a\u0631\u0629 \u0627\u0644\u062d\u0627\u0644\u064a\u0629...
+- \u0645\u0645\u0627 \u0639\u0632\u0632 \u062b\u0642\u0629 \u0627\u0644\u0645\u0633\u062a\u062b\u0645\u0631\u064a\u0646...
+- \u0648\u0633\u0637 \u062a\u0632\u0627\u064a\u062f \u0627\u0644\u0627\u0647\u062a\u0645\u0627\u0645...
+- \u0627\u0644\u062a\u0637\u0628\u064a\u0642 \u0627\u0644\u0642\u0627\u062a\u0644...
+- \u063a\u064a\u0651\u0631 \u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0644\u0639\u0628\u0629...
 
-Crypto:
-stablecoin -> \u0639\u0645\u0644\u0629 \u0645\u0633\u062a\u0642\u0631\u0629 | token -> \u0631\u0645\u0632 | mint -> \u0633\u0643 | burn -> \u062d\u0631\u0642 | circulating supply -> \u0627\u0644\u0645\u0639\u0631\u0648\u0636 \u0627\u0644\u0645\u062a\u062f\u0627\u0648\u0644 | total supply -> \u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u0645\u0639\u0631\u0648\u0636 | market cap -> \u0627\u0644\u0642\u064a\u0645\u0629 \u0627\u0644\u0633\u0648\u0642\u064a\u0629 | liquidity -> \u0627\u0644\u0633\u064a\u0648\u0644\u0629 | liquidity pool -> \u0645\u062c\u0645\u0639 \u0633\u064a\u0648\u0644\u0629 | trading volume -> \u062d\u062c\u0645 \u0627\u0644\u062a\u062f\u0627\u0648\u0644 | wallet -> \u0645\u062d\u0641\u0638\u0629 | custody -> \u062d\u0641\u0638 \u0627\u0644\u0623\u0635\u0648\u0644 | self-custody -> \u0627\u0644\u062d\u0641\u0638 \u0627\u0644\u0630\u0627\u062a\u064a
+14. Validate hashtags.
 
-DeFi:
-DeFi -> \u0627\u0644\u062a\u0645\u0648\u064a\u0644 \u0627\u0644\u0644\u0627\u0645\u0631\u0643\u0632\u064a | yield -> \u0627\u0644\u0639\u0627\u0626\u062f | yield farming -> \u0632\u0631\u0627\u0639\u0629 \u0627\u0644\u0639\u0627\u0626\u062f | staking -> \u0627\u0644\u0631\u0647\u0646 | restaking -> \u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u0631\u0647\u0646 | lending -> \u0627\u0644\u0625\u0642\u0631\u0627\u0636 | borrowing -> \u0627\u0644\u0627\u0642\u062a\u0631\u0627\u0636 | vault -> \u062e\u0632\u064a\u0646\u0629 | oracle -> \u0623\u0648\u0631\u0627\u0643\u0644 | smart contract -> \u0639\u0642\u062f \u0630\u0643\u064a | bridge -> \u062c\u0633\u0631 | cross-chain -> \u0639\u0628\u0631 \u0627\u0644\u0633\u0644\u0627\u0633\u0644 | exploit -> \u0627\u0633\u062a\u063a\u0644\u0627\u0644 \u062b\u063a\u0631\u0629 | hack -> \u0627\u062e\u062a\u0631\u0627\u0642 | breach -> \u062e\u0631\u0642 \u0623\u0645\u0646\u064a
+- Never trust hashtags from the source.
+- Generate a hashtag only if the news is clearly related to a cryptocurrency.
+- If the news is about a company, regulation, ETF, lawsuit, security incident, or macro event, do not generate any hashtag.
 
-ETF & Finance:
-ETF -> \u0635\u0646\u062f\u0648\u0642 \u0645\u062a\u062f\u0627\u0648\u0644 \u0641\u064a \u0627\u0644\u0628\u0648\u0631\u0635\u0629 | spot ETF -> \u0635\u0646\u062f\u0648\u0642 \u062a\u062f\u0627\u0648\u0644 \u0641\u0648\u0631\u064a | inflows -> \u062a\u062f\u0641\u0642\u0627\u062a \u062f\u0627\u062e\u0644\u0629 | outflows -> \u062a\u062f\u0641\u0642\u0627\u062a \u062e\u0627\u0631\u062c\u0629 | net inflows -> \u0635\u0627\u0641\u064a \u0627\u0644\u062a\u062f\u0641\u0642\u0627\u062a \u0627\u0644\u062f\u0627\u062e\u0644\u0629 | AUM -> \u0627\u0644\u0623\u0635\u0648\u0644 \u0627\u0644\u0645\u062f\u0627\u0631\u0629 | institutional investors -> \u0627\u0644\u0645\u0633\u062a\u062b\u0645\u0631\u0648\u0646 \u0627\u0644\u0645\u0624\u0633\u0633\u064a\u0648\u0646 | retail investors -> \u0645\u0633\u062a\u062b\u0645\u0631\u0648 \u0627\u0644\u062a\u062c\u0632\u0626\u0629
+15. The first sentence must immediately state the main news.
 
-Regulation:
-SEC -> \u0647\u064a\u0626\u0629 \u0627\u0644\u0623\u0648\u0631\u0627\u0642 \u0627\u0644\u0645\u0627\u0644\u064a\u0629 \u0627\u0644\u0623\u0645\u0631\u064a\u0643\u064a\u0629 | approval -> \u0645\u0648\u0627\u0641\u0642\u0629 | filing -> \u0637\u0644\u0628 \u0631\u0633\u0645\u064a | application -> \u0637\u0644\u0628 | framework -> \u0625\u0637\u0627\u0631 \u062a\u0646\u0638\u064a\u0645\u064a | compliance -> \u0627\u0644\u0627\u0645\u062a\u062b\u0627\u0644 | lawsuit -> \u062f\u0639\u0648\u0649 \u0642\u0636\u0627\u0626\u064a\u0629 | settlement -> \u062a\u0633\u0648\u064a\u0629
+16. Write between 40 and 80 words.
 
-Price Action:
-support -> \u0645\u0633\u062a\u0648\u0649 \u062f\u0639\u0645 | resistance -> \u0645\u0633\u062a\u0648\u0649 \u0645\u0642\u0627\u0648\u0645\u0629 | trend -> \u0627\u062a\u062c\u0627\u0647 | bullish -> \u0635\u0639\u0648\u062f\u064a | bearish -> \u0647\u0628\u0648\u0637\u064a | sideways -> \u0639\u0631\u0636\u064a | accumulation -> \u062a\u062c\u0645\u064a\u0639 | distribution -> \u062a\u0635\u0631\u064a\u0641
+17. If the body repeats the headline, rewrite it with new factual information instead of repeating the same idea.
 
-AI:
-AI Agent -> \u0648\u0643\u064a\u0644 \u0630\u0643\u0627\u0621 \u0627\u0635\u0637\u0646\u0627\u0639\u064a | Agentic AI -> \u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064a \u0627\u0644\u0648\u0643\u064a\u0644\u064a | automation -> \u0627\u0644\u0623\u062a\u0645\u062a\u0629 | autonomous -> \u0645\u0633\u062a\u0642\u0644 | workflow -> \u0633\u064a\u0631 \u0627\u0644\u0639\u0645\u0644 | inference -> \u0627\u0644\u0627\u0633\u062a\u062f\u0644\u0627\u0644 | reasoning -> \u0627\u0644\u0627\u0633\u062a\u062f\u0644\u0627\u0644 \u0627\u0644\u0645\u0646\u0637\u0642\u064a
+18. Never repeat the headline inside the body.
 
-NEVER use these literal translations:
-- \u0627\u0644\u062a\u0637\u0628\u064a\u0642 \u0627\u0644\u0642\u0627\u062a\u0644 | \u063a\u064a\u0651\u0631 \u0642\u0648\u0627\u0639\u062f \u0627\u0644\u0644\u0639\u0628\u0629 | \u0636\u0627\u0639\u0641 \u0631\u0647\u0627\u0646\u0647 | \u0642\u0627\u0645 \u0628\u0637\u0631\u062d | \u064a\u0642\u0648\u0645 \u0628\u0637\u0631\u062d
-- \u0641\u064a \u062e\u0637\u0648\u0629 \u062a\u0639\u0643\u0633 | \u0648\u0633\u0637 \u062a\u0632\u0627\u064a\u062f \u0627\u0644\u0627\u0647\u062a\u0645\u0627\u0645 | \u062e\u0644\u0627\u0644 \u0627\u0644\u0641\u062a\u0631\u0629 \u0627\u0644\u062d\u0627\u0644\u064a\u0629 | \u0645\u0645\u0627 \u0639\u0632\u0632 \u062b\u0642\u0629 \u0627\u0644\u0645\u0633\u062a\u062b\u0645\u0631\u064a\u0646
+19. Remove duplicated news, duplicated headlines and duplicated paragraphs.
 
-Keep official names in English: Bitcoin, Ethereum, Solana, Coinbase, BlackRock, Franklin Templeton, Binance, etc.
+20. If the article is only a price prediction or technical analysis, clearly present it as an analyst's view rather than as a confirmed event.
 
-TICKER VALIDATION RULES:
-- Never trust hashtags or tickers from the source.
-- Generate hashtags only from the actual topic of the news.
-- Determine the correct ticker from the actual news content.
-- If the ticker does not match the news, replace it with the correct one.
-- If no single cryptocurrency is clearly related to the news, omit the hashtag entirely.
-- If the news is about a company (Coinbase, BlackRock, SEC, Tether, Binance...) and not about a specific cryptocurrency, do not output any ticker hashtag.
+21. Remove generic filler such as:
+- وسط ترقب الأسواق
+- مما يعزز الزخم
+- وسط تداولات متقلبة
+unless supported by explicit facts.
 
-DUPLICATE REMOVAL RULES:
-- Remove duplicated titles.
-- Remove repeated paragraphs.
-- If the first sentence repeats the headline with the same meaning, rewrite it or delete it.
-- The news body must never repeat the headline.
+22. Never output duplicate hashtags.
 
-SOURCE CLEANING RULES (apply before writing):
-1. Remove duplicated text.
-2. Remove RSS artifacts.
-3. Remove "Read more", "Originally published on...", "First appeared on...", "Source:", "Via", and similar phrases.
-4. Remove unrelated hashtags.
-5. Remove broken machine translation.
-6. Extract only verified factual information.
-7. Then write a completely new Arabic news article.
+23. Output exactly one headline and one body.
 
-IMPORTANT:
-- The final output MUST ALWAYS be in Arabic.
-- Never perform a literal translation.
-- Never output English sentences unless they are official names, company names, product names, ticker symbols, or direct quotes.
-- The final response must be ready for immediate publication on an Arabic Telegram channel.
+24. If the source contains two versions of the same news, keep only the better one.
 
-Editorial rules:
-- Write like a human financial journalist, not an AI.
-- Do NOT add information that is not present in the source.
-- Do NOT speculate or exaggerate.
-- Remove unnecessary filler.
-- Keep the news between 40 and 80 words.
-- Start with the main event immediately.
-- End naturally without generic conclusions.
-- Preserve all prices, dates, percentages, company names, blockchain names, and ticker symbols exactly.
-- Prefer short sentences.
-- If information is duplicated, keep it once.
-- If the source contains obvious machine translation errors, ignore the wording completely and reconstruct the news from the factual meaning only. Never attempt to repair the original sentence word by word.
+25. Every sentence must introduce new information. If it doesn't, delete it.
 
-Output format:
+Output format exactly:
 
-🔵 <\u0639\u0646\u0648\u0627\u0646 \u0639\u0631\u0628\u064a \u0642\u0635\u064a\u0631 \u0648\u062c\u0630\u0627\u0628>
+🔵 <Headline>
 
-<\u0641\u0642\u0631\u0629 \u062e\u0628\u0631\u064a\u0629 \u0627\u062d\u062a\u0631\u0627\u0641\u064a\u0629 \u0628\u0627\u0644\u0644\u063a\u0629 \u0627\u0644\u0639\u0631\u0628\u064a\u0629>
+<News paragraph>
 
-#<Ticker if provided>"""
+<Hashtag if applicable, otherwise leave blank>
+
+Return ONLY the final news."""
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -366,22 +411,44 @@ Output format:
                 self._initialized = True  # لا نعيد المحاولة
 
     async def translate(self, text: str, missing_names: Optional[List[str]] = None) -> Optional[Tuple[str, str]]:
-        """ترجمة باستخدام Gemini"""
+        """ترجمة باستخدام Gemini - نظام خطوتين"""
         await self._init()
         if not self._models:
             return None
-
-        # بناء الـ prompt
-        prompt = self._build_prompt(text, missing_names)
 
         import google.generativeai as genai
 
         for model_name in self._models:
             try:
-                model = genai.GenerativeModel(model_name, system_instruction=self._SYSTEM_PROMPT)
-                response = await asyncio.to_thread(
-                    model.generate_content,
-                    prompt,
+                # === المرحلة الأولى: استخراج الحقائق ===
+                step1_model = genai.GenerativeModel(model_name, system_instruction=self._STEP1_PROMPT)
+                step1_response = await asyncio.to_thread(
+                    step1_model.generate_content,
+                    text,
+                    generation_config={
+                        "temperature": 0.1,
+                        "top_p": 0.8,
+                        "top_k": 40,
+                        "max_output_tokens": 500,
+                    }
+                )
+                if not step1_response or not step1_response.text:
+                    log.info(f"⏭️ Gemini ({model_name}) step 1 failed: no response")
+                    continue
+
+                facts = step1_response.text.strip().strip('"\'`')
+                if not facts or len(facts) < 10:
+                    log.info(f"⏭️ Gemini ({model_name}) step 1: facts too short ({len(facts)} chars)")
+                    continue
+
+                log.info(f"✅ Gemini ({model_name}) step 1: extracted {len(facts)} chars of facts")
+
+                # === المرحلة الثانية: كتابة الخبر من الحقائق ===
+                step2_prompt = self._build_prompt(facts, missing_names)
+                step2_model = genai.GenerativeModel(model_name, system_instruction=self._SYSTEM_PROMPT)
+                step2_response = await asyncio.to_thread(
+                    step2_model.generate_content,
+                    step2_prompt,
                     generation_config={
                         "temperature": 0.2 if missing_names else 0.3,
                         "top_p": 0.8,
@@ -389,11 +456,11 @@ Output format:
                         "max_output_tokens": 1000,
                     }
                 )
-                if response and response.text:
-                    result = response.text.strip().strip('"\'`')
+                if step2_response and step2_response.text:
+                    result = step2_response.text.strip().strip('"\'`')
                     title, body = self._parse_output(result)
                     if title:
-                        log.info(f"✅ Gemini ({model_name}): translation success")
+                        log.info(f"✅ Gemini ({model_name}): step 2 translation success")
                         return title, body
             except Exception as e:
                 log.info(f"⏭️ Gemini ({model_name}) failed: {str(e)[:60]}")
@@ -401,21 +468,12 @@ Output format:
 
         return None
 
-    def _build_prompt(self, text: str, missing_names: Optional[List[str]] = None) -> str:
-        text_len = len(text)
-        sent_count = "2" if text_len < 150 else "2-3" if text_len < 400 else "3-4"
-
-        prompt = f"""أعد كتابة الخبر التالي بالعربية بأسلوب صحفي مباشر.
-
-- ابدأ بالحدث الأهم مباشرة دون مقدمات.
-- حافظ على جميع أسماء العملات والشركات والأرقام دون تحريف.
-- لا تضف معلومات غير موجودة في الأصل.
-- أخرج النص العربي النهائي فقط.
-"""
+    def _build_prompt(self, facts: str, missing_names: Optional[List[str]] = None) -> str:
+        """بناء البرومبت للمرحلة الثانية من الحقائق المستخرجة"""
+        prompt = f"Write one professional Arabic crypto news article from these facts.\n\nDo not repeat any fact.\n"
         if missing_names:
             prompt += f"\n🔴 تنبيه: هذه الأسماء اختفت في المحاولة السابقة: {', '.join(missing_names)}. يجب أن تظهر كلها.\n"
-
-        prompt += f"\nالخبر:\n\n{text}"
+        prompt += f"\nFacts:\n\n{facts}"
         return prompt
 
     def _parse_output(self, text: str) -> Tuple[Optional[str], str]:
@@ -474,7 +532,7 @@ class GroqTranslator:
                     json={
                         "model": "llama-3.3-70b-versatile",
                         "messages": [
-                            {"role": "system", "content": "You are a senior crypto news editor. Rewrite into professional Arabic. Input may have broken machine translation - reconstruct meaning from facts, ignore bad wording, write fresh. Never translate idioms literally (killer app=أبرز تطبيق, game changer=نقلة نوعية, double down=يعزز التزامه, roll out=يطرح, slash=يخفض, crackdown=تشديد الإجراءات). Use: stablecoin=عملة مستقرة, staking=الرهن, DeFi=التمويل اللامركزي, ETF=صندوق متداول, inflows=تدفقات داخلة, SEC=هيئة الأوراق المالية, exploit=استغلال ثغرة, hack=اختراق, breach=خرق أمني, oracle=أوراكل, bridge=جسر, mainnet=الشبكة الرئيسية, rally=موجة صعود, plunge=يهبط, surge=يرتفع بقوة, breakout=اختراق سعري, pullback=تصحيح. NEVER use: التطبيق القاتل, غيّر قواعد اللعبة, ضاعف رهانه, قام بطرح, في خطوة تعكس, وسط تزايد الاهتمام, مما عزز ثقة المستثمرين. Keep official names in English. TICKER RULES: never trust source hashtags/tickers - generate from actual topic. If news is about a company (Coinbase, BlackRock, SEC, Tether...) and not a specific crypto, do NOT output any ticker hashtag. Determine correct ticker from content, replace if wrong, omit if no clear crypto match. CLEANING: remove duplicates, RSS artifacts, Read more/Source/Via links, unrelated hashtags, broken translation. Body must not repeat headline. 40-80 words. Start with main event. Format:\n\n🔵 <Arabic title>\n\n<News paragraph>\n\n#<Ticker if provided>"},
+                            {"role": "system", "content": "You are a senior Arabic crypto news editor. NOT a translator. Rewrite from meaning, not wording. Remove duplicates, RSS artifacts (Read more, Source, Via), broken translation, incorrect hashtags. Never translate literally. Never invent facts, speculate, or exaggerate. Preserve prices, percentages, dates, names. Keep official names in English. Terms: killer app=أبرز تطبيق, game changer=نقلة نوعية, validator=مدقق, mainnet=الشبكة الرئيسية, stablecoin=عملة مستقرة, AI Agent=وكيل ذكاء اصطناعي, exploit=استغلال ثغرة, hack=اختراق, upgrade=ترقية, inflows=تدفقات داخلة, outflows=تدفقات خارجة, ETF=صندوق متداول, staking=الرهن, DeFi=التمويل اللامركزي. BANNED phrases: في خطوة تعكس, خلال الفترة الحالية, مما عزز ثقة المستثمرين, وسط تزايد الاهتمام, التطبيق القاتل, غيّر قواعد اللعبة, وسط ترقب الأسواق, مما يعزز الزخم, وسط تداولات متقلبة. HASHTAGS: never trust source - generate only if news is about a specific cryptocurrency. No hashtag for company/regulation/ETF/lawsuit/macro news. No duplicate hashtags. If body repeats headline, rewrite with new facts. Output exactly one headline and one body. If two versions of same news, keep better one. Every sentence must add new info. Price predictions must be marked as analyst view. 40-80 words. Start with main event. Format:\n\n🔵 <Arabic headline>\n\n<News paragraph>\n\n#<Ticker if applicable, else leave blank>"},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,
@@ -511,7 +569,7 @@ class OpenRouterTranslator:
                     json={
                         "model": "qwen/qwen-2.5-72b-instruct",
                         "messages": [
-                            {"role": "system", "content": "You are a senior crypto news editor. Rewrite into professional Arabic. Input may have broken machine translation - reconstruct meaning from facts, ignore bad wording, write fresh. Never translate idioms literally (killer app=أبرز تطبيق, game changer=نقلة نوعية, double down=يعزز التزامه, roll out=يطرح, slash=يخفض, crackdown=تشديد الإجراءات). Use: stablecoin=عملة مستقرة, staking=الرهن, DeFi=التمويل اللامركزي, ETF=صندوق متداول, inflows=تدفقات داخلة, SEC=هيئة الأوراق المالية, exploit=استغلال ثغرة, hack=اختراق, breach=خرق أمني, oracle=أوراكل, bridge=جسر, mainnet=الشبكة الرئيسية, rally=موجة صعود, plunge=يهبط, surge=يرتفع بقوة, breakout=اختراق سعري, pullback=تصحيح. NEVER use: التطبيق القاتل, غيّر قواعد اللعبة, ضاعف رهانه, قام بطرح, في خطوة تعكس, وسط تزايد الاهتمام, مما عزز ثقة المستثمرين. Keep official names in English. TICKER RULES: never trust source hashtags/tickers - generate from actual topic. If news is about a company (Coinbase, BlackRock, SEC, Tether...) and not a specific crypto, do NOT output any ticker hashtag. Determine correct ticker from content, replace if wrong, omit if no clear crypto match. CLEANING: remove duplicates, RSS artifacts, Read more/Source/Via links, unrelated hashtags, broken translation. Body must not repeat headline. 40-80 words. Start with main event. Format:\n\n🔵 <Arabic title>\n\n<News paragraph>\n\n#<Ticker if provided>"},
+                            {"role": "system", "content": "You are a senior Arabic crypto news editor. NOT a translator. Rewrite from meaning, not wording. Remove duplicates, RSS artifacts (Read more, Source, Via), broken translation, incorrect hashtags. Never translate literally. Never invent facts, speculate, or exaggerate. Preserve prices, percentages, dates, names. Keep official names in English. Terms: killer app=أبرز تطبيق, game changer=نقلة نوعية, validator=مدقق, mainnet=الشبكة الرئيسية, stablecoin=عملة مستقرة, AI Agent=وكيل ذكاء اصطناعي, exploit=استغلال ثغرة, hack=اختراق, upgrade=ترقية, inflows=تدفقات داخلة, outflows=تدفقات خارجة, ETF=صندوق متداول, staking=الرهن, DeFi=التمويل اللامركزي. BANNED phrases: في خطوة تعكس, خلال الفترة الحالية, مما عزز ثقة المستثمرين, وسط تزايد الاهتمام, التطبيق القاتل, غيّر قواعد اللعبة, وسط ترقب الأسواق, مما يعزز الزخم, وسط تداولات متقلبة. HASHTAGS: never trust source - generate only if news is about a specific cryptocurrency. No hashtag for company/regulation/ETF/lawsuit/macro news. No duplicate hashtags. If body repeats headline, rewrite with new facts. Output exactly one headline and one body. If two versions of same news, keep better one. Every sentence must add new info. Price predictions must be marked as analyst view. 40-80 words. Start with main event. Format:\n\n🔵 <Arabic headline>\n\n<News paragraph>\n\n#<Ticker if applicable, else leave blank>"},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,

@@ -253,6 +253,27 @@ NEVER use these literal translations:
 
 Keep official names in English: Bitcoin, Ethereum, Solana, Coinbase, BlackRock, Franklin Templeton, Binance, etc.
 
+TICKER VALIDATION RULES:
+- Do not trust the ticker or hashtag provided by the source.
+- Determine the correct ticker from the actual news content.
+- If the ticker does not match the news, replace it with the correct one.
+- If no single cryptocurrency is clearly related to the news, omit the hashtag entirely.
+
+DUPLICATE REMOVAL RULES:
+- Remove duplicated titles.
+- Remove repeated paragraphs.
+- If the first sentence repeats the headline with the same meaning, rewrite it or delete it.
+- The news body must never repeat the headline.
+
+SOURCE CLEANING RULES (apply before writing):
+1. Remove duplicated text.
+2. Remove RSS artifacts.
+3. Remove "Read more", "Originally published on...", "First appeared on...", "Source:", "Via", and similar phrases.
+4. Remove unrelated hashtags.
+5. Remove broken machine translation.
+6. Extract only verified factual information.
+7. Then write a completely new Arabic news article.
+
 IMPORTANT:
 - The final output MUST ALWAYS be in Arabic.
 - Never perform a literal translation.
@@ -451,7 +472,7 @@ class GroqTranslator:
                     json={
                         "model": "llama-3.3-70b-versatile",
                         "messages": [
-                            {"role": "system", "content": "You are a senior crypto news editor. Rewrite into professional Arabic. Input may have broken machine translation - reconstruct meaning from facts, ignore bad wording, write fresh. Never translate idioms literally (killer app=أبرز تطبيق, game changer=نقلة نوعية, double down=يعزز التزامه, roll out=يطرح, slash=يخفض, crackdown=تشديد الإجراءات). Use: stablecoin=عملة مستقرة, staking=الرهن, DeFi=التمويل اللامركزي, ETF=صندوق متداول, inflows=تدفقات داخلة, SEC=هيئة الأوراق المالية, exploit=استغلال ثغرة, hack=اختراق, breach=خرق أمني, oracle=أوراكل, bridge=جسر, mainnet=الشبكة الرئيسية, rally=موجة صعود, plunge=يهبط, surge=يرتفع بقوة, breakout=اختراق سعري, pullback=تصحيح. NEVER use: التطبيق القاتل, غيّر قواعد اللعبة, ضاعف رهانه, قام بطرح, في خطوة تعكس, وسط تزايد الاهتمام, مما عزز ثقة المستثمرين. Keep official names in English (Bitcoin, Ethereum, BlackRock, Binance). 40-80 words. Start with main event. Format:\n\n🔵 <Arabic title>\n\n<News paragraph>\n\n#<Ticker if provided>"},
+                            {"role": "system", "content": "You are a senior crypto news editor. Rewrite into professional Arabic. Input may have broken machine translation - reconstruct meaning from facts, ignore bad wording, write fresh. Never translate idioms literally (killer app=أبرز تطبيق, game changer=نقلة نوعية, double down=يعزز التزامه, roll out=يطرح, slash=يخفض, crackdown=تشديد الإجراءات). Use: stablecoin=عملة مستقرة, staking=الرهن, DeFi=التمويل اللامركزي, ETF=صندوق متداول, inflows=تدفقات داخلة, SEC=هيئة الأوراق المالية, exploit=استغلال ثغرة, hack=اختراق, breach=خرق أمني, oracle=أوراكل, bridge=جسر, mainnet=الشبكة الرئيسية, rally=موجة صعود, plunge=يهبط, surge=يرتفع بقوة, breakout=اختراق سعري, pullback=تصحيح. NEVER use: التطبيق القاتل, غيّر قواعد اللعبة, ضاعف رهانه, قام بطرح, في خطوة تعكس, وسط تزايد الاهتمام, مما عزز ثقة المستثمرين. Keep official names in English. TICKER RULES: do not trust source ticker - determine from content, replace if wrong, omit if no clear match. CLEANING: remove duplicates, RSS artifacts, Read more/Source/Via links, unrelated hashtags, broken translation. Body must not repeat headline. 40-80 words. Start with main event. Format:\n\n🔵 <Arabic title>\n\n<News paragraph>\n\n#<Ticker if provided>"},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,
@@ -488,7 +509,7 @@ class OpenRouterTranslator:
                     json={
                         "model": "qwen/qwen-2.5-72b-instruct",
                         "messages": [
-                            {"role": "system", "content": "You are a senior crypto news editor. Rewrite into professional Arabic. Input may have broken machine translation - reconstruct meaning from facts, ignore bad wording, write fresh. Never translate idioms literally (killer app=أبرز تطبيق, game changer=نقلة نوعية, double down=يعزز التزامه, roll out=يطرح, slash=يخفض, crackdown=تشديد الإجراءات). Use: stablecoin=عملة مستقرة, staking=الرهن, DeFi=التمويل اللامركزي, ETF=صندوق متداول, inflows=تدفقات داخلة, SEC=هيئة الأوراق المالية, exploit=استغلال ثغرة, hack=اختراق, breach=خرق أمني, oracle=أوراكل, bridge=جسر, mainnet=الشبكة الرئيسية, rally=موجة صعود, plunge=يهبط, surge=يرتفع بقوة, breakout=اختراق سعري, pullback=تصحيح. NEVER use: التطبيق القاتل, غيّر قواعد اللعبة, ضاعف رهانه, قام بطرح, في خطوة تعكس, وسط تزايد الاهتمام, مما عزز ثقة المستثمرين. Keep official names in English (Bitcoin, Ethereum, BlackRock, Binance). 40-80 words. Start with main event. Format:\n\n🔵 <Arabic title>\n\n<News paragraph>\n\n#<Ticker if provided>"},
+                            {"role": "system", "content": "You are a senior crypto news editor. Rewrite into professional Arabic. Input may have broken machine translation - reconstruct meaning from facts, ignore bad wording, write fresh. Never translate idioms literally (killer app=أبرز تطبيق, game changer=نقلة نوعية, double down=يعزز التزامه, roll out=يطرح, slash=يخفض, crackdown=تشديد الإجراءات). Use: stablecoin=عملة مستقرة, staking=الرهن, DeFi=التمويل اللامركزي, ETF=صندوق متداول, inflows=تدفقات داخلة, SEC=هيئة الأوراق المالية, exploit=استغلال ثغرة, hack=اختراق, breach=خرق أمني, oracle=أوراكل, bridge=جسر, mainnet=الشبكة الرئيسية, rally=موجة صعود, plunge=يهبط, surge=يرتفع بقوة, breakout=اختراق سعري, pullback=تصحيح. NEVER use: التطبيق القاتل, غيّر قواعد اللعبة, ضاعف رهانه, قام بطرح, في خطوة تعكس, وسط تزايد الاهتمام, مما عزز ثقة المستثمرين. Keep official names in English. TICKER RULES: do not trust source ticker - determine from content, replace if wrong, omit if no clear match. CLEANING: remove duplicates, RSS artifacts, Read more/Source/Via links, unrelated hashtags, broken translation. Body must not repeat headline. 40-80 words. Start with main event. Format:\n\n🔵 <Arabic title>\n\n<News paragraph>\n\n#<Ticker if provided>"},
                             {"role": "user", "content": text},
                         ],
                         "temperature": 0.3,

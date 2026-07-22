@@ -424,6 +424,31 @@ Tether, Circle, Coinbase, BlackRock, MicroStrategy.
 Never output: بتكوين، بيت كوين، بلاك روك، كوين بيس.
 These names are immutable.
 
+FINANCIAL TERMINOLOGY POLICY
+
+Use established Arabic financial terminology.
+Never translate financial idioms literally.
+
+Inflows → تدفقات صافية
+Outflows → تدفقات خارجة
+Momentum → زخم
+Holdings → حيازات
+Spot ETF → صندوق تداول فوري
+Assets under management → الأصول المدارة
+Bullish → إيجابي
+Bearish → سلبي
+
+Never invent literal expressions.
+If an idiom cannot be translated naturally,
+rewrite the sentence from its meaning.
+
+SOURCE ATTRIBUTION
+
+Publisher names (Benzinga, CoinDesk, Cointelegraph, BeInCrypto, Decrypt)
+are metadata.
+Never include them in the article
+unless the source itself is the subject of the news.
+
 Never:
 
 - translate literally
@@ -990,7 +1015,11 @@ class TranslationManager:
         return chunk
 
     async def translate(self, text: str, force: bool = False) -> Optional[Dict[str, str]]:
-        """ترجمة النص — يُرجع dict {headline, body, format, hashtag, importance} أو None"""
+        """ترجمة النص — يُرجع dict {headline, body, format, hashtag, importance} أو None
+
+        LLM translators (Gemini, Groq, OpenRouter): نص إنجليزي خام — البرومبت يعالج الأسماء.
+        Google Translate: حماية الكيانات داخلياً.
+        """
         if not text or len(text) < 3:
             return None
 
@@ -1003,57 +1032,40 @@ class TranslationManager:
                 log.info("💾 Translation cache hit")
                 return cached
 
-        # حماية الكيانات
-        protected_text, restore_map = _protect_entities(text)
-
-        # ═══ الطبقة 1: Gemini ═══
+        # ═══ الطبقة 1: Gemini (نص خام — البرومبت يتعامل مع الأسماء) ═══
         if self.gemini:
-            result = await self.gemini.translate(protected_text)
-            if result:
-                result["headline"] = _restore_entities(result["headline"], restore_map)
-                result["body"] = _restore_entities(result.get("body", ""), restore_map)
+            result = await self.gemini.translate(text)
+            if result and self._is_quality_good(result["headline"]):
+                check_text = result["headline"] + " " + result.get("body", "")
+                ok, missing = self._verify_entities(text, check_text)
 
-                if self._is_quality_good(result["headline"]):
-                    check_text = result["headline"] + " " + result.get("body", "")
-                    ok, missing = self._verify_entities(text, check_text)
+                if not ok:
+                    log.warning(f"   🔄 Gemini retry — missing: {missing}")
+                    retry = await self.gemini.translate(text, missing_names=missing)
+                    if retry and self._is_quality_good(retry["headline"]):
+                        await translation_cache.set(cache_key, retry)
+                        return retry
+                else:
+                    await translation_cache.set(cache_key, result)
+                    return result
 
-                    if not ok:
-                        log.warning(f"   🔄 Gemini retry — missing: {missing}")
-                        retry = await self.gemini.translate(protected_text, missing_names=missing)
-                        if retry:
-                            retry["headline"] = _restore_entities(retry["headline"], restore_map)
-                            retry["body"] = _restore_entities(retry.get("body", ""), restore_map)
-                            if self._is_quality_good(retry["headline"]):
-                                await translation_cache.set(cache_key, retry)
-                                return retry
-                    else:
-                        await translation_cache.set(cache_key, result)
-                        return result
-
-        # ═══ الطبقة 2: Groq ═══
+        # ═══ الطبقة 2: Groq (نص خام) ═══
         if self.groq:
-            result = await self.groq.translate(protected_text)
-            if result:
-                result["headline"] = _restore_entities(result["headline"], restore_map)
-                result["body"] = _restore_entities(result.get("body", ""), restore_map)
-                if self._is_quality_good(result["headline"]):
-                    await translation_cache.set(cache_key, result)
-                    return result
+            result = await self.groq.translate(text)
+            if result and self._is_quality_good(result["headline"]):
+                await translation_cache.set(cache_key, result)
+                return result
 
-        # ═══ الطبقة 3: OpenRouter ═══
+        # ═══ الطبقة 3: OpenRouter (نص خام) ═══
         if self.openrouter:
-            result = await self.openrouter.translate(protected_text)
-            if result:
-                result["headline"] = _restore_entities(result["headline"], restore_map)
-                result["body"] = _restore_entities(result.get("body", ""), restore_map)
-                if self._is_quality_good(result["headline"]):
-                    await translation_cache.set(cache_key, result)
-                    return result
+            result = await self.openrouter.translate(text)
+            if result and self._is_quality_good(result["headline"]):
+                await translation_cache.set(cache_key, result)
+                return result
 
-        # ═══ الطبقة 4: Google Translate (يُرجع نصاً عادياً) ═══
+        # ═══ الطبقة 4: Google Translate (حماية الكيانات داخلياً) ═══
         raw = await self.google.translate(text)
         if raw:
-            raw = _restore_entities(raw, restore_map)
             arabic_chars = sum(1 for c in raw if '\u0600' <= c <= '\u06FF')
             if len(raw) > 20 and arabic_chars / len(raw) >= 0.15:
                 fallback = _parse_raw_as_fallback(raw)

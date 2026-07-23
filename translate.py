@@ -465,6 +465,50 @@ Never:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+INPUT QUALITY GATE (MANDATORY)
+
+Before extracting any facts, evaluate the source quality.
+
+Reject if the source contains:
+
+- broken words
+- mixed Arabic and English inside the same word
+- corrupted machine translation
+- incomplete sentences
+- malformed RSS titles
+- unreadable grammar
+
+If the source is corrupted:
+
+1. Ignore the broken wording.
+2. Recover only the facts that are clearly understandable.
+3. Reconstruct the article from those recovered facts.
+4. Never copy corrupted text.
+
+If the facts cannot be recovered with high confidence:
+
+Return:
+{"status": "reject", "reason": "corrupted_source"}
+
+Never guess missing information.
+
+CORRUPTED TEXT POLICY
+
+Words such as:
+
+إطلاقes
+Launchingات
+Developer النظام
+Protocol الخاصة
+
+are evidence of corrupted translation.
+
+Never copy corrupted words.
+Never attempt to repair individual words.
+Recover the meaning and rewrite from scratch.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 NEWSROOM FILTER
 
 Before writing, classify every source sentence.
@@ -611,12 +655,19 @@ OUTPUT
 
 Return ONLY JSON.
 
+Normal article:
 {
   "headline": "",
   "body": "",
   "format": "standard | bullets | economic",
   "hashtag": "",
   "importance": "low | medium | high | breaking"
+}
+
+Rejected article (corrupted source):
+{
+  "status": "reject",
+  "reason": "corrupted_source"
 }
 
 Never return markdown.
@@ -681,9 +732,13 @@ def parse_json_output(text: str) -> Optional[Dict[str, str]]:
 
 
 def _validate_result(data: Dict) -> Optional[Dict[str, str]]:
-    """فحص صحة نتيجة JSON"""
+    """فحص صحة نتيجة JSON — يدعم reject أيضاً"""
     if not isinstance(data, dict):
         return None
+
+    # حالة رفض: مصدر معطوب
+    if data.get("status") == "reject":
+        return {"_rejected": True, "reason": data.get("reason", "unknown")}
 
     headline = (data.get("headline") or "").strip()
     if not headline or len(headline) < 3:
@@ -1078,19 +1133,29 @@ class TranslationManager:
         # ═══ الطبقة 1: Gemini (نص خام — البرومبت يتعامل مع الأسماء) ═══
         if self.gemini:
             result = await self.gemini.translate(text)
-            if result and self._is_quality_good(result["headline"]):
-                check_text = result["headline"] + " " + result.get("body", "")
-                ok, missing = self._verify_entities(text, check_text)
+            if result:
+                # Gemini رفض الخبر (مصدر معطوب) → تخطي كل الفولباكات
+                if result.get("_rejected"):
+                    log.warning(f"   🚫 Gemini rejected article: {result.get('reason', 'unknown')}")
+                    return None
+                if self._is_quality_good(result["headline"]):
+                    check_text = result["headline"] + " " + result.get("body", "")
+                    ok, missing = self._verify_entities(text, check_text)
 
-                if not ok:
-                    log.warning(f"   🔄 Gemini retry — missing: {missing}")
-                    retry = await self.gemini.translate(text, missing_names=missing)
-                    if retry and self._is_quality_good(retry["headline"]):
-                        await translation_cache.set(cache_key, retry)
-                        return retry
-                else:
-                    await translation_cache.set(cache_key, result)
-                    return result
+                    if not ok:
+                        log.warning(f"   🔄 Gemini retry — missing: {missing}")
+                        retry = await self.gemini.translate(text, missing_names=missing)
+                        if retry:
+                            if retry.get("_rejected"):
+                                log.warning(f"   🚫 Gemini retry rejected: {retry.get('reason', 'unknown')}")
+                                return None
+                            if self._is_quality_good(retry["headline"]):
+                                await translation_cache.set(cache_key, retry)
+                                return retry
+                        # فشل Retry → جرب الفولباكات
+                    else:
+                        await translation_cache.set(cache_key, result)
+                        return result
 
         # ═══ الطبقة 2: Groq (نص خام) ═══
         if self.groq:

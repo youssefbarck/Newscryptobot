@@ -172,11 +172,17 @@ def _is_same_event(a: NewsItem, b: NewsItem, now: float) -> bool:
         if coin_overlap >= 2:
             return True
 
-    # فحص التشابه النصي — آخر طبقة حماية
-    text_a = _normalize_for_similarity(f"{a.clean_title or a.title} {a.clean_summary or a.summary}")
-    text_b = _normalize_for_similarity(f"{b.clean_title or b.title} {b.clean_summary or b.summary}")
-    if text_a and text_b and text_a == text_b:
-        return True
+    # فحص التشابه النصي — Jaccard similarity (التقاط الأخبار نفسها بصياغات مختلفة)
+    text_a = f"{a.clean_title or a.title} {a.clean_summary or a.summary}"
+    text_b = f"{b.clean_title or b.title} {b.clean_summary or b.summary}"
+    if text_a.strip() and text_b.strip():
+        jaccard = _word_jaccard(text_a, text_b)
+        if jaccard >= 0.50:
+            log.debug(
+                f"📊 Same event (text Jaccard {jaccard:.0%}): "
+                f"{a.title[:40]} ≈ {b.title[:40]}"
+            )
+            return True
 
     return False
 
@@ -217,12 +223,27 @@ def _merge_group(group: List[NewsItem]) -> NewsItem:
 # 📊 Semantic Deduplication (مكمل — للتشابه النصي)
 # ═══════════════════════════════════════════════════════════
 
+# كلمات وقف عربية للتطبيع
+_ARABIC_STOPWORDS = {
+    "في", "من", "إلى", "على", "عن", "مع", "هذا", "هذه", "ذلك", "تلك",
+    "التي", "الذي", "هو", "هي", "هم", "هن", "نحن", "كان", "كانت",
+    "يكون", "تكون", "قد", "لقد", "سوف", "منذ", "حتى", "خلال",
+    "بعد", "قبل", "عند", "بين", "أو", "و", "ثم", "تم", "تمت", "يتم",
+    "أي", "كل", "بعض", "كما", "لذلك", "أكثر", "أقل", "جدا", "لا",
+    "لم", "لن", "إن", "أن", "ما", "ب", "ل", "ع", "ف", "ذات",
+    "لها", "له", "لهم", "منها", "منه", "عليه", "عليها", "فيه", "فيها",
+    "به", "بها", "مما", "مثل", "حيث", "حول", "ضد", "عبر", "وفق",
+    "نحو", "لكن", "سوف", "الى", "علي", "انه", "انها", "عليه",
+    "اي", "والتي", "والذي", "التى", "تم",
+}
+
+
 def _normalize_for_similarity(text: str) -> str:
-    """تطبيع النص للمقارنة الدلالية"""
+    """تطبيع النص للمقارنة الدلالية — يدعم العربية والإنجليزية"""
     import re
     text = text.lower()
     text = re.sub(r'\d+', ' ', text)
-    text = re.sub(r'[^\w\s]', ' ', text)
+    text = re.sub(r'[^\w\s\u0600-\u06FF]', ' ', text)
     stopwords = {
         "the", "a", "an", "is", "are", "was", "were", "have", "has",
         "had", "do", "does", "did", "will", "would", "could", "should",
@@ -234,5 +255,51 @@ def _normalize_for_similarity(text: str) -> str:
         "own", "same", "so", "than", "too", "very", "just", "and",
         "but", "if", "or", "because", "until", "while", "this", "that",
     }
-    words = [w for w in text.split() if w not in stopwords and len(w) > 2]
+    stopwords.update(_ARABIC_STOPWORDS)
+    words = [w for w in text.split() if w not in stopwords and len(w) > 1]
     return " ".join(sorted(set(words)))
+
+
+def _word_jaccard(text_a: str, text_b: str) -> float:
+    """حساب تشابه Jaccard بين نصين بناءً على الكلمات المعنوية"""
+    if not text_a or not text_b:
+        return 0.0
+    norm_a = _normalize_for_similarity(text_a)
+    norm_b = _normalize_for_similarity(text_b)
+    words_a = set(norm_a.split()) if norm_a else set()
+    words_b = set(norm_b.split()) if norm_b else set()
+    if not words_a or not words_b:
+        return 0.0
+    intersection = len(words_a & words_b)
+    union = len(words_a | words_b)
+    return intersection / union if union > 0 else 0.0
+
+
+def compute_text_fingerprint(text: str) -> str:
+    """حساب بصمة نصية مطبعّة لكشف التكرار"""
+    return _normalize_for_similarity(text)
+
+
+def check_text_similarity(text: str, stored_fingerprints: list, threshold: float = 0.50) -> bool:
+    """
+    فحص تشابه النص ضد بصمات مخزنة.
+    يُستخدم لكشف التكرار الدلالي عبر الدورات والنشرات.
+    يُرجع True إذا وجد تشابه >= threshold.
+    """
+    if not text or not stored_fingerprints:
+        return False
+    words_new = set(_normalize_for_similarity(text).split())
+    if not words_new:
+        return False
+
+    for fp in stored_fingerprints:
+        if not fp:
+            continue
+        words_stored = set(fp.split())
+        if not words_stored:
+            continue
+        intersection = len(words_new & words_stored)
+        union = len(words_new | words_stored)
+        if union > 0 and (intersection / union) >= threshold:
+            return True
+    return False

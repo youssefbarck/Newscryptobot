@@ -45,7 +45,7 @@ class Config:
     SCAN_INTERVAL: int = 300          # 5 دقائق
     MAX_NEWS_PER_SCAN: int = 40
     MAX_NEWS_AGE: int = 10800          # 3 ساعات
-    MIN_PUBLISH_SCORE: float = 35.0    # الحد الأدنى للنشر (من 100)
+    MIN_PUBLISH_SCORE: float = 60.0    # الحد الأدنى للنشر (من 100)
     SUMMARY_HOUR: int = 23
     SUMMARY_MINUTE: int = 59
     WATERMARK_TEXT: str = "@newscrypto1m"
@@ -59,7 +59,7 @@ class Config:
 
     # --- عتبات التقييم ---
     SCORE_THRESHOLDS = {
-        "publish": 35.0,     # أدنى درجة للنشر
+        "publish": 60.0,     # أدنى درجة للنشر
         "priority": 60.0,    # أخبار ذات أولوية عالية
         "breaking": 70.0,     # أخبار عاجلة
     }
@@ -426,6 +426,7 @@ class State:
     """حالة البوت العامّة"""
     sent_news_hashes: Set[str] = set()       # title hashes
     sent_fact_hashes: Set[str] = set()       # fact hashes — لكشف التكرار الدلالي
+    sent_text_fingerprints: list = []         # بصمات نصية عربية — لكشف التكرار عبر الدورات
     bot_shutdown: bool = False
     channel_enabled: Optional[bool] = None
     allowed_users: Set[int] = set()
@@ -437,6 +438,7 @@ def load_sent_hashes():
     """تحميل الأخبار المُرسلة سابقاً"""
     all_hashes = set()
     all_fact_hashes = set()
+    all_fingerprints = []
     # Gist
     if cfg.GIST_ID_SENT_NEWS:
         content = gist_get(cfg.GIST_ID_SENT_NEWS, "sent_news.json")
@@ -445,6 +447,9 @@ def load_sent_hashes():
                 data = json.loads(content)
                 all_hashes.update(set(data.get("hashes", [])))
                 all_fact_hashes.update(set(data.get("fact_hashes", [])))
+                fps = data.get("text_fingerprints", [])
+                if fps:
+                    all_fingerprints = fps
             except:
                 pass
     # محلي
@@ -453,18 +458,25 @@ def load_sent_hashes():
             data = json.load(f)
             all_hashes.update(set(data.get("hashes", [])))
             all_fact_hashes.update(set(data.get("fact_hashes", [])))
+            if not all_fingerprints:
+                fps = data.get("text_fingerprints", [])
+                if fps:
+                    all_fingerprints = fps
     except:
         pass
     state.sent_news_hashes = all_hashes
     state.sent_fact_hashes = all_fact_hashes
-    log.info(f"📊 Loaded {len(state.sent_news_hashes)} text hashes + {len(state.sent_fact_hashes)} fact hashes")
+    state.sent_text_fingerprints = all_fingerprints
+    log.info(f"📊 Loaded {len(state.sent_news_hashes)} text hashes + {len(state.sent_fact_hashes)} fact hashes + {len(all_fingerprints)} text fingerprints")
 
 
 def save_sent_hashes():
     """حفظ الأخبار المُرسلة"""
+    fps_to_save = state.sent_text_fingerprints[-300:] if state.sent_text_fingerprints else []
     content = json.dumps({
         "hashes": list(state.sent_news_hashes)[-500:],
         "fact_hashes": list(state.sent_fact_hashes)[-500:],
+        "text_fingerprints": fps_to_save,
     })
     try:
         with open(os.path.join(cfg.PERSISTENT_DIR, "sent_news.json"), "w") as f:

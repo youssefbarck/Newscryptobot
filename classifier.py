@@ -244,7 +244,7 @@ def score_news(item: NewsItem) -> ScoreResult:
     result.total = max(0, result.total)
 
     # قرار النشر
-    result.should_publish = result.total >= 35.0
+    result.should_publish = result.total >= 60.0
     result.reason = _explain_score(result)
 
     result.breakdown = {

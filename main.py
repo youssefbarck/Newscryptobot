@@ -8,7 +8,7 @@
 
 import os, asyncio, time, json
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from config import (
     cfg, state, log, tz, load_sent_hashes, save_sent_hashes,
@@ -19,7 +19,7 @@ from database import NewsDatabase, Analytics
 from collector import fetch_all_news, close_session
 from cleaner import clean_news_item
 from fact_extractor import extract_facts
-from deduplicator import check_duplicate, register_news, merge_sources
+from deduplicator import check_duplicate, register_news, merge_sources, check_text_similarity, compute_text_fingerprint
 from classifier import classify_news, score_news, should_reject
 from rewriter import rewrite_news
 from formatter import format_news
@@ -315,6 +315,30 @@ class NewsPipeline:
 
         log.info(f"✍️ Rewritten: {stats.rewritten}/{len(to_publish)}")
 
+        # ━━━ المرحلة 6.5: فحص التكرار النصي بعد الترجمة ━━━
+        # كشف أخبار نفس الحدث من مصادر مختلفة بصياغات عربية متعددة
+        _batch_fps = []
+        _deduped_items = []
+        for item in to_publish:
+            if not item.title_ar:
+                _deduped_items.append(item)
+                continue
+            ar_text = f"{item.title_ar} {item.summary_ar or ''}"
+            fp = compute_text_fingerprint(ar_text)
+            if not fp:
+                _deduped_items.append(item)
+                continue
+            # فحص ضد منشورات سابقة + نفس الدورة
+            all_fps = state.sent_text_fingerprints + _batch_fps
+            if check_text_similarity(ar_text, all_fps, threshold=0.50):
+                log.info(f"🔄 تكرار نصي بعد الترجمة: {item.title_ar[:50]}")
+                stats.deduplicated += 1
+                continue
+            _batch_fps.append(fp)
+            _deduped_items.append(item)
+        to_publish = _deduped_items
+        log.info(f"🔄 Post-rewrite dedup: {len(to_publish)} remain after text similarity check")
+
         # ━━━ المرحلة 7: تنسيق النشر ━━━
         for item in to_publish:
             if not item.title_ar:
@@ -331,6 +355,11 @@ class NewsPipeline:
                     if fact_h:
                         state.sent_fact_hashes.add(fact_h)
                     register_news(item, self.db)
+
+                    # تسجيل بصمة نصية عربية لكشف التكرار مستقبلاً
+                    ar_fp = compute_text_fingerprint(f"{item.title_ar} {item.summary_ar or ''}")
+                    if ar_fp:
+                        state.sent_text_fingerprints.append(ar_fp)
 
                     # إرسال للقناة
                     if is_channel_enabled():

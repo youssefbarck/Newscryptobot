@@ -178,7 +178,7 @@ class ScoreResult:
             + self.bonus + self.penalty
         )
         self.total = max(0, self.total)
-        self.should_publish = self.total >= 35.0
+        self.should_publish = self.total >= 60.0
         self.breakdown = {
             "source": self.source_score,
             "urgency": self.urgency_score,

@@ -495,6 +495,36 @@ def _check_quality(headline: str, body: str) -> Tuple[bool, str]:
         return False, f"نسبة العربية منخفضة ({ratio:.0%})"
     if _has_unwanted_english(combined):
         return False, "يوجد كلمات إنجليزية غير مسموحة"
+
+    # فحص الجمل الناقصة — جملة تنتهي بحرف/كلمة مفردة بدون سياق
+    broken_patterns = [
+        r'\s[a-zA-Z]\s*$',            # حرف إنجليزي وحيد في النهاية (مثل "o" في النهاية)
+        r'\s[أ-ي]\s*[.،]$',            # حرف عربي وحيد + نقطة/فاصلة
+        r'\sفي\s*[.،]\s*$',          # "في." أو "في،" في النهاية
+        r'\sمن\s*[.،]\s*$',          # "من." في النهاية
+        r'\sإلى\s*[.،]\s*$',         # "إلى." في النهاية
+        r'\sعلى\s*[.،]\s*$',         # "على." في النهاية
+        r'\sفي\s+ال[.،]\s*$',        # "في ال." في النهاية
+        r'\sأن\s+تم\s+[.،]\s*$',    # "أن تم." في النهاية بدون تفصيل
+    ]
+    for pat in broken_patterns:
+        if re.search(pat, body):
+            return False, "جملة ناقصة في نهاية المحتوى"
+
+    # فحص المحتوى المبهم — فقرة بدون أسماء/كيانات محددة
+    # المحتوى الجيد يجب أن يحتوي على تفاصيل محددة (أرقام، أسماء، أماكن)
+    has_specifics = (
+        re.search(r'[\$][\d,]+', combined) or       # مبالغ "$48M"
+        re.search(r'\d{2,}', combined) or          # أرقام (تواريخ، كميات)
+        re.search(r'(\d+\.\d+)%', combined) or   # نسب مئوية
+        any(ent in combined for ent in ['Bitcoin', 'Ethereum', 'SEC', 'Binance', 'BTC', 'ETH'])  # كيانات معروفة
+    )
+    if not has_specifics:
+        # فحص إضافي: إذا كان المحتوى عام جداً بدون تفاصيل
+        vague_words = ["شيء", "أمر", "عمل", "تطور", "حدث"]
+        if sum(1 for w in vague_words if w in combined) >= 2:
+            return False, "محتوى مبهم بدون تفاصيل محددة"
+
     return True, ""
 
 

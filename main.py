@@ -270,18 +270,41 @@ class NewsPipeline:
         # حد أقصى: خبران فقط لكل عملة في الدورة الواحدة
         _MAX_PER_COIN = 2
         coin_count: Dict[str, int] = {}
+        # حد أقصى: خبر واحد فقط لكل كيان بشرية (شخص) في الدورة الواحدة
+        _MAX_PER_PERSON = 1
+        person_count: Dict[str, int] = {}
         filtered = []
         for item in to_publish:
+            # فحص حد الكيانات البشرية أولاً (الأولوية)
+            people = item.facts.people if item.facts else []
+            dominant_person = ""
+            if people:
+                # تطبيع الاسم للمقارنة
+                dominant_person = people[0].strip().lower()
+                if person_count.get(dominant_person, 0) >= _MAX_PER_PERSON:
+                    log.info(f"⏭️ تخطي: حد الأشخاص ({people[0]}): {item.title[:50]}")
+                    stats.rejected.append({
+                        "title": item.title[:60],
+                        "reason": f"حد الأشخاص: {people[0]} ({person_count[dominant_person]}/{_MAX_PER_PERSON})",
+                        "source": item.source,
+                    })
+                    continue
+
+            # فحص حد العملات
             coins = item.facts.coins if item.facts else []
             # إذا لم تكن هناك عملات محددة → نسمح بها
             if not coins:
                 filtered.append(item)
+                if dominant_person:
+                    person_count[dominant_person] = person_count.get(dominant_person, 0) + 1
                 continue
             # إضافة خبر فقط إذا لم نتجاوز الحد
             dominant_coin = coins[0] if coins else ""
             if coin_count.get(dominant_coin, 0) < _MAX_PER_COIN:
                 filtered.append(item)
                 coin_count[dominant_coin] = coin_count.get(dominant_coin, 0) + 1
+                if dominant_person:
+                    person_count[dominant_person] = person_count.get(dominant_person, 0) + 1
             else:
                 log.debug(f"⏭️ تخطي: حد العملات ({dominant_coin}): {item.title[:50]}")
                 stats.rejected.append({

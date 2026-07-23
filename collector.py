@@ -162,8 +162,6 @@ def _get_or_create_session() -> ClientSession:
         timeout=timeout,
         headers=HEADERS,
         skip_auto_headers={"User-Agent"},
-        # لا نتابع التحويلات تلقائياً — نتحكم بها يدوياً
-        max_redirects=5,
     )
 
     log.info(

@@ -21,7 +21,6 @@ import dedup
 from filters import NewsItem, filter_news_items, is_complete_news
 from rss import fetch_all_news, fetch_etf_flows, session_manager
 from translate import TranslationManager, translation_cache
-# daily_report.py — تم إزالته (وحدة مستقلة لم تعد مطلوبة)
 
 
 # ═══════════════════════════════════════════════════════════

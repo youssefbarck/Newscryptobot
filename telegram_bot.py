@@ -21,6 +21,7 @@ import dedup
 from filters import NewsItem, filter_news_items, is_complete_news
 from rss import fetch_all_news, fetch_etf_flows, session_manager
 from translate import TranslationManager, translation_cache
+from source_quality import source_quality
 
 
 # ═══════════════════════════════════════════════════════════
@@ -520,11 +521,17 @@ async def scan_news_loop(config: BotConfig, state: BotState, translator: Transla
                 msg = final_editorial_review(msg)
                 if not msg:
                     log.info(f"   🧹 Blocked by editorial review: {item.title[:60]}")
+                    if item.source:
+                        source_quality.record_rejection(item.source, "Blocked by editorial review")
                     continue
 
                 # إرسال
                 state.sent_news_hashes.add(item.hash)
                 state.last_alerts_hashes[item.hash] = now
+
+                # تسجيل نجاح المصدر
+                if item.source:
+                    source_quality.record_success(item.source)
 
                 # للأولوية: importance هو المصدر الموحد
                 imp = getattr(item, 'importance', 'medium') or 'medium'
@@ -713,6 +720,7 @@ async def run_bot(config: BotConfig, state: BotState):
     except asyncio.CancelledError:
         log.info("🛑 Bot shutting down...")
     finally:
+        source_quality.flush()
         await session_manager.close()
         translation_cache.flush()
 
@@ -772,6 +780,8 @@ async def run_oneshot(config: BotConfig, state: BotState):
         msg = final_editorial_review(msg)
         if not msg:
             print(f"   🧹 Blocked by editorial review: {item.title[:60]}")
+            if item.source:
+                source_quality.record_rejection(item.source, "Blocked by editorial review")
             continue
 
         # إرسال
@@ -780,6 +790,10 @@ async def run_oneshot(config: BotConfig, state: BotState):
         if state.is_channel_enabled(config):
             await send_telegram_message(config.CHANNEL_ID, msg, item.image, config.TOKEN)
         await send_telegram_message(config.CHAT_ID, msg, item.image, config.TOKEN)
+
+        # تسجيل نجاح المصدر
+        if item.source:
+            source_quality.record_success(item.source)
 
         alerts_sent += 1
         print(f"  ✉️ {item.title[:60]}...")
@@ -809,3 +823,4 @@ async def run_oneshot(config: BotConfig, state: BotState):
 
     await session_manager.close()
     translation_cache.flush()
+    source_quality.flush()

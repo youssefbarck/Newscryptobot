@@ -16,6 +16,7 @@ from config import (
     FARSIDE_RATE_LIMITER,
 )
 from filters import NewsItem
+from source_quality import source_quality
 
 
 # ═══════════════════════════════════════════════════════════
@@ -269,19 +270,40 @@ async def parse_rss_source(source: "NewsSource") -> List[NewsItem]:
 # 🚀 Parallel Fetching
 # ═══════════════════════════════════════════════════════════
 async def fetch_all_news(max_concurrent: int = 5) -> List[NewsItem]:
-    """جلب كل الأخبار بشكل متوازي مع semaphore"""
+    """جلب كل الأخبار بشكل متوازي مع semaphore
+    — يُخطّي المصادر المعطّلة منطقيًا
+    — يحاول استرداد المصادر المعطّلة كل 24 ساعة
+    """
     semaphore = asyncio.Semaphore(max_concurrent)
+
+    active_sources = []
+
+    for name, source in NEWS_SOURCES.items():
+        if source_quality.is_source_enabled(name):
+            active_sources.append(source)
+        elif source_quality.should_attempt_recovery(name):
+            # محاولة استرداد: جلب مقال واحد
+            log.info(f"📊 Recovery attempt: {name}")
+            active_sources.append(source)
 
     async def fetch_with_limit(source):
         async with semaphore:
-            # circuit breaker
+            is_recovery = not source_quality.is_source_enabled(source.name)
             try:
-                return await source.circuit_breaker.call(parse_rss_source, source)
+                items = await source.circuit_breaker.call(parse_rss_source, source)
+
+                # إذا كان مصدرًا معطّلاً وفشل الجلب → خصم
+                if is_recovery and not items:
+                    source_quality.record_parse_failure(source.name, "Recovery fetch failed")
+                    return []
+
+                return items
             except Exception as e:
                 log.warning(f"Circuit breaker for {source.name}: {e}")
+                source_quality.record_parse_failure(source.name, f"Circuit breaker: {type(e).__name__}")
                 return []
 
-    tasks = [fetch_with_limit(source) for source in NEWS_SOURCES.values()]
+    tasks = [fetch_with_limit(source) for source in active_sources]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_items = []

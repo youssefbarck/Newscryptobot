@@ -19,6 +19,9 @@ import aiohttp
 from config import log, BotConfig
 
 
+from source_quality import source_quality
+
+
 # ═══════════════════════════════════════════════════════════
 # 💾 Persistent Translation Cache (ملف JSON + ذاكرة مؤقتة)
 # ═══════════════════════════════════════════════════════════
@@ -1112,11 +1115,13 @@ class TranslationManager:
             return chunk[:last_space]
         return chunk
 
-    async def translate(self, text: str, force: bool = False) -> Optional[Dict[str, str]]:
+    async def translate(self, text: str, force: bool = False, source_name: str = "") -> Optional[Dict[str, str]]:
         """ترجمة النص — يُرجع dict {headline, body, format, hashtag, importance} أو None
 
         LLM translators (Gemini, Groq, OpenRouter): نص إنجليزي خام — البرومبت يعالج الأسماء.
         Google Translate: حماية الكيانات داخلياً.
+
+        source_name: اسم المصدر لإبلاغ source_quality.
         """
         if not text or len(text) < 3:
             return None
@@ -1137,6 +1142,8 @@ class TranslationManager:
                 # Gemini رفض الخبر (مصدر معطوب) → تخطي كل الفولباكات
                 if result.get("_rejected"):
                     log.warning(f"   🚫 Gemini rejected article: {result.get('reason', 'unknown')}")
+                    if source_name:
+                        source_quality.record_rejection(source_name, "Gemini rejected: corrupted_source")
                     return None
                 if self._is_quality_good(result["headline"]):
                     check_text = result["headline"] + " " + result.get("body", "")
@@ -1148,6 +1155,8 @@ class TranslationManager:
                         if retry:
                             if retry.get("_rejected"):
                                 log.warning(f"   🚫 Gemini retry rejected: {retry.get('reason', 'unknown')}")
+                                if source_name:
+                                    source_quality.record_rejection(source_name, "Gemini retry rejected: corrupted_source")
                                 return None
                             if self._is_quality_good(retry["headline"]):
                                 await translation_cache.set(cache_key, retry)
@@ -1182,19 +1191,22 @@ class TranslationManager:
                     return fallback
 
         log.warning("   ❌ All translation methods failed")
+        if source_name:
+            source_quality.record_rejection(source_name, "All translation methods failed")
         return None
 
     async def translate_item(self, item) -> None:
         """ترجمة خبر كامل — يملأ حقول item مباشرة"""
         title = getattr(item, 'title', '') or ''
         summary = getattr(item, 'summary', '') or ''
+        source_name = getattr(item, 'source', '') or ''
 
         # دمج العنوان والملخص
         combined = (title + "\n" + summary).strip() if summary else title.strip()
         if not combined:
             return
 
-        result = await self.translate(combined)
+        result = await self.translate(combined, source_name=source_name)
         if not result:
             return
 

@@ -446,6 +446,21 @@ are metadata.
 Never include them in the article
 unless the source itself is the subject of the news.
 
+NO HANGING ATTRIBUTION
+
+Never end an article with a vague attribution.
+
+Forbidden:
+- وفقاً لتقارير
+- وفقاً لمصادر
+- بحسب التقارير
+- وفقاً لـ...
+- وتشير التقارير إلى...
+
+Either name the SPECIFIC source (وفقاً لتقرير البنك المركزي الأمريكي)
+or remove the sentence entirely.
+A sentence without a named source is noise.
+
 Never:
 
 - translate literally
@@ -544,6 +559,23 @@ Forbidden examples:
 - التطبيق القاتل
 - غير قواعد اللعبة
 
+PARAGRAPH STYLING
+
+Each body paragraph MUST start with one relevant emoji.
+
+Choose based on content:
+⚡ breaking / urgent fact
+📈 data / statistics / market movement
+🔥 major development / key event
+💰 financial impact / numbers
+🔧 technical / protocol detail
+⚠️ risk / warning / regulation
+🌐 regulation / geopolitics / institutional
+
+Each paragraph: 1-2 sentences maximum.
+Every sentence must contain a concrete fact.
+If a sentence has no fact, delete it.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 HEADLINE RULES
@@ -584,6 +616,34 @@ Forecast
 Actual
 One-line explanation
 
+-----------------------
+
+ETF FLOW ARTICLES
+
+If the article reports ETF fund inflows or outflows:
+Use "economic" format.
+Output ONLY: fund name, direction, amount.
+
+Direction keywords:
+إيجابي (positive inflow)
+سلبي (negative outflow)
+تعادل (neutral / zero)
+
+Do NOT:
+- Write analysis or commentary
+- Generate cryptocurrency hashtags
+- Mention fund strategies or holdings
+- Explain market implications
+
+Example output:
+{
+  "headline": "IBIT — تدفقات إيجابية +100.5M",
+  "body": "",
+  "format": "economic",
+  "hashtag": "",
+  "importance": "medium"
+}
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ANALYSIS
@@ -617,6 +677,12 @@ Otherwise return an empty hashtag.
 Never generate hashtags from verbs, adjectives,
 common English words, company names, locations,
 or ticker-like words.
+
+HASHTAG BLACKLIST
+
+These are NEVER valid hashtags:
+#ES #TO #IN #AT #BY #OR #AS #DO #GO #NO #SO
+Common English words are not crypto tickers.
 
 Never trust the source hashtag.
 
@@ -675,6 +741,15 @@ Never return anything outside JSON."""
 # ═══════════════════════════════════════════════════════════
 # 🔧 JSON Output Parser (مشترك — يستخدمه كل المترجمين)
 # ═══════════════════════════════════════════════════════════
+
+# وسوم ليست عملات كريبتو — حظر كامل
+_HASHTAG_BLACKLIST = {
+    "es", "to", "in", "on", "at", "by", "or", "as", "is", "be", "do", "go",
+    "no", "so", "up", "if", "am", "an", "my", "he", "we", "me", "us", "it",
+    "ai", "tv", "io", "de", "la", "el", "un", "en", "lo", "su", "se",
+}
+
+
 def parse_json_output(text: str) -> Optional[Dict[str, str]]:
     """تحليل مخرجات JSON من أي مترجم.
 
@@ -748,7 +823,11 @@ def _validate_result(data: Dict) -> Optional[Dict[str, str]]:
 
     hashtag = (data.get("hashtag") or "").strip().lstrip("#")
     if hashtag:
-        hashtag = "#" + hashtag
+        # فلتر: حظر الوسوم القصيرة أو كلمات إنجليزية شائعة
+        if hashtag.lower() in _HASHTAG_BLACKLIST or len(hashtag) <= 2:
+            hashtag = ""
+        else:
+            hashtag = "#" + hashtag
 
     importance = (data.get("importance") or "medium").strip()
     if importance not in ("low", "medium", "high", "breaking"):
@@ -1045,7 +1124,7 @@ class TranslationManager:
     # كلمات إنجليزية شائعة تُسبب false positives — تحتاج uppercase أو $ أو سياق واضح
     _AMBIGUOUS = {"near", "op", "sol", "dot", "link", "apt", "sei", "ton",
                   "mat", "avax", "arb", "run", "sui", "sea", "top", "fit",
-                  "meta", "atom", "one", "all", "sun", "moon", "star"}
+                  "meta", "atom", "one", "all", "sun", "moon", "star", "es"}
 
     def _extract_entities(self, text: str) -> List[str]:
         """استخراج الكيانات — كلمات مبهمة تحتاج uppercase أو رمز"""

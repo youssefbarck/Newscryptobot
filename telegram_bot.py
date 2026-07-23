@@ -271,11 +271,12 @@ _ARABIC_MARKERS = re.compile(
     re.MULTILINE
 )
 
-# عبارات إسناد بدون رابط — يجب إزالتها إن لم يكن هناك مصدر محدد
-_ATTRIBUTION_PATTERNS = [
-    re.compile(r'وفقا\s+ل(?:يَ?)\s+[^\.\n]+', re.IGNORECASE),
-    re.compile(r'بحسب\s+[^\.\n]+', re.IGNORECASE),
-    re.compile(r'وفق\s+[^\.\n]+', re.IGNORECASE),
+# عبارات إسناد مبهمة — بدون مصدر محدد — يجب إزالتها
+_VAGUE_ATTRIBUTIONS = [
+    re.compile(r'وفقا[ً°]??\s+ل(?:يَ?|ـ)?\s+(?:تقارير|مصادر|معلومات|بيانات|أنباء|أوساط|دوائر)\b[^\.\n]*', re.IGNORECASE),
+    re.compile(r'بحسب\s+(?:تقارير|مصادر|معلومات|بيانات|أنباء|أوساط|دوائر)\b[^\.\n]*', re.IGNORECASE),
+    re.compile(r'وفق[ً°]??\s+ل(?:يَ?|ـ)?\s+(?:تقارير|مصادر)\b[^\.\n]*', re.IGNORECASE),
+    re.compile(r'وتشير\s+(?:التقارير|المصادر|الأوساط)\b[^\.\n]*', re.IGNORECASE),
 ]
 
 
@@ -320,8 +321,8 @@ def final_editorial_review(text: str) -> Optional[str]:
         if not stripped:
             continue
 
-        # 2b. حذف عبارات إسناد بدون مصدر محدد (وفقاً ل... / بحسب...)
-        for pat in _ATTRIBUTION_PATTERNS:
+        # 2b. حذف عبارات إسناد مبهمة (وفقاً لتقارير... / بحسب مصادر...)
+        for pat in _VAGUE_ATTRIBUTIONS:
             stripped = pat.sub('', stripped).strip()
         if not stripped:
             continue
@@ -353,14 +354,19 @@ def final_editorial_review(text: str) -> Optional[str]:
 
         cleaned.append(stripped)
 
-    # 6. توحيد الهاشتاغات في النهاية
+    # 6. توحيد الهاشتاغات في النهاية — مع فصل الوسوم المتعددة على سطر واحد
     result_lines = []
     hashtags = []
     for line in cleaned:
-        if re.match(r'^#\w+', line.strip()):
-            tag = line.strip().upper()  # توحيد: أحرف كبيرة
-            if tag not in hashtags:
-                hashtags.append(tag)
+        stripped_line = line.strip()
+        # فحص: هل السطر يتكون من وسم/وسوم فقط؟
+        if re.match(r'^#[\w]+', stripped_line):
+            # فصل كل وسم على حدة (يدعم عدة وسوم على نفس السطر)
+            tags = re.findall(r'#[\w]+', stripped_line)
+            for tag in tags:
+                tag_upper = tag.upper()  # توحيد: أحرف كبيرة
+                if tag_upper not in hashtags:
+                    hashtags.append(tag_upper)
             continue
         result_lines.append(line)
 
@@ -444,50 +450,28 @@ def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]
 
 
 def format_etf_flows(etf_data: Dict) -> str:
-    """تنسيق بيانات ETF — مبسّط: اسم الصندوق + الإشارة + التاريخ والوقت"""
+    """تنسيق بيانات ETF — مبسّط: اسم الصندوق + الإشارة + التاريخ والوقت فقط"""
     from config import tz
 
     msg = "📊 تدفقات صناديق ETF\n"
 
     # التاريخ والوقت
     now = datetime.now(tz)
-    msg += f"📅 {etf_data['date']}  ⏰ {now.strftime('%H:%M')}\n\n"
+    msg += f"📅 {etf_data['date']}  ⏰ {now.strftime('%H:%M')}\n"
 
-    # Bitcoin ETF
-    btc_funds = etf_data.get('btc_funds', {})
+    # Bitcoin ETF — صافي فقط
     btc_total = etf_data.get('btc_total', 0)
+    btc_dir = "إيجابي" if btc_total > 0 else ("سلبي" if btc_total < 0 else "تعادل")
+    btc_sign = "+" if btc_total > 0 else ""
+    msg += f"\n🟠 Bitcoin ETF — {btc_dir} {btc_sign}{btc_total:.1f}M"
 
-    msg += "🟠 Bitcoin\n"
-    if btc_funds:
-        for name, flow in btc_funds.items():
-            if flow == 0:
-                continue
-            arrow = "📈" if flow > 0 else "📉"
-            sign = "+" if flow > 0 else ""
-            msg += f"  {arrow} {name}: {sign}{flow:.1f}M\n"
-    else:
-        arrow = "📈" if btc_total >= 0 else "📉"
-        sign = "+" if btc_total >= 0 else ""
-        msg += f"  {arrow} الصافي: {sign}{btc_total:.1f}M\n"
-
-    # Ethereum ETF
-    eth_funds = etf_data.get('eth_funds', {})
+    # Ethereum ETF — صافي فقط
     eth_total = etf_data.get('eth_total', 0)
+    eth_dir = "إيجابي" if eth_total > 0 else ("سلبي" if eth_total < 0 else "تعادل")
+    eth_sign = "+" if eth_total > 0 else ""
+    msg += f"\n🔵 Ethereum ETF — {eth_dir} {eth_sign}{eth_total:.1f}M"
 
-    msg += "\n🔵 Ethereum\n"
-    if eth_funds:
-        for name, flow in eth_funds.items():
-            if flow == 0:
-                continue
-            arrow = "📈" if flow > 0 else "📉"
-            sign = "+" if flow > 0 else ""
-            msg += f"  {arrow} {name}: {sign}{flow:.1f}M\n"
-    else:
-        arrow = "📈" if eth_total >= 0 else "📉"
-        sign = "+" if eth_total >= 0 else ""
-        msg += f"  {arrow} الصافي: {sign}{eth_total:.1f}M\n"
-
-    msg += "\n✉️ @newscrypto1m"
+    msg += "\n\n✉️ @newscrypto1m"
     return msg
 
 

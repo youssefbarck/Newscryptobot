@@ -146,6 +146,14 @@ class SemanticDeduplicator:
 # ═══════════════════════════════════════════════════════════
 # 🎯 Scoring Engine
 # ═══════════════════════════════════════════════════════════
+# كلمات إنجليزية شائعة تُسبب false positives — تحتاج uppercase أو سياق كريبتو واضح
+_AMBIGUOUS_COINS = {
+    "near", "op", "sol", "dot", "link", "apt", "sei", "ton",
+    "mat", "avax", "arb", "run", "sui", "sea", "top", "fit",
+    "meta", "atom", "one", "all", "sun", "moon", "star", "es",
+}
+
+
 class NewsScorer:
     """محرك تقييم أهمية الخبر"""
 
@@ -199,14 +207,29 @@ class NewsScorer:
 
         return min(score, 10.0), categories
 
-    def extract_coins(self, text: str) -> List[str]:
-        """استخراج العملات بدقة"""
-        text_lower = text.lower()
+    def extract_coins(self, text: str, original: str = "") -> List[str]:
+        """استخراج العملات بدقة — كلمات مبهمة تحتاج uppercase أو سياق كريبتو"""
+        original = original or text
+        text_lower = text.lower() if text != text.lower() else text
         found = set()
         # ترتيب: الأطول أولاً
         for keyword, symbol in sorted(COIN_MAP.items(), key=lambda x: len(x[0]), reverse=True):
             pattern = re.compile(r'\b' + re.escape(keyword) + r'\b', re.IGNORECASE)
             if pattern.search(text_lower):
+                kw_lower = keyword.lower()
+                # كلمات مبهمة: تتطلب uppercase في النص الأصلي أو سياق كريبتو واضح
+                if kw_lower in _AMBIGUOUS_COINS:
+                    has_context = (
+                        re.search(rf'\b{re.escape(kw_lower.upper())}\b', original)
+                        or f'${kw_lower.upper()}' in original
+                        or f'#{kw_lower.upper()}' in original
+                        or f'{kw_lower} protocol' in text_lower
+                        or f'{kw_lower} token' in text_lower
+                        or f'{kw_lower} blockchain' in text_lower
+                        or f'{kw_lower} network' in text_lower
+                    )
+                    if not has_context:
+                        continue
                 found.add(symbol)
         return sorted(found)
 
@@ -280,6 +303,7 @@ def process_news_item(item: NewsItem) -> Optional[NewsItem]:
     يعيد None إذا لم يمر بالفلترة
     """
     text = f"{item.title} {item.summary}".lower()
+    text_original = f"{item.title} {item.summary}"
 
     # (1) فحص التكرار
     if _deduplicator.is_duplicate(item):
@@ -303,8 +327,8 @@ def process_news_item(item: NewsItem) -> Optional[NewsItem]:
     item.score = score
     item.categories = categories
 
-    # (6) استخراج العملات
-    item.coins = _scorer.extract_coins(text)
+    # (6) استخراج العملات — مع تمرير النص الأصلي للفحص السياقي
+    item.coins = _scorer.extract_coins(text, original=text_original)
 
     # (7) التسجيل في deduplicator
     _deduplicator.add(item)

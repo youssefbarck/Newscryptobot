@@ -260,11 +260,6 @@ BAD_LINES = [
     "✉️",
 ]
 
-BAD_HASHTAGS = {
-    "#near",
-    "#op",
-}
-
 
 def _normalize_text(text: str) -> str:
     text = text.strip()
@@ -314,9 +309,8 @@ def clean_news(raw: str) -> str:
         # جمع الهاشتاغات
         if line.startswith("#"):
             tag = line.lower()
-            if tag not in BAD_HASHTAGS:
-                if tag not in hashtags:
-                    hashtags.append(line)
+            if tag not in hashtags:
+                hashtags.append(line)
             continue
 
         # أول عنوان

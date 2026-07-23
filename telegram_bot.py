@@ -271,6 +271,13 @@ _ARABIC_MARKERS = re.compile(
     re.MULTILINE
 )
 
+# عبارات إسناد بدون رابط — يجب إزالتها إن لم يكن هناك مصدر محدد
+_ATTRIBUTION_PATTERNS = [
+    re.compile(r'وفقا\s+ل(?:يَ?)\s+[^\.\n]+', re.IGNORECASE),
+    re.compile(r'بحسب\s+[^\.\n]+', re.IGNORECASE),
+    re.compile(r'وفق\s+[^\.\n]+', re.IGNORECASE),
+]
+
 
 def final_editorial_review(text: str) -> Optional[str]:
     """آخر طبقة أمان قبل إرسال الخبر إلى تيليجرام.
@@ -310,6 +317,12 @@ def final_editorial_review(text: str) -> Optional[str]:
 
         # 2. حذف الوسوم العربية (المصدر: ... / كتابة: ...)
         stripped = _ARABIC_MARKERS.sub('', stripped).strip()
+        if not stripped:
+            continue
+
+        # 2b. حذف عبارات إسناد بدون مصدر محدد (وفقاً ل... / بحسب...)
+        for pat in _ATTRIBUTION_PATTERNS:
+            stripped = pat.sub('', stripped).strip()
         if not stripped:
             continue
 
@@ -431,28 +444,50 @@ def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]
 
 
 def format_etf_flows(etf_data: Dict) -> str:
-    """تنسيق بيانات ETF"""
-    btc_sign = "+" if etf_data['btc_total'] >= 0 else ""
-    eth_sign = "+" if etf_data['eth_total'] >= 0 else ""
-    btc_emoji = "📈" if etf_data['btc_total'] >= 0 else "📉"
-    eth_emoji = "📈" if etf_data['eth_total'] >= 0 else "📉"
+    """تنسيق بيانات ETF — مبسّط: اسم الصندوق + الإشارة + التاريخ والوقت"""
+    from config import tz
 
-    msg = f"📊 صافي تدفقات صناديق ETF — {etf_data['date']}\n\n"
-    msg += f"{btc_emoji} Bitcoin ETF: {btc_sign}{etf_data['btc_total']:.1f} مليون $"
+    msg = "📊 تدفقات صناديق ETF\n"
 
-    top_btc = sorted(etf_data['btc_funds'].items(), key=lambda x: -x[1])[:3]
-    btc_parts = [f"{t} {v:+.1f}M" for t, v in top_btc if v != 0]
-    if btc_parts:
-        msg += f"  ({', '.join(btc_parts)})"
-    msg += "\n"
+    # التاريخ والوقت
+    now = datetime.now(tz)
+    msg += f"📅 {etf_data['date']}  ⏰ {now.strftime('%H:%M')}\n\n"
 
-    msg += f"{eth_emoji} Ethereum ETF: {eth_sign}{etf_data['eth_total']:.1f} مليون $"
-    top_eth = sorted(etf_data['eth_funds'].items(), key=lambda x: -x[1])[:3]
-    eth_parts = [f"{t} {v:+.1f}M" for t, v in top_eth if v != 0]
-    if eth_parts:
-        msg += f"  ({', '.join(eth_parts)})"
-    msg += "\n\n✉️ @newscrypto1m"
+    # Bitcoin ETF
+    btc_funds = etf_data.get('btc_funds', {})
+    btc_total = etf_data.get('btc_total', 0)
 
+    msg += "🟠 Bitcoin\n"
+    if btc_funds:
+        for name, flow in btc_funds.items():
+            if flow == 0:
+                continue
+            arrow = "📈" if flow > 0 else "📉"
+            sign = "+" if flow > 0 else ""
+            msg += f"  {arrow} {name}: {sign}{flow:.1f}M\n"
+    else:
+        arrow = "📈" if btc_total >= 0 else "📉"
+        sign = "+" if btc_total >= 0 else ""
+        msg += f"  {arrow} الصافي: {sign}{btc_total:.1f}M\n"
+
+    # Ethereum ETF
+    eth_funds = etf_data.get('eth_funds', {})
+    eth_total = etf_data.get('eth_total', 0)
+
+    msg += "\n🔵 Ethereum\n"
+    if eth_funds:
+        for name, flow in eth_funds.items():
+            if flow == 0:
+                continue
+            arrow = "📈" if flow > 0 else "📉"
+            sign = "+" if flow > 0 else ""
+            msg += f"  {arrow} {name}: {sign}{flow:.1f}M\n"
+    else:
+        arrow = "📈" if eth_total >= 0 else "📉"
+        sign = "+" if eth_total >= 0 else ""
+        msg += f"  {arrow} الصافي: {sign}{eth_total:.1f}M\n"
+
+    msg += "\n✉️ @newscrypto1m"
     return msg
 
 

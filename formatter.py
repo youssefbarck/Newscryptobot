@@ -6,6 +6,7 @@
 كل نوع خبر له قالب خاص بالتنسيق والهاشتاقات
 """
 
+import re
 import time
 from typing import Dict, List, Optional, Set
 
@@ -227,12 +228,29 @@ def _get_economic_indicator(facts: ExtractedFacts) -> Dict[str, str]:
 # 📝 قوالب التنسيق
 # ═══════════════════════════════════════════════════════════
 
+def _is_duplicate_content(headline: str, body: str) -> bool:
+    """فحص هل المحتوى مكرر كالعنوان (تشابه > 60%)"""
+    if not headline or not body:
+        return False
+    words_h = set(re.findall(r'[\w\u0600-\u06FF]+', headline.lower()))
+    words_b = set(re.findall(r'[\w\u0600-\u06FF]+', body.lower()))
+    if not words_h or not words_b:
+        return False
+    common = words_h & words_b
+    return len(common) / min(len(words_h), len(words_b)) > 0.6
+
+
 def _format_general(item: NewsItem) -> str:
     """قالب A — أخبار عامة (GENERAL, LISTING, PARTNERSHIP, ...)"""
     headline = item.title_ar or item.title
     body = item.summary_ar or ""
     hashtags = _build_hashtags(item)
     channel = cfg.WATERMARK_TEXT
+
+    # طبقة حماية: منع تكرار المحتوى إذا تطابق مع العنوان
+    if body and _is_duplicate_content(headline, body):
+        log.debug(f"⏭️ formatter: حذف محتوى مكرر [hash={item.hash}]")
+        body = ""
 
     parts: List[str] = [f"🔵 {headline}"]
     if body:
@@ -250,6 +268,10 @@ def _format_hack(item: NewsItem) -> str:
     body = item.summary_ar or ""
     hashtags = _build_hashtags(item)
     channel = cfg.WATERMARK_TEXT
+
+    # طبقة حماية: منع تكرار المحتوى
+    if body and _is_duplicate_content(headline, body):
+        body = ""
 
     parts: List[str] = [f"🔴 {headline}"]
 
@@ -280,6 +302,10 @@ def _format_etf(item: NewsItem) -> str:
     hashtags = _build_hashtags(item)
     channel = cfg.WATERMARK_TEXT
 
+    # طبقة حماية: منع تكرار المحتوى
+    if body and _is_duplicate_content(headline, body):
+        body = ""
+
     parts: List[str] = [f"📊 {headline}"]
 
     # تفاصيل التدفقات إن وُجدت
@@ -308,6 +334,11 @@ def _format_economic(item: NewsItem) -> str:
     indicator = _get_economic_indicator(item.facts)
     body = item.summary_ar or ""
     hashtags = _build_hashtags(item)
+
+    # طبقة حماية: منع تكرار المحتوى
+    headline_temp = item.title_ar or item.title or ""
+    if body and _is_duplicate_content(headline_temp, body):
+        body = ""
 
     parts: List[str] = []
 

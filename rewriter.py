@@ -226,14 +226,197 @@ def _build_prompt(item: NewsItem) -> str:
         f"العنوان: {title}\n"
         f"المحتوى: {summary}\n\n"
         f"القواعد:\n"
-        f"1. اكتب فقط: عنوان + فقرة واحدة مختصرة (3-5 جمل)\n"
+        f"1. اكتب فقط: عنوان قصير جداً (سطر واحد فقط، أقل من 15 كلمة) + فقرة واحدة مختصرة (3-5 جمل)\n"
         f"2. لا تضف تعليقات أو تحليلات شخصية\n"
-        f"3. لا تذكر اسم المصدر في النص\n"
+        f"3. لا تذكر اسم المصدر في النص (لا تقل 'وفقاً لمصادر' أو 'بحسب تقرير')\n"
         f"4. احتفظ بأسماء الأشخاص والشركات والعملات كما هي (لا تترجمها)\n"
-        f"5. لا تضيف هاشتاغ أو إيموجي\n"
-        f'6. أعد النتيجة كـ JSON فقط:\n{{"headline": "...", "body": "..."}}'
+        f"5. لا تضيف هاشتاغ أو إيموجي أو تسميات مثل 'أخبار عاجلة'\n"
+        f"6. لا تستخدم أي كلمة إنجليزية إلا أسماء العملات والشركات (مثل BTC, BlackRock)\n"
+        f"7. العنوان يجب أن يكون مختلفاً تماماً عن المحتوى — لا تكرر نفس الجمل أو الكلمات\n"
+        f'8. أعد النتيجة كـ JSON فقط:\n{{"headline": "...", "body": "..."}}'
     )
     return prompt
+
+
+# ═══════════════════════════════════════════════════════════════
+# 🧹 تنظيف النص المُترجم — طبقة حماية إضافية بعد الترجمة
+# ═══════════════════════════════════════════════════════════════
+
+# أنماط تسريبات التصنيف من AI (في النص العربي)
+_RE_FORMAT_LABELS_AR = re.compile(
+    r"(?:"
+    r"أخبار عاجلة|أخبار عامة|أخبار الكريبتو|أخبار العملات المشفرة|"
+    r"تقرير تحليلي|تقرير خاص|ملخص الأخبار|تحديث السوق|"
+    r"منشور الأخبار العاجلة|أخبار مستعجلة|عاجل جداً|"
+    r"آخر الأخبار|أحدث الأخبار|آخر المستجدات"
+    r")[\s:]*",
+    re.IGNORECASE,
+)
+
+# أنماط تسريبات المصادر في النص العربي
+_RE_SOURCE_LEAKS_AR = re.compile(
+    r"(?:"
+    r"وفقاً\s+ل(?:ـ)?\s*(?:تقرير|مصادر?|المصادر?|التقارير?|وسائل\s+الإعلام)|"
+    r"وفق[اًا]\s+ل(?:ـ)?\s*(?:تقرير|مصادر?|المصادر?|التقارير?)|"
+    r"كشفت?\s+(?:المصادر?|التقارير?|وسائل\s+الإعلام)\s+(?:عن|أن)|"
+    r"أفادت?\s+(?:المصادر?|التقارير?)\s+(?:عن|أن)|"
+    r"أكدت?\s+(?:المصادر?|التقارير?)|"
+    r"ذكرت?\s+(?:المصادر?|التقارير?|وسائل\s+الإعلام)|"
+    r"نقلت?\s+(?:عن|وكالات|الأنباء)|"
+    r"أشارت?\s+(?:المصادر?|التقارير?|لـ)|"
+    r"بحسب\s+(?:تقرير|مصدر|المصادر?|التقارير?)"
+    r")[\s:,،.]*",
+    re.IGNORECASE,
+)
+
+# أنماط تسريبات المصادر في النص الإنجليزي (إن بقيت كلمات إنجليزية)
+_RE_SOURCE_LEAKS_EN_IN_AR = re.compile(
+    r"(?:"
+    r"According\s+to\s+(?:a\s+)?(?:report|sources?|analysts?|data)|"
+    r"Reported\s+by|"
+    r"(?:said|reported|announced|revealed|stated|confirmed)\s+by"
+    r")[\s:,]*",
+    re.IGNORECASE,
+)
+
+# أنماط أسماء المصادر المعروفة في النص المُترجم
+_RE_KNOWN_SOURCES_IN_TEXT = re.compile(
+    r"(?:"
+    r"CoinDesk|Cointelegraph|Blockworks|Decrypt|"
+    r"BeInCrypto|Crypto\.News|CoinPedia|Bitcoinist|"
+    r"The\s+Block|Bitcoin\s+Magazine|Bloomberg|Reuters|"
+    r"CNBC|Forbes|CoinMarketCap|CoinGecko"
+    r")[\s:,]",
+    re.IGNORECASE,
+)
+
+# هاشتاقات مُضمّنة في النص (سيعيد formatter بناءها)
+_RE_EMBEDDED_HASHTAGS = re.compile(r"#\w+")
+
+# إيموجي زائدة (formatter يضيفها في بداية السطر)
+_RE_EMOJI_PREFIX = re.compile(
+    r"^[\U0001F300-\U0001F9FF\U00002600-\U000027BF\U0001FA00-\U0001FA9F"
+    r"\U0001FAD0-\U0001FAFF\u2702\u2705\u274c\u274e\u2753-\u2757"
+    r"\u2763\u2764\u2795-\u2797\u2b50\u2b55\u2b1b\u2b1c"
+    r"\ufe0f]{1,4}\s+",
+)
+
+# أقواس مربعة وعلامات markdown
+_RE_BRACKETS_MARKDOWN = re.compile(
+    r"(?:\[.*?\]|\(.*?\))",
+)
+
+# كلمات إنجليزية غير مسموحة (≥ 4 أحرف) — تُزال من النص العربي
+# نستخدم نفس ALLOWED_ENGLISH_TERMS أعلاه
+
+
+def _text_similarity(a: str, b: str) -> float:
+    """حساب تشابه نصين بناءً على الكلمات المشتركة"""
+    if not a or not b:
+        return 0.0
+    words_a = set(re.findall(r'[\w\u0600-\u06FF]+', a.lower()))
+    words_b = set(re.findall(r'[\w\u0600-\u06FF]+', b.lower()))
+    if not words_a or not words_b:
+        return 0.0
+    common = words_a & words_b
+    return len(common) / min(len(words_a), len(words_b))
+
+
+def _clean_translated_text(headline: str, body: str) -> Tuple[str, str]:
+    """
+    طبقة تنظيف نهائية AFTER الترجمة.
+    تُنفّذ على النص العربي المُترجم قبل التنسيق.
+
+    تحل 5 مشاكل:
+    1. تسرب تصنيف المنشور ("أخبار عاجلة: ...")
+    2. تسرب أسماء المصادر ("وفقاً لمصادر..." / "CoinDesk")
+    3. كلمات إنجليزية فاسدة (market, exchange, platform)
+    4. هاشتاقات مُضمّنة (#بيتكوين) — formatter يبنيها
+    5. إيموجي زائدة — formatter يضيفها
+    """
+    # ── تنظيف العنوان ──
+    headline = _clean_one_line(headline)
+
+    # ── تنظيف المحتوى ──
+    body_lines = body.split("\n")
+    cleaned_lines = []
+    for line in body_lines:
+        line = _clean_one_line(line)
+        if line.strip():
+            cleaned_lines.append(line)
+    body = "\n".join(cleaned_lines)
+
+    # تنظيف المسافات الأخيرة
+    headline = headline.strip()
+    body = body.strip()
+
+    # فحص تكرار العنوان في المحتوى — طبقة حماية أساسية
+    if headline and body:
+        similarity = _text_similarity(headline, body)
+        if similarity > 0.6:
+            log.debug(f"⏭️ تشابه headline/body: {similarity:.0%} — حذف المحتوى المكرر")
+            body = ""
+
+    return headline, body
+
+
+def _clean_one_line(text: str) -> str:
+    """تنظيف سطر واحد من النص المُترجم"""
+    if not text:
+        return text
+
+    original = text
+
+    # 1️⃣ إزالة تسميات التصنيف العربي
+    text = _RE_FORMAT_LABELS_AR.sub("", text)
+
+    # 2️⃣ إزالة تسريبات المصادر العربية
+    text = _RE_SOURCE_LEAKS_AR.sub("", text)
+
+    # 2️⃣b إزالة تسريبات المصادر الإنجليزية
+    text = _RE_SOURCE_LEAKS_EN_IN_AR.sub("", text)
+
+    # 2️⃣c إزالة أسماء المصادر المعروفة
+    text = _RE_KNOWN_SOURCES_IN_TEXT.sub("", text)
+
+    # 3️⃣ إزالة الكلمات الإنجليزية غير المسموحة
+    text = _remove_unwanted_english_words(text)
+
+    # 4️⃣ إزالة الهاشتاقات المُضمّنة
+    text = _RE_EMBEDDED_HASHTAGS.sub("", text)
+
+    # 5️⃣ إزالة الإيموجي من بداية السطر
+    text = _RE_EMOJI_PREFIX.sub("", text)
+
+    # 6️⃣ إزالة أقواس وعلامات markdown
+    text = _RE_BRACKETS_MARKDOWN.sub("", text)
+
+    # تنظيف المسافات والفواصل المتروكة
+    text = re.sub(r"\s*[.,،؛]\s*\.", ".", text)
+    text = re.sub(r"^[.,،؛]\s+", "", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    text = re.sub(r"^\s*[-–—:،]\s*", "", text)
+    text = text.strip()
+
+    if text != original:
+        log.debug(f"_clean_translated: '{original[:50]}...' → '{text[:50]}...'")
+
+    return text
+
+
+def _remove_unwanted_english_words(text: str) -> str:
+    """
+    إزالة الكلمات الإنجليزية غير المسموحة من النص العربي.
+    كلمة إنجليزية = ≥ 4 أحرف لاتينية متتالية.
+    """
+    def _replace_word(match):
+        word = match.group(0)
+        if word.upper() in ALLOWED_ENGLISH_TERMS:
+            return word  # مسموحة
+        return ""  # غير مسموحة → حذف
+
+    text = re.sub(r"\b[a-zA-Z]{4,}\b", _replace_word, text)
+    return text
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -565,6 +748,8 @@ async def _rewrite_with_ai(item: NewsItem, entity_map: Dict[str, str]) -> Option
             headline, body = result
             headline = _restore_entities(headline, entity_map)
             body = _restore_entities(body, entity_map)
+            # طبقة التنظيف بعد الترجمة
+            headline, body = _clean_translated_text(headline, body)
             ok, reason = _check_quality(headline, body)
             if ok:
                 return headline, body
@@ -581,6 +766,8 @@ async def _rewrite_with_ai(item: NewsItem, entity_map: Dict[str, str]) -> Option
             headline, body = result
             headline = _restore_entities(headline, entity_map)
             body = _restore_entities(body, entity_map)
+            # طبقة التنظيف بعد الترجمة
+            headline, body = _clean_translated_text(headline, body)
             ok, reason = _check_quality(headline, body)
             if ok:
                 return headline, body
@@ -597,6 +784,8 @@ async def _rewrite_with_ai(item: NewsItem, entity_map: Dict[str, str]) -> Option
             headline, body = result
             headline = _restore_entities(headline, entity_map)
             body = _restore_entities(body, entity_map)
+            # طبقة التنظيف بعد الترجمة
+            headline, body = _clean_translated_text(headline, body)
             ok, reason = _check_quality(headline, body)
             if ok:
                 return headline, body
@@ -660,6 +849,8 @@ async def rewrite_news(item: NewsItem) -> NewsItem:
         )
         if translated:
             headline, body = translated
+            # طبقة التنظيف بعد الترجمة — حتى لـ Google Translate
+            headline, body = _clean_translated_text(headline, body)
             item.title_ar = headline
             item.summary_ar = body
             elapsed = time.time() - start

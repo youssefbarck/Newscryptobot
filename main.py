@@ -14,7 +14,7 @@ from config import (
     cfg, state, log, tz, load_sent_hashes, save_sent_hashes,
     load_settings, save_settings, is_channel_enabled,
 )
-from models import NewsItem, PipelineStats, NewsType
+from models import NewsItem, PipelineStats, NewsType, OutgoingMessage
 from database import NewsDatabase, Analytics
 from collector import fetch_all_news, close_session
 from cleaner import clean_news_item
@@ -24,6 +24,16 @@ from classifier import classify_news, score_news, should_reject
 from rewriter import rewrite_news
 from formatter import format_news
 from publisher import MessageQueue, send_to_telegram
+
+
+# خريطة أنواع الأخبار بالعربية (لرسائل المالك)
+_NEWS_TYPE_AR = {
+    "etf": "صناديق ETF", "hack": "اختراق", "listing": "إدراج",
+    "partnership": "شراكة", "regulation": "تنظيم", "macro": "اقتصاد كلي",
+    "on_chain": "أون-تشين", "technical_analysis": "تحليل فني",
+    "funding": "تمويل", "stablecoin": "عملات مستقرة", "general": "أخبار عامة",
+    "economic_data": "بيانات اقتصادية", "adoption": "اعتماد",
+}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -292,19 +302,24 @@ class NewsPipeline:
 
                     # إرسال للقناة
                     if is_channel_enabled():
-                        channel_msg = format_news(item)
-                        if channel_msg:
-                            channel_msg.chat_id = cfg.CHANNEL_ID
-                            await self.message_queue.put(channel_msg)
+                        channel_msg = OutgoingMessage(
+                            text=msg.text,
+                            image_url=msg.image_url,
+                            chat_id=cfg.CHANNEL_ID,
+                            priority=msg.priority,
+                        )
+                        await self.message_queue.put(channel_msg)
 
                     # إرسال نسخة للمالك مع معلومات التقييم
                     if cfg.CHAT_ID:
-                        score_info = f"\n📊 [{item.score}/100] {item.news_type.value}"
-                        owner_msg = format_news(item)
-                        if owner_msg:
-                            owner_msg.chat_id = cfg.CHAT_ID
-                            owner_msg.text = owner_msg.text + score_info
-                            await self.message_queue.put(owner_msg)
+                        type_ar = _NEWS_TYPE_AR.get(item.news_type.value, "")
+                        owner_msg = OutgoingMessage(
+                            text=msg.text + f"\n📊 [{item.score}/100] {type_ar}",
+                            image_url=msg.image_url,
+                            chat_id=cfg.CHAT_ID,
+                            priority=msg.priority,
+                        )
+                        await self.message_queue.put(owner_msg)
 
                     self.analytics.record_published(item.source, item.news_type.value, item.score)
                     stats.published += 1

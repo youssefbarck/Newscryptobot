@@ -4,7 +4,7 @@
 بوت متقدم مع queues، rate limiting، و image processing فعال
 """
 
-import os, time, json, asyncio, hashlib
+import os, re, time, json, asyncio, hashlib
 from datetime import datetime
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass, field

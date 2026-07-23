@@ -21,7 +21,7 @@ import dedup
 from filters import NewsItem, filter_news_items, is_complete_news
 from rss import fetch_all_news, fetch_etf_flows, session_manager
 from translate import TranslationManager, translation_cache
-import daily_report
+# daily_report.py — تم إزالته (وحدة مستقلة لم تعد مطلوبة)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -253,6 +253,123 @@ async def message_consumer(config: BotConfig, state: BotState):
 
 
 # ═══════════════════════════════════════════════════════════
+# 🔍 Final Editorial Review (آخر طبقة أمان قبل الإرسال)
+# ═══════════════════════════════════════════════════════════
+
+# أسماء مصادر محظورة — لا يجب أن تظهر في الخبر المنشور
+_BLOCKED_SOURCES = {
+    "benzinga", "coindesk", "cointelegraph", "beincrypto",
+    "decrypt", "cryptobriefing", "blockworks", "thedefiant",
+    "bitcoinist", "cryptopotato", "newsbtc", "u.today",
+}
+
+# وسوم عربية يجب إزالتها من النص النهائي
+_ARABIC_MARKERS = re.compile(
+    r'(?:\s*)?'
+    r'(?:الخبر|المصدر|كتابة|تحرير|نشر|إعداد|ترجمة)'
+    r'(?:\s*[::\-])?\s*.*$',
+    re.MULTILINE
+)
+
+
+def final_editorial_review(text: str) -> Optional[str]:
+    """آخر طبقة أمان قبل إرسال الخبر إلى تيليجرام.
+
+    وظائفها:
+    1. إزالة أي تكرار بقي بعد الترجمة
+    2. إزالة أي جملة فارغة أو تكرار العنوان في النص
+    3. حذف أسماء المصادر الإنجليزية إن تسربت
+    4. توحيد الهاشتاغ (حرف كبير، بدون تكرار)
+    5. حذف الوسوم العربية الزائدة
+    6. التأكد من بنية صحيحة: عنوان واحد + نص
+    """
+    if not text or not text.strip():
+        return None
+
+    lines = text.strip().split("\n")
+    cleaned = []
+    seen_lines = set()
+    headline = None
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            # لا أكثر من سطر فارغ متتالي
+            if cleaned and cleaned[-1] != "":
+                cleaned.append("")
+            continue
+
+        # 1. حذف أسماء المصادر الإنجليزية
+        lower = stripped.lower()
+        if any(src in lower for src in _BLOCKED_SOURCES):
+            # لا تحذف السطر كله — فقط نظّفه من اسم المصدر
+            for src in _BLOCKED_SOURCES:
+                stripped = re.sub(rf'\b{re.escape(src)}\b', '', stripped, flags=re.IGNORECASE).strip()
+            if not stripped:
+                continue
+
+        # 2. حذف الوسوم العربية (المصدر: ... / كتابة: ...)
+        stripped = _ARABIC_MARKERS.sub('', stripped).strip()
+        if not stripped:
+            continue
+
+        # 3. إزالة التكرار
+        norm = re.sub(r'\s+', ' ', stripped).lower()
+        if norm in seen_lines:
+            continue
+        seen_lines.add(norm)
+
+        # 4. كشف العنوان (أول سطر فيه رمز)
+        if headline is None and (stripped.startswith("🔵") or stripped.startswith("🚨") or stripped.startswith("🔴") or stripped.startswith("⚪") or stripped.startswith("📊")):
+            headline = stripped
+            cleaned.append(stripped)
+            continue
+
+        # 5. حذف تكرار العنوان في النص
+        if headline:
+            h_clean = headline.lstrip("🔵🚨🔴⚪📊 ").strip()
+            s_clean = stripped.lstrip("0123456789.-) ").strip()
+            if h_clean.lower() == s_clean.lower():
+                continue
+            # فحص احتواء جزئي (أكثر من 80% تطابق)
+            shorter = min(len(h_clean), len(s_clean))
+            if shorter > 10:
+                common = sum(a == b for a, b in zip(h_clean.lower(), s_clean.lower()))
+                if common / shorter > 0.8:
+                    continue
+
+        cleaned.append(stripped)
+
+    # 6. توحيد الهاشتاغات في النهاية
+    result_lines = []
+    hashtags = []
+    for line in cleaned:
+        if re.match(r'^#\w+', line.strip()):
+            tag = line.strip().upper()  # توحيد: أحرف كبيرة
+            if tag not in hashtags:
+                hashtags.append(tag)
+            continue
+        result_lines.append(line)
+
+    # إضافة الهاشتاغات الموحدة
+    if hashtags:
+        if result_lines and result_lines[-1] != "":
+            result_lines.append("")
+        result_lines.extend(hashtags)
+
+    result = "\n".join(result_lines).strip()
+
+    # 7. فحص نهائي: يجب أن يكون هناك عنوان
+    if not headline and not result:
+        return None
+
+    # 8. حذف سطور فارغة متعددة
+    result = re.sub(r'\n{3,}', '\n\n', result)
+
+    return result if len(result) > 10 else None
+
+
+# ═══════════════════════════════════════════════════════════
 # 📝 News Formatting
 # ═══════════════════════════════════════════════════════════
 def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]:
@@ -398,6 +515,12 @@ async def scan_news_loop(config: BotConfig, state: BotState, translator: Transla
                 # تنسيق
                 msg = format_news_item(item)
                 if not msg:
+                    continue
+
+                # طبقة الأمان الأخيرة: المراجعة التحريرية النهائية
+                msg = final_editorial_review(msg)
+                if not msg:
+                    log.info(f"   🧹 Blocked by editorial review: {item.title[:60]}")
                     continue
 
                 # إرسال
@@ -584,7 +707,6 @@ async def run_bot(config: BotConfig, state: BotState):
         asyncio.create_task(message_consumer(config, state)),
         asyncio.create_task(scan_news_loop(config, state, translator)),
         asyncio.create_task(daily_summary_loop(config, state)),
-        asyncio.create_task(daily_report.daily_report_loop(config, state)),
     ]
 
     try:
@@ -647,6 +769,12 @@ async def run_oneshot(config: BotConfig, state: BotState):
         if not msg:
             continue
 
+        # طبقة الأمان الأخيرة: المراجعة التحريرية النهائية
+        msg = final_editorial_review(msg)
+        if not msg:
+            print(f"   🧹 Blocked by editorial review: {item.title[:60]}")
+            continue
+
         # إرسال
         dedup.mark_sent(sent_hashes, item.hash)
 
@@ -671,12 +799,6 @@ async def run_oneshot(config: BotConfig, state: BotState):
                 print(f"  📊 ETF flows: {etf['date']}")
     except Exception as e:
         print(f"  ⚠️ ETF error: {e}")
-
-    # التقرير اليومي (إن كان ضمن النافذة 3:00-3:30)
-    try:
-        await daily_report.send_report_if_due(config, state)
-    except Exception as e:
-        print(f"  ⚠️ Daily report error: {e}")
 
     # حفظ الهاشات (محلي + commit للريبو)
     dedup.save_to_repo(sent_hashes)

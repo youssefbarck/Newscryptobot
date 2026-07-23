@@ -16,10 +16,21 @@ from typing import Optional, Tuple, Dict, List
 
 import aiohttp
 
-from config import log, BotConfig
+from config import log, BotConfig, COIN_MAP
 
 
 from source_quality import source_quality
+
+
+# ═══════════════════════════════════════════════════════════
+# 🔗 خريطة عكسية: اسم العملة ← رمزها (لمنع التكرار)
+# ═══════════════════════════════════════════════════════════
+COIN_NAME_TO_TICKER = {}
+for _kw, _sym in COIN_MAP.items():
+    COIN_NAME_TO_TICKER[_kw.lower()] = _sym.upper()
+# إزالة التعارضات: احتفظ بالأطول أولاً
+for _kw in sorted(COIN_NAME_TO_TICKER, key=len, reverse=True):
+    COIN_NAME_TO_TICKER[_kw] = COIN_NAME_TO_TICKER[_kw]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -576,6 +587,34 @@ Each paragraph: 1-2 sentences maximum.
 Every sentence must contain a concrete fact.
 If a sentence has no fact, delete it.
 
+BODY METADATA CLEANUP
+
+Never include RSS metadata in the body.
+These are metadata, not article content:
+- ظهر لأول مرة على
+- نُشر في
+- حسبما أفادت
+- بحسب موقع
+- كما نشرته
+- منشور الأخبار
+
+Delete any sentence that is pure metadata.
+
+TRANSLITERATION SAFETY
+
+Never transliterate proper nouns into Arabic
+using non-Arabic scripts (Telugu, Devanagari, etc.).
+
+If a name cannot be written in Arabic correctly,
+keep the English name unchanged.
+
+Examples:
+Wrong: غ్రేస్కేల (Telugu script)
+Correct: Grayscale (keep English)
+
+Wrong: بلاك روك (invented transliteration)
+Correct: BlackRock (keep English)
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 HEADLINE RULES
@@ -587,6 +626,20 @@ Headline:
 - informative
 - no clickbait
 - maximum 15 words
+
+HEADLINE CLEANUP
+
+Never prefix the headline with:
+- الأخبار العاجلة
+- عاجل
+- منشور الأخبار العاجلة
+- خبر عاجل
+- إلحاحي
+- flash
+
+The importance field controls the emoji (🚨🔴🔵⚪).
+The headline itself must state the FACT only.
+No labels, no prefixes, no metadata.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1152,24 +1205,91 @@ class TranslationManager:
         missing = [n for n in entities if n not in translated_lower]
         return len(missing) == 0, missing
 
+    # أسماء إنجليزية مسموحة في النص العربي
+    _ALLOWED_ENGLISH = frozenset({
+        "Bitcoin", "Ethereum", "Solana", "Binance", "Coinbase", "USDT", "USDC",
+        "Solana", "Cardano", "Ripple", "BlackRock", "MicroStrategy", "Grayscale",
+        "Fidelity", "SEC", "ETF", "DeFi", "NFT", "Web3", "Near", "Op",
+        "BitMEX", "CoinDesk", "Cointelegraph", "BeInCrypto", "Decrypt", "Blockworks",
+        "Vitalik", "Satoshi", "Saylor", "Gensler", "Dorsey", "Buterin", "CZ",
+        "Litecoin", "Dogecoin", "Avalanche", "Polkadot", "Chainlink", "Polygon",
+        "Tron", "Uniswap", "Aptos", "Arbitrum", "Optimism", "Stellar", "Hedera",
+        "Cosmos", "Fantom", "Aave", "Tether", "Circle", "OKX", "Kraken", "Bybit",
+        "Ripple", "Shiba", "Pepe", "Toncoin", "Hedera", "Near", "Sui", "Sei",
+        "IBIT", "FBTC", "ARKK", "GBTC", "ETHA", "HODL", "ETH",
+        "BTC", "XRP", "BNB", "ADA", "DOGE", "AVAX", "DOT", "LINK", "POL",
+        "LTC", "TRX", "UNI", "APT", "ARB", "SUI", "SEI", "TON", "FTM",
+        "ATOM", "XLM", "HBAR", "SHIB", "PEPE", "DAI",
+    })
+
+    # سكريبتات يونيكود ممنوعة (ليست عربية ولا لاتينية)
+    _WRONG_SCRIPTS = re.compile(
+        r'[\u0C00-\u0C7F\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F'
+        r'\u0B00-\u0B7F\u0E00-\u0E7F\u1000-\u109F\u0D00-\u0D7F'
+        r'\u0A80-\u0AFF\u0B80-\u0BFF\u0C80-\u0CFF\u0D80-\u0DFF]'
+    )
+
     def _is_quality_good(self, text: str) -> bool:
-        """التحقق من جودة النص العربي"""
+        """التحقق من جودة النص العربي — فحص شامل
+
+        يكشف:
+        1. نسبة العربية المنخفضة
+        2. سكريبتات يونيكود خاطئة (Telugu, Devanagari...)
+        3. كلمات إنجليزية مشبوهة
+        4. بادئات عناوين ممنوعة
+        5. تسرب أسماء المصادر
+        """
         if not text or len(text) < 5:
             return False
 
+        # (1) فحص السكريبتات الخاطئة — Telugu, Devanagari, إلخ
+        wrong_chars = self._WRONG_SCRIPTS.findall(text)
+        if wrong_chars:
+            log.warning(f"Wrong Unicode script detected: {len(wrong_chars)} chars")
+            return False
+
+        # (2) نسبة العربية
         arabic_chars = sum(1 for c in text if '\u0600' <= c <= '\u06FF')
         if len(text) > 20 and arabic_chars / len(text) < 0.25:
             log.warning(f"Low Arabic ratio: {arabic_chars/len(text)*100:.0f}%")
             return False
 
-        # فحص كلمات إنجليزية مشبوهة
-        english_words = re.findall(r'[a-zA-Z]{4,}', text)
-        allowed = {"Bitcoin", "Ethereum", "Binance", "Coinbase", "USDT", "USDC",
-                   "Solana", "Cardano", "Ripple", "BlackRock", "MicroStrategy",
-                   "SEC", "ETF", "DeFi", "NFT", "Web3", "Near", "Op"}
-        suspicious = [w for w in english_words if w not in allowed]
+        # (3) كلمات إنجليزية مشبوهة (ليست في القائمة المسموحة)
+        english_words = re.findall(r'[a-zA-Z]{3,}', text)
+        suspicious = [w for w in english_words if w not in self._ALLOWED_ENGLISH]
         if suspicious:
-            log.warning(f"Suspicious English words: {suspicious[:5]}")
+            log.warning(f"Blocked: suspicious English words: {suspicious[:5]}")
+            return False
+
+        # (4) بادئات عناوين ممنوعة
+        bad_prefixes = [
+            r'^الأخبار\s+العاجلة\s*:',
+            r'^عاجل\s*:',
+            r'^منشور\s+الأخبار\s+العاجلة\s*:',
+            r'^خبر\s+عاجل\s*:',
+        ]
+        for pat in bad_prefixes:
+            if re.search(pat, text):
+                log.warning(f"Blocked: forbidden headline prefix")
+                return False
+
+        return True
+
+    def _is_body_quality_good(self, body: str) -> bool:
+        """فحص جودة النص (body) — نفس معايير _is_quality_good"""
+        if not body or len(body) < 5:
+            return True  # body فارغ مسموح
+
+        # فحص السكريبتات الخاطئة
+        if self._WRONG_SCRIPTS.findall(body):
+            log.warning(f"Wrong Unicode script in body")
+            return False
+
+        # كلمات إنجليزية مشبوهة في body
+        english_words = re.findall(r'[a-zA-Z]{3,}', body)
+        suspicious = [w for w in english_words if w not in self._ALLOWED_ENGLISH]
+        if suspicious:
+            log.warning(f"Blocked: suspicious English in body: {suspicious[:5]}")
             return False
 
         return True
@@ -1218,7 +1338,7 @@ class TranslationManager:
                     if source_name:
                         source_quality.record_rejection(source_name, "Gemini rejected: corrupted_source")
                     return None
-                if self._is_quality_good(result["headline"]):
+                if self._is_quality_good(result["headline"]) and self._is_body_quality_good(result.get("body", "")):
                     check_text = result["headline"] + " " + result.get("body", "")
                     ok, missing = self._verify_entities(text, check_text)
 
@@ -1231,7 +1351,7 @@ class TranslationManager:
                                 if source_name:
                                     source_quality.record_rejection(source_name, "Gemini retry rejected: corrupted_source")
                                 return None
-                            if self._is_quality_good(retry["headline"]):
+                            if self._is_quality_good(retry["headline"]) and self._is_body_quality_good(retry.get("body", "")):
                                 await translation_cache.set(cache_key, retry)
                                 return retry
                         # فشل Retry → جرب الفولباكات
@@ -1242,14 +1362,14 @@ class TranslationManager:
         # ═══ الطبقة 2: Groq (نص خام) ═══
         if self.groq:
             result = await self.groq.translate(text)
-            if result and self._is_quality_good(result["headline"]):
+            if result and self._is_quality_good(result["headline"]) and self._is_body_quality_good(result.get("body", "")):
                 await translation_cache.set(cache_key, result)
                 return result
 
         # ═══ الطبقة 3: OpenRouter (نص خام) ═══
         if self.openrouter:
             result = await self.openrouter.translate(text)
-            if result and self._is_quality_good(result["headline"]):
+            if result and self._is_quality_good(result["headline"]) and self._is_body_quality_good(result.get("body", "")):
                 await translation_cache.set(cache_key, result)
                 return result
 
@@ -1289,13 +1409,16 @@ class TranslationManager:
         item.news_format = result.get("format", "standard")
         item.importance = result.get("importance", "medium")
 
-        # تحديث العملات من الهاشتاغ
+        # تحديث العملات من الهاشتاغ — مع dedup عبر COIN_NAME_TO_TICKER
         hashtag = result.get("hashtag", "")
         if hashtag:
             tag = hashtag.lstrip("#").upper()
-            existing_lower = [c.lower() for c in (item.coins or [])]
-            if tag.lower() not in existing_lower:
+            # خريطة: BITCOIN → BTC, ETHEREUM → ETH, إلخ
+            mapped_tag = COIN_NAME_TO_TICKER.get(tag.lower(), tag)
+            # فحص: هل العملة موجودة فعلاً (حتى لو باسم مختلف)؟
+            existing_mapped = {COIN_NAME_TO_TICKER.get(c.lower(), c.upper()) for c in (item.coins or [])}
+            if mapped_tag not in existing_mapped:
                 if item.coins:
-                    item.coins = item.coins + [tag]
+                    item.coins = item.coins + [mapped_tag]
                 else:
-                    item.coins = [tag]
+                    item.coins = [mapped_tag]

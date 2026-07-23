@@ -283,69 +283,161 @@ _VAGUE_ATTRIBUTIONS = [
 def final_editorial_review(text: str) -> Optional[str]:
     """آخر طبقة أمان قبل إرسال الخبر إلى تيليجرام.
 
-    وظائفها:
-    1. إزالة أي تكرار بقي بعد الترجمة
-    2. إزالة أي جملة فارغة أو تكرار العنوان في النص
-    3. حذف أسماء المصادر الإنجليزية إن تسربت
-    4. توحيد الهاشتاغ (حرف كبير، بدون تكرار)
-    5. حذف الوسوم العربية الزائدة
-    6. التأكد من بنية صحيحة: عنوان واحد + نص
+    طبقات الحماية:
+    1. كشف السكريبتات الخاطئة (Telugu, Devanagari...)
+    2. إزالة بادئات العناوين الممنوعة
+    3. إزالة تسرب أسماء المصادر
+    4. إزالة تكرار العنوان في النص
+    5. إزالة العبارات الإسناد المبهمة
+    6. كشف الكلمات الإنجليزية المدمجة (opcerations)
+    7. توحيد الهاشتاغات قبل التوقيع
+    8. منع تكرار الوسم لنفس العملة (#BTC + #BITCOIN)
     """
     if not text or not text.strip():
+        return None
+
+    # ═══ كشف السكريبتات الخاطئة ═══
+    _WRONG_SCRIPTS = re.compile(
+        r'[\u0C00-\u0C7F\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F'
+        r'\u0B00-\u0B7F\u0E00-\u0E7F\u1000-\u109F\u0D00-\u0D7F'
+        r'\u0A80-\u0AFF\u0B80-\u0BFF\u0C80-\u0CFF\u0D80-\u0DFF]'
+    )
+    if _WRONG_SCRIPTS.search(text):
+        log.warning("   🧹 Editorial: wrong Unicode script — blocked")
         return None
 
     lines = text.strip().split("\n")
     cleaned = []
     seen_lines = set()
     headline = None
+    hashtags = []
+    signature_line = None
+
+    # ═══ أنماط التنظيف ═══
+    # بادئات عناوين ممنوعة
+    _HEADLINE_PREFIXES = [
+        re.compile(r'^الأخبار\s+العاجلة\s*:\s*'),
+        re.compile(r'^عاجل\s*:\s*'),
+        re.compile(r'^منشور\s+الأخبار\s+العاجلة\s*:\s*'),
+        re.compile(r'^خبر\s+عاجل\s*:\s*'),
+        re.compile(r'^إلحاحي\s*:\s*'),
+    ]
+
+    # تسرب أسماء المصادر في النص
+    _SOURCE_LEAKS = [
+        re.compile(r'ظهر\s+لأول\s+مرة\s+على\s+[^\.\n]+'),
+        re.compile(r'نُشر\s+(?:في|على)\s+[^\.\n]+'),
+        re.compile(r'حسبما\s+أفادت\s+[^\.\n]+'),
+        re.compile(r'وفقا?\s+لموقع\s+[^\.\n]+'),
+        re.compile(r'كما\s+نشرته?\s+[^\.\n]+'),
+        re.compile(r'بحسب\s+موقع\s+[^\.\n]+'),
+        re.compile(r'على\s+حسب\s+[^\.\n]+(?:Fintech|News|Media|Crypto|Coin|Block)'),
+    ]
+
+    # كلمات إنجليزية مدمجة في عربي (مثل "opcerations")
+    _EMBEDDED_ENGLISH = re.compile(r'[\u0600-\u06FF]+\s([a-zA-Z]{4,})')
+
+    # أسماء إنجليزية مسموحة
+    _ALLOWED_ENGLISH = {
+        "Bitcoin", "Ethereum", "Solana", "Binance", "Coinbase", "USDT", "USDC",
+        "BlackRock", "MicroStrategy", "Grayscale", "Fidelity", "SEC", "ETF",
+        "DeFi", "NFT", "Web3", "BitMEX", "CoinDesk", "Cointelegraph", "BeInCrypto",
+        "Decrypt", "Blockworks", "Vitalik", "Satoshi", "Saylor", "Gensler", "CZ",
+        "Litecoin", "Dogecoin", "Avalanche", "Polkadot", "Chainlink", "Polygon",
+        "Tron", "Uniswap", "Aptos", "Arbitrum", "Optimism", "Stellar", "Hedera",
+        "Cosmos", "Fantom", "Aave", "Tether", "Circle", "OKX", "Kraken", "Bybit",
+        "Near", "Sui", "Sei", "Toncoin", "Shiba", "Pepe", "Dorsey", "Buterin",
+        "BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX", "DOT",
+        "LINK", "POL", "LTC", "TRX", "UNI", "APT", "ARB", "SUI", "SEI",
+        "TON", "FTM", "ATOM", "XLM", "HBAR", "SHIB", "PEPE", "DAI",
+        "IBIT", "FBTC", "GBTC", "ETHA", "HODL", "USDT", "USDC",
+        "Cardano", "Ripple", "Op",
+    }
 
     for line in lines:
         stripped = line.strip()
+
+        # ═══ سطر فارغ ═══
         if not stripped:
-            # لا أكثر من سطر فارغ متتالي
             if cleaned and cleaned[-1] != "":
                 cleaned.append("")
             continue
 
-        # 1. حذف أسماء المصادر الإنجليزية
+        # ═══ كشف التوقيع — لا نعالجه ═══
+        if "@newscrypto1m" in stripped:
+            signature_line = stripped
+            continue
+
+        # ═══ سطر وسم — نجمعها للنهاية ═══
+        if re.match(r'^#\w+', stripped):
+            tags = re.findall(r'#\w+', stripped)
+            for tag in tags:
+                tag_upper = tag.upper()
+                if tag_upper not in hashtags:
+                    hashtags.append(tag_upper)
+            continue
+
+        # ═══ كشف الكلمات الإنجليزية المدمجة في عربي ═══
+        embedded = _EMBEDDED_ENGLISH.findall(stripped)
+        for word in embedded:
+            if word not in _ALLOWED_ENGLISH:
+                log.warning(f"   🧹 Editorial: embedded English '{word}' — removing line")
+                stripped = re.sub(rf'\s{re.escape(word)}', '', stripped).strip()
+                if not stripped:
+                    continue
+
+        # ═══ حذف أسماء المصادر الإنجليزية ═══
         lower = stripped.lower()
         if any(src in lower for src in _BLOCKED_SOURCES):
-            # لا تحذف السطر كله — فقط نظّفه من اسم المصدر
             for src in _BLOCKED_SOURCES:
                 stripped = re.sub(rf'\b{re.escape(src)}\b', '', stripped, flags=re.IGNORECASE).strip()
             if not stripped:
                 continue
 
-        # 2. حذف الوسوم العربية (المصدر: ... / كتابة: ...)
+        # ═══ حذف الوسوم العربية ═══
         stripped = _ARABIC_MARKERS.sub('', stripped).strip()
         if not stripped:
             continue
 
-        # 2b. حذف عبارات إسناد مبهمة (وفقاً لتقارير... / بحسب مصادر...)
+        # ═══ حذف عبارات إسناد مبهمة ═══
         for pat in _VAGUE_ATTRIBUTIONS:
             stripped = pat.sub('', stripped).strip()
         if not stripped:
             continue
 
-        # 3. إزالة التكرار
+        # ═══ حذف تسرب أسماء المصادر ═══
+        for pat in _SOURCE_LEAKS:
+            stripped = pat.sub('', stripped).strip()
+        if not stripped:
+            continue
+
+        # ═══ إزالة التكرار ═══
         norm = re.sub(r'\s+', ' ', stripped).lower()
         if norm in seen_lines:
             continue
         seen_lines.add(norm)
 
-        # 4. كشف العنوان (أول سطر فيه رمز)
+        # ═══ كشف العنوان (أول سطر فيه رمز) ═══
         if headline is None and (stripped.startswith("🔵") or stripped.startswith("🚨") or stripped.startswith("🔴") or stripped.startswith("⚪") or stripped.startswith("📊")):
-            headline = stripped
-            cleaned.append(stripped)
+            # تنظيف بادئات العناوين الممنوعة
+            h_cleaned = stripped
+            for pat in _HEADLINE_PREFIXES:
+                h_cleaned = pat.sub('', h_cleaned).strip()
+            # إعادة إضافة الرمز إن أُزيل
+            if not h_cleaned.startswith(("🔵", "🚨", "🔴", "⚪", "📊")):
+                # احتفظ بالرمز الأصلي
+                emoji = stripped[0]
+                h_cleaned = emoji + " " + h_cleaned
+            headline = h_cleaned
+            cleaned.append(h_cleaned)
             continue
 
-        # 5. حذف تكرار العنوان في النص
+        # ═══ حذف تكرار العنوان في النص ═══
         if headline:
             h_clean = headline.lstrip("🔵🚨🔴⚪📊 ").strip()
             s_clean = stripped.lstrip("0123456789.-) ").strip()
             if h_clean.lower() == s_clean.lower():
                 continue
-            # فحص احتواء جزئي (أكثر من 80% تطابق)
             shorter = min(len(h_clean), len(s_clean))
             if shorter > 10:
                 common = sum(a == b for a, b in zip(h_clean.lower(), s_clean.lower()))
@@ -354,35 +446,40 @@ def final_editorial_review(text: str) -> Optional[str]:
 
         cleaned.append(stripped)
 
-    # 6. توحيد الهاشتاغات في النهاية — مع فصل الوسوم المتعددة على سطر واحد
-    result_lines = []
-    hashtags = []
-    for line in cleaned:
-        stripped_line = line.strip()
-        # فحص: هل السطر يتكون من وسم/وسوم فقط؟
-        if re.match(r'^#[\w]+', stripped_line):
-            # فصل كل وسم على حدة (يدعم عدة وسوم على نفس السطر)
-            tags = re.findall(r'#[\w]+', stripped_line)
-            for tag in tags:
-                tag_upper = tag.upper()  # توحيد: أحرف كبيرة
-                if tag_upper not in hashtags:
-                    hashtags.append(tag_upper)
-            continue
-        result_lines.append(line)
+    # ═══ ترتيب الهاشتاغات + التوقيع ═══
+    # الهاشتاغات تأتي قبل التوقيع مباشرة
+    result_lines = list(cleaned)
 
-    # إضافة الهاشتاغات الموحدة
     if hashtags:
+        # منع تكرار: #BTC و #BITCOIN (نفس العملة)
+        from translate import COIN_NAME_TO_TICKER
+        seen_tickers = set()
+        unique_hashtags = []
+        for tag in hashtags:
+            tag_name = tag.lstrip("#")
+            mapped = COIN_NAME_TO_TICKER.get(tag_name.lower(), tag_name.upper())
+            if mapped not in seen_tickers:
+                seen_tickers.add(mapped)
+                unique_hashtags.append(f"#{mapped}")
+
+        if unique_hashtags:
+            if result_lines and result_lines[-1] != "":
+                result_lines.append("")
+            result_lines.append(" ".join(unique_hashtags))
+
+    # التوقيع في النهاية دائماً
+    if signature_line:
         if result_lines and result_lines[-1] != "":
             result_lines.append("")
-        result_lines.extend(hashtags)
+        result_lines.append(signature_line)
 
     result = "\n".join(result_lines).strip()
 
-    # 7. فحص نهائي: يجب أن يكون هناك عنوان
+    # ═══ فحص نهائي ═══
     if not headline and not result:
         return None
 
-    # 8. حذف سطور فارغة متعددة
+    # حذف سطور فارغة متعددة
     result = re.sub(r'\n{3,}', '\n\n', result)
 
     return result if len(result) > 10 else None

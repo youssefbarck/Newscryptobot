@@ -597,8 +597,28 @@ These are metadata, not article content:
 - بحسب موقع
 - كما نشرته
 - منشور الأخبار
+- First appeared on
+- Originally published on
+- Source:
+- Read more
+- via [publisher name]
 
 Delete any sentence that is pure metadata.
+
+FORMAT CONTAINMENT
+
+Never output format labels in any field.
+Forbidden in headline AND body:
+- منشور الأخبار العاجلة:
+- الأخبار العاجلة:
+- عاجل:
+- خبر عاجل:
+- Breaking News:
+- Urgent:
+
+The importance field controls the emoji (🚨🔴🔵⚪).
+The format field controls the layout.
+Never reveal these labels in the article text.
 
 TRANSLITERATION SAFETY
 
@@ -857,7 +877,9 @@ def parse_json_output(text: str) -> Optional[Dict[str, str]]:
 
 
 def _validate_result(data: Dict) -> Optional[Dict[str, str]]:
-    """فحص صحة نتيجة JSON — يدعم reject أيضاً"""
+    """فحص صحة نتيجة JSON — يدعم reject أيضاً
+    يتضمن: إزالة بادئات التصنيف، فلتر الهاشتاغات، توحيد المرادفات
+    """
     if not isinstance(data, dict):
         return None
 
@@ -869,7 +891,33 @@ def _validate_result(data: Dict) -> Optional[Dict[str, str]]:
     if not headline or len(headline) < 3:
         return None
 
+    # ═══ إزالة بادئات التصنيف من العنوان ═══
+    _LABEL_PREFIXES = [
+        re.compile(r'^منشور\s+الأخبار\s+العاجلة\s*:\s*', re.IGNORECASE),
+        re.compile(r'^الأخبار\s+العاجلة\s*:\s*', re.IGNORECASE),
+        re.compile(r'^عاجل\s*:\s*', re.IGNORECASE),
+        re.compile(r'^خبر\s+عاجل\s*:\s*', re.IGNORECASE),
+        re.compile(r'^Breaking\s+News\s*:\s*', re.IGNORECASE),
+    ]
+    for pat in _LABEL_PREFIXES:
+        headline = pat.sub('', headline).strip()
+    if not headline or len(headline) < 3:
+        return None
+
     body = (data.get("body") or "").strip()
+
+    # ═══ إزالة بادئات التصنيف من كل سطر في body ═══
+    if body:
+        body_lines = body.split("\n")
+        cleaned_body = []
+        for bline in body_lines:
+            bline_s = bline.strip()
+            for pat in _LABEL_PREFIXES:
+                bline_s = pat.sub('', bline_s).strip()
+            if bline_s:
+                cleaned_body.append(bline_s)
+        body = "\n".join(cleaned_body).strip()
+
     fmt = (data.get("format") or "standard").strip()
     if fmt not in ("standard", "bullets", "economic"):
         fmt = "standard"
@@ -880,7 +928,9 @@ def _validate_result(data: Dict) -> Optional[Dict[str, str]]:
         if hashtag.lower() in _HASHTAG_BLACKLIST or len(hashtag) <= 2:
             hashtag = ""
         else:
-            hashtag = "#" + hashtag
+            # توحيد المرادفات: BITCOIN → BTC, ETHEREUM → ETH
+            canonical = COIN_NAME_TO_TICKER.get(hashtag.lower(), hashtag.upper())
+            hashtag = "#" + canonical
 
     importance = (data.get("importance") or "medium").strip()
     if importance not in ("low", "medium", "high", "breaking"):

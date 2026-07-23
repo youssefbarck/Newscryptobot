@@ -50,12 +50,12 @@ class NewsItem:
             self.hash = self._compute_hash()
 
     def _compute_hash(self) -> str:
-        """hash متقدم يعتمد على العنوان + المصدر"""
+        """hash متقدم يعتمد على العنوان فقط — نفس الخبر من مصدرين مختلفين = نفس الهاش"""
         title_norm = re.sub(r'[^\w\s]', '', self.title.lower())
         title_norm = re.sub(r'\s+', ' ', title_norm).strip()
         title_norm = re.sub(r'^(breaking|update|news|alert|urgent|just in|report)[\s:]*', '', title_norm)
-        hash_input = title_norm[:60]
-        return hashlib.md5(hash_input.encode()).hexdigest()[:12]
+        # استخدام 100 حرف بدل 60 — لتغطية عناوين أطول ومقاومة الاختلافات الطفيفة
+        return hashlib.md5(title_norm[:100].encode()).hexdigest()[:12]
 
     def to_dict(self) -> Dict:
         return {

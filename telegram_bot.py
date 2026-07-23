@@ -15,7 +15,7 @@ from aiohttp import ClientTimeout
 from config import (
     log, BotConfig, BotState, TELEGRAM_RATE_LIMITER, TELEGRAM_CB,
     MAX_NEWS_PER_SCAN, MAX_NEWS_AGE, SCAN_INTERVAL, NEWS_SOURCES,
-    SUMMARY_HOUR, SUMMARY_MINUTE, tz,
+    SUMMARY_HOUR, SUMMARY_MINUTE, tz, save_sent_news,
 )
 import dedup
 from filters import NewsItem, filter_news_items, is_complete_news
@@ -271,37 +271,106 @@ _ARABIC_MARKERS = re.compile(
     re.MULTILINE
 )
 
+# ═══ ثوابت مشتركة لمستوى الوحدة — تُستخدم في final_editorial_review ═══
+# سكريبتات يونيكود ممنوعة (ليست عربية ولا لاتينية)
+_WRONG_SCRIPTS = re.compile(
+    r'[\u0C00-\u0C7F\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F'
+    r'\u0B00-\u0B7F\u0E00-\u0E7F\u1000-\u109F\u0D00-\u0D7F'
+    r'\u0A80-\u0AFF\u0B80-\u0BFF\u0C80-\u0CFF\u0D80-\u0DFF]'
+)
+
+# كلمات إنجليزية مدمجة في عربي (مثل "وقف opcerations")
+_EMBEDDED_ENGLISH = re.compile(r'[\u0600-\u06FF]+\s([a-zA-Z]{4,})')
+
+# أسماء إنجليزية مسموحة في النص العربي — القائمة المرجعية الوحيدة
+_ALLOWED_ENGLISH_NAMES = frozenset({
+    # عملات وبروتوكولات
+    "Bitcoin", "Ethereum", "Solana", "Binance", "Coinbase", "USDT", "USDC",
+    "BlackRock", "MicroStrategy", "Grayscale", "Fidelity", "SEC", "ETF",
+    "DeFi", "NFT", "Web3", "BitMEX", "Litecoin", "Dogecoin", "Avalanche",
+    "Polkadot", "Chainlink", "Polygon", "Tron", "Uniswap", "Aptos",
+    "Arbitrum", "Optimism", "Stellar", "Hedera", "Cosmos", "Fantom",
+    "Aave", "Tether", "Circle", "OKX", "Kraken", "Bybit", "Ripple",
+    "Cardano", "Toncoin", "Near", "Sui", "Sei", "Shiba", "Pepe",
+    # رموز
+    "BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX", "DOT",
+    "LINK", "POL", "LTC", "TRX", "UNI", "APT", "ARB", "SUI", "SEI",
+    "TON", "FTM", "ATOM", "XLM", "HBAR", "SHIB", "PEPE", "DAI", "OP",
+    # صناديق ETF
+    "IBIT", "FBTC", "GBTC", "ETHA", "HODL",
+    # شخصيات
+    "Vitalik", "Satoshi", "Saylor", "Gensler", "CZ", "Dorsey", "Buterin",
+    # مصادر (أسماء واجهزة فقط — لا تُحذف من النص عند ذكرها كموضوع الخبر)
+    "CoinDesk", "Cointelegraph", "BeInCrypto", "Decrypt", "Blockworks",
+})
+
+# هاشتاغات محظورة (كلمات إنجليزية شائعة)
+_HASHTAG_BLACKLIST = frozenset({
+    "es", "to", "in", "on", "at", "by", "or", "as", "is", "be", "do", "go",
+    "no", "so", "up", "if", "am", "an", "my", "he", "we", "me", "us", "it",
+    "ai", "tv", "io", "de", "la", "el", "un", "en", "lo", "su", "se",
+})
+
 # عبارات إسناد مبهمة — بدون مصدر محدد — يجب إزالتها
 _VAGUE_ATTRIBUTIONS = [
-    re.compile(r'وفقا[ً°]??\s+ل(?:يَ?|ـ)?\s+(?:تقارير|مصادر|معلومات|بيانات|أنباء|أوساط|دوائر)\b[^\.\n]*', re.IGNORECASE),
+    re.compile(r'وفقا[ً°]?\s+ل(?:يَ?|ـ)?\s+(?:تقارير|مصادر|معلومات|بيانات|أنباء|أوساط|دوائر)\b[^\.\n]*', re.IGNORECASE),
     re.compile(r'بحسب\s+(?:تقارير|مصادر|معلومات|بيانات|أنباء|أوساط|دوائر)\b[^\.\n]*', re.IGNORECASE),
-    re.compile(r'وفق[ً°]??\s+ل(?:يَ?|ـ)?\s+(?:تقارير|مصادر)\b[^\.\n]*', re.IGNORECASE),
+    re.compile(r'وفق[ً°]?\s+ل(?:يَ?|ـ)?\s+(?:تقارير|مصادر)\b[^\.\n]*', re.IGNORECASE),
     re.compile(r'وتشير\s+(?:التقارير|المصادر|الأوساط)\b[^\.\n]*', re.IGNORECASE),
+]
+
+# ═══ بادئات تصنيف المنشور — يجب حذفها من أي سطر ═══
+_FORMAT_LABELS = [
+    # مع أو بدون رمز بادئة (🔵 🚨 🔴 ⚪ 📊)
+    re.compile(r'^(?:[🔵🚨🔴⚪📊]\s*)?منشور\s+الأخبار\s+العاجلة\s*:\s*', re.IGNORECASE),
+    re.compile(r'^(?:[🔵🚨🔴⚪📊]\s*)?الأخبار\s+العاجلة\s*:\s*', re.IGNORECASE),
+    re.compile(r'^(?:[🔵🚨🔴⚪📊]\s*)?عاجل\s*:\s*', re.IGNORECASE),
+    re.compile(r'^(?:[🔵🚨🔴⚪📊]\s*)?خبر\s+عاجل\s*:\s*', re.IGNORECASE),
+    re.compile(r'^(?:[🔵🚨🔴⚪📊]\s*)?إلحاقي\s*:\s*', re.IGNORECASE),
+    re.compile(r'^(?:[🔵🚨🔴⚪📊]\s*)?منشور\s+[\w]+\s*:\s*', re.IGNORECASE),
+    # أنماط إنجليزية
+    re.compile(r'^(?:[🔵🚨🔴⚪📊]\s*)?Breaking\s+News\s*:\s*', re.IGNORECASE),
+    re.compile(r'^(?:[🔵🚨🔴⚪📊]\s*)?Urgent\s*:\s*', re.IGNORECASE),
+]
+
+# ═══ تسرب أسماء المصادر — أنماط موسّعة ═══
+_SOURCE_LEAKS_BROAD = [
+    # أنماط عربية — شاملة لكل الصيغ الممكنة
+    re.compile(r'ظهر\s+(?:لأول\s+مرة|أول\s+مرة|مسبقاً?)\s+(?:على|في)\s+[^\.\n]+', re.IGNORECASE),
+    re.compile(r'ن[ُِّ]?ش(?:ر|رت|ره|رته)\s+(?:في|على|لا?|لأول\s+مرة)\s+[^\.\n]+', re.IGNORECASE),
+    re.compile(r'نشرت?\s+(?:المقال|الخبر|التقرير|المحتوى)\s+(?:في|على|عبر)\s+[^\.\n]+', re.IGNORECASE),
+    re.compile(r'حسبما\s+أفاد(?:ت?|)?\s+[^\.\n]+', re.IGNORECASE),
+    re.compile(r'وفقا?[ً°]?\s+لموقع\s+[^\.\n]+', re.IGNORECASE),
+    re.compile(r'وفقا?[ً°]?\s+ل(?:يَ?|ـ)?\s+[^\.\n]+(?:Fintech|News|Media|Crypto|Coin|Desk|Telegraph|Crypto)', re.IGNORECASE),
+    re.compile(r'كما\s+نشر(?:ت?|ه?|ته?)\s+[^\.\n]+', re.IGNORECASE),
+    re.compile(r'بحسب\s+موقع\s+[^\.\n]+', re.IGNORECASE),
+    re.compile(r'على\s+حسب\s+[^\.\n]+', re.IGNORECASE),
+    re.compile(r'المصدر\s*:\s*[^\.\n]+', re.IGNORECASE),
+    re.compile(r'الخبر\s*:\s*[^\.\n]+', re.IGNORECASE),
+    # أنماط إنجليزية متسربة
+    re.compile(r'(?:First\s+appeared|Originally\s+published|Source|Reported\s+by|According\s+to)\s+[^\.\n]+', re.IGNORECASE),
+    re.compile(r'Read\s+more\s+[^\.\n]*', re.IGNORECASE),
+    re.compile(r'via\s+[A-Z][a-zA-Z]+(?:\s+News|\s+Crypto|\s+Media|\s+Fintech)?', re.IGNORECASE),
 ]
 
 
 def final_editorial_review(text: str) -> Optional[str]:
     """آخر طبقة أمان قبل إرسال الخبر إلى تيليجرام.
 
-    طبقات الحماية:
-    1. كشف السكريبتات الخاطئة (Telugu, Devanagari...)
-    2. إزالة بادئات العناوين الممنوعة
-    3. إزالة تسرب أسماء المصادر
-    4. إزالة تكرار العنوان في النص
-    5. إزالة العبارات الإسناد المبهمة
-    6. كشف الكلمات الإنجليزية المدمجة (opcerations)
-    7. توحيد الهاشتاغات قبل التوقيع
-    8. منع تكرار الوسم لنفس العملة (#BTC + #BITCOIN)
+    طبقات الحماية (جذري — لا يسمح بأي تسرب):
+    1. كشف السكريبتات الخاطئة (Telugu, Devanagari...) → حظر كامل
+    2. إزالة بادئات تصنيف المنشور من أي سطر (منشور الأخبار العاجلة:)
+    3. إزالة تسرب أسماء المصادر (أشمل — عربي + إنجليزي)
+    4. كشف الكلمات الإنجليزية المشبوهة → حذف السطر بالكامل
+    5. إزالة عبارات الإسناد المبهمة
+    6. إزالة تكرار العنوان في النص
+    7. توحيد الهاشتاغات المرادفة (#BITCOIN → #BTC)
+    8. حذف المصادر المحظورة من النص
     """
     if not text or not text.strip():
         return None
 
     # ═══ كشف السكريبتات الخاطئة ═══
-    _WRONG_SCRIPTS = re.compile(
-        r'[\u0C00-\u0C7F\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F'
-        r'\u0B00-\u0B7F\u0E00-\u0E7F\u1000-\u109F\u0D00-\u0D7F'
-        r'\u0A80-\u0AFF\u0B80-\u0BFF\u0C80-\u0CFF\u0D80-\u0DFF]'
-    )
     if _WRONG_SCRIPTS.search(text):
         log.warning("   🧹 Editorial: wrong Unicode script — blocked")
         return None
@@ -313,46 +382,8 @@ def final_editorial_review(text: str) -> Optional[str]:
     hashtags = []
     signature_line = None
 
-    # ═══ أنماط التنظيف ═══
-    # بادئات عناوين ممنوعة
-    _HEADLINE_PREFIXES = [
-        re.compile(r'^الأخبار\s+العاجلة\s*:\s*'),
-        re.compile(r'^عاجل\s*:\s*'),
-        re.compile(r'^منشور\s+الأخبار\s+العاجلة\s*:\s*'),
-        re.compile(r'^خبر\s+عاجل\s*:\s*'),
-        re.compile(r'^إلحاحي\s*:\s*'),
-    ]
-
-    # تسرب أسماء المصادر في النص
-    _SOURCE_LEAKS = [
-        re.compile(r'ظهر\s+لأول\s+مرة\s+على\s+[^\.\n]+'),
-        re.compile(r'نُشر\s+(?:في|على)\s+[^\.\n]+'),
-        re.compile(r'حسبما\s+أفادت\s+[^\.\n]+'),
-        re.compile(r'وفقا?\s+لموقع\s+[^\.\n]+'),
-        re.compile(r'كما\s+نشرته?\s+[^\.\n]+'),
-        re.compile(r'بحسب\s+موقع\s+[^\.\n]+'),
-        re.compile(r'على\s+حسب\s+[^\.\n]+(?:Fintech|News|Media|Crypto|Coin|Block)'),
-    ]
-
-    # كلمات إنجليزية مدمجة في عربي (مثل "opcerations")
-    _EMBEDDED_ENGLISH = re.compile(r'[\u0600-\u06FF]+\s([a-zA-Z]{4,})')
-
-    # أسماء إنجليزية مسموحة
-    _ALLOWED_ENGLISH = {
-        "Bitcoin", "Ethereum", "Solana", "Binance", "Coinbase", "USDT", "USDC",
-        "BlackRock", "MicroStrategy", "Grayscale", "Fidelity", "SEC", "ETF",
-        "DeFi", "NFT", "Web3", "BitMEX", "CoinDesk", "Cointelegraph", "BeInCrypto",
-        "Decrypt", "Blockworks", "Vitalik", "Satoshi", "Saylor", "Gensler", "CZ",
-        "Litecoin", "Dogecoin", "Avalanche", "Polkadot", "Chainlink", "Polygon",
-        "Tron", "Uniswap", "Aptos", "Arbitrum", "Optimism", "Stellar", "Hedera",
-        "Cosmos", "Fantom", "Aave", "Tether", "Circle", "OKX", "Kraken", "Bybit",
-        "Near", "Sui", "Sei", "Toncoin", "Shiba", "Pepe", "Dorsey", "Buterin",
-        "BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX", "DOT",
-        "LINK", "POL", "LTC", "TRX", "UNI", "APT", "ARB", "SUI", "SEI",
-        "TON", "FTM", "ATOM", "XLM", "HBAR", "SHIB", "PEPE", "DAI",
-        "IBIT", "FBTC", "GBTC", "ETHA", "HODL", "USDT", "USDC",
-        "Cardano", "Ripple", "Op",
-    }
+    # أسماء إنجليزية مسموحة في النص العربي
+    _ALLOWED_ENGLISH = _ALLOWED_ENGLISH_NAMES
 
     for line in lines:
         stripped = line.strip()
@@ -377,14 +408,48 @@ def final_editorial_review(text: str) -> Optional[str]:
                     hashtags.append(tag_upper)
             continue
 
-        # ═══ كشف الكلمات الإنجليزية المدمجة في عربي ═══
-        embedded = _EMBEDDED_ENGLISH.findall(stripped)
-        for word in embedded:
-            if word not in _ALLOWED_ENGLISH:
-                log.warning(f"   🧹 Editorial: embedded English '{word}' — removing line")
-                stripped = re.sub(rf'\s{re.escape(word)}', '', stripped).strip()
+        # ═══ (إصلاح #1) حذف بادئات تصنيف المنشور من أي سطر ═══
+        _original_stripped = stripped
+        for pat in _FORMAT_LABELS:
+            match = pat.match(stripped)
+            if match:
+                log.warning(f"   🧹 Editorial: format label stripped: '{stripped[:50]}'")
+                stripped = stripped[match.end():].strip()
+                # إعادة إضافة الرمز إن أُزيل
+                emoji_match = re.match(r'^([🔵🚨🔴⚪📊])', _original_stripped)
+                if emoji_match and not stripped.startswith(emoji_match.group(1)):
+                    stripped = emoji_match.group(1) + " " + stripped
+                if not stripped or stripped == emoji_match.group(1) if emoji_match else not stripped:
+                    continue
+                break
+
+        # ═══ (إصلاح #2) حذف تسرب أسماء المصادر — أنماط موسّعة ═══
+        for pat in _SOURCE_LEAKS_BROAD:
+            new_stripped = pat.sub('', stripped).strip()
+            if new_stripped != stripped:
+                log.warning(f"   🧹 Editorial: source leak stripped: '{stripped[:50]}'")
+                stripped = new_stripped
                 if not stripped:
                     continue
+
+        # ═══ (إصلاح #3) كشف كامل للكلمات الإنجليزية المشبوهة ═══
+        # فحص 1: كلمات إنجليزية بعد عربي مباشرة
+        embedded = _EMBEDDED_ENGLISH.findall(stripped)
+        # فحص 2: أي كلمة إنجليزية ≥ 4 أحرف ليست في القائمة المسموحة
+        all_english = re.findall(r'\b([a-zA-Z]{4,})\b', stripped)
+        suspicious = [w for w in all_english if w not in _ALLOWED_ENGLISH
+                      and w.lower() not in _HASHTAG_BLACKLIST]
+        if suspicious:
+            log.warning(f"   🧹 Editorial: suspicious English '{suspicious}' — removing LINE")
+            continue
+        if embedded:
+            for word in embedded:
+                if word not in _ALLOWED_ENGLISH:
+                    log.warning(f"   🧹 Editorial: embedded English '{word}' — removing LINE")
+                    stripped = ""
+                    break
+            if not stripped:
+                continue
 
         # ═══ حذف أسماء المصادر الإنجليزية ═══
         lower = stripped.lower()
@@ -405,12 +470,6 @@ def final_editorial_review(text: str) -> Optional[str]:
         if not stripped:
             continue
 
-        # ═══ حذف تسرب أسماء المصادر ═══
-        for pat in _SOURCE_LEAKS:
-            stripped = pat.sub('', stripped).strip()
-        if not stripped:
-            continue
-
         # ═══ إزالة التكرار ═══
         norm = re.sub(r'\s+', ' ', stripped).lower()
         if norm in seen_lines:
@@ -418,18 +477,10 @@ def final_editorial_review(text: str) -> Optional[str]:
         seen_lines.add(norm)
 
         # ═══ كشف العنوان (أول سطر فيه رمز) ═══
-        if headline is None and (stripped.startswith("🔵") or stripped.startswith("🚨") or stripped.startswith("🔴") or stripped.startswith("⚪") or stripped.startswith("📊")):
-            # تنظيف بادئات العناوين الممنوعة
-            h_cleaned = stripped
-            for pat in _HEADLINE_PREFIXES:
-                h_cleaned = pat.sub('', h_cleaned).strip()
-            # إعادة إضافة الرمز إن أُزيل
-            if not h_cleaned.startswith(("🔵", "🚨", "🔴", "⚪", "📊")):
-                # احتفظ بالرمز الأصلي
-                emoji = stripped[0]
-                h_cleaned = emoji + " " + h_cleaned
-            headline = h_cleaned
-            cleaned.append(h_cleaned)
+        _HEADLINE_EMOJIS = ("🔵", "🚨", "🔴", "⚪", "📊")
+        if headline is None and stripped.startswith(_HEADLINE_EMOJIS):
+            headline = stripped
+            cleaned.append(stripped)
             continue
 
         # ═══ حذف تكرار العنوان في النص ═══
@@ -447,11 +498,10 @@ def final_editorial_review(text: str) -> Optional[str]:
         cleaned.append(stripped)
 
     # ═══ ترتيب الهاشتاغات + التوقيع ═══
-    # الهاشتاغات تأتي قبل التوقيع مباشرة
     result_lines = list(cleaned)
 
     if hashtags:
-        # منع تكرار: #BTC و #BITCOIN (نفس العملة)
+        # (إصلاح #5) توحيد الهاشتاغات المرادفة جذرياً
         from translate import COIN_NAME_TO_TICKER
         seen_tickers = set()
         unique_hashtags = []
@@ -529,15 +579,17 @@ def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]
                 if clean_summary:
                     msg += f"\n\n{clean_summary}"
 
-    # إضافة العملات إن وُجدت (فريد، case-insensitive)
+    # (إصلاح #5) إضافة العملات — توحيد مرادفات جذري (#BITCOIN → #BTC)
     if item.coins:
-        seen = set()
+        from translate import COIN_NAME_TO_TICKER
+        seen_tickers = set()
         unique_coins = []
         for c in item.coins:
-            cl = c.lower()
-            if cl not in seen:
-                seen.add(cl)
-                unique_coins.append(c)
+            # توحيد: BITCOIN → BTC, ETHEREUM → ETH، إلخ
+            canonical = COIN_NAME_TO_TICKER.get(c.lower(), c.upper())
+            if canonical not in seen_tickers:
+                seen_tickers.add(canonical)
+                unique_coins.append(canonical)
         coins_str = " ".join([f"#{c}" for c in unique_coins[:5]])
         msg += f"\n\n{coins_str}"
 
@@ -680,6 +732,10 @@ async def scan_news_loop(config: BotConfig, state: BotState, translator: Transla
                 categories=sum([i.categories or [] for i in filtered[:MAX_NEWS_PER_SCAN]], []),
             )
             log.info(f"📊 Scan complete: {len(news)} fetched, {len(filtered)} important, {alerts_sent} sent")
+
+            # (إصلاح #4) حفظ الهاشات بعد كل دورة فحص — لمنع النشر المكرر عند إعادة التشغيل
+            if alerts_sent > 0:
+                save_sent_news()
 
             # ETF flows (مرة واحدة يومياً)
             try:

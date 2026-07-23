@@ -398,17 +398,51 @@ def _clean_one_line(text: str) -> str:
     text = re.sub(r"^\s*[-–—:،]\s*", "", text)
     text = text.strip()
 
+    # 7️⃣ حذف الجمل الناقصة — تنتهي بحرف جر أو عطف ثم نقطة مباشرة
+    # مثل: "نقل الأموال إلى ." أو "حسبما ذكر من ." أو "مع أنه ."
+    text = re.sub(
+        r"\s+(?:إلى|من|على|في|عن|مع|عبر|خلال|حتى|بعد|قبل|لـ|لكل|via|through|to|from|at)\s*\.\s*",
+        " ", text
+    )
+    # تنظيف الفاصلة/العطف المتروك بعد حذف الجملة الناقصة
+    text = re.sub(r"\s+[،,]\s*\.\s*", ".", text)
+    text = re.sub(r"\s+[،,]\s*$", "", text)
+    text = re.sub(r"^\s*[،,]\s+", "", text)
+    text = re.sub(r"\.{2,}", ".", text)
+    text = text.strip()
+
     if text != original:
         log.debug(f"_clean_translated: '{original[:50]}...' → '{text[:50]}...'")
 
     return text
 
 
+# كلمات إنجليزية قصيرة (1-3 حروف) تُظهر في النص العربي — تُحذف دائماً
+_SHORT_ENGLISH_BLOCKLIST: Set[str] = {
+    # حروف جر وأدوات ربط
+    "the", "and", "for", "but", "not", "are", "was", "has", "had",
+    "its", "all", "any", "out", "how", "who", "why", "can", "may",
+    "our", "she", "his", "her", "him", "you", "they", "them",
+    "this", "that", "with", "from", "into", "also", "just", "than",
+    "been", "will", "would", "could", "should", "does", "done",
+    # كلمات متداولة في الكريبتو
+    "via", "cap", "fee", "gas", "key", "top", "new", "old", "now",
+    "per", "yet", "set", "run", "buy", "sell", "hot", "low",
+    "gap", "net", "cut", "bit", "lot", "way", "use", "put",
+    "led", "saw", "met", "got", "let", "due", "mid",
+}
+
+
 def _remove_unwanted_english_words(text: str) -> str:
     """
     إزالة الكلمات الإنجليزية غير المسموحة من النص العربي.
-    كلمة إنجليزية = ≥ 4 أحرف لاتينية متتالية.
+    يزيل الكلمات 1-3 حروف من القائمة السوداء + 4+ حروف غير المسموحة.
     """
+    # 1) إزالة الكلمات القصيرة (1-3 حروف) من القائمة السوداء
+    for word in _SHORT_ENGLISH_BLOCKLIST:
+        text = re.sub(r'\b' + re.escape(word) + r'\b', '', text, flags=re.IGNORECASE)
+
+    # 2) إزالة الكلمات الطويلة (4+ حروف) غير المسموحة
     def _replace_word(match):
         word = match.group(0)
         if word.upper() in ALLOWED_ENGLISH_TERMS:
@@ -433,8 +467,14 @@ def _arabic_char_ratio(text: str) -> float:
 
 def _has_unwanted_english(text: str) -> bool:
     """هل يوجد كلمات إنجليزية غير مسموحة؟"""
-    words = re.findall(r'\b[a-zA-Z]{4,}\b', text)
-    for word in words:
+    # فحص الكلمات القصيرة
+    short_words = re.findall(r'\b[a-zA-Z]{1,3}\b', text)
+    for word in short_words:
+        if word.lower() in _SHORT_ENGLISH_BLOCKLIST:
+            return True
+    # فحص الكلمات الطويلة
+    long_words = re.findall(r'\b[a-zA-Z]{4,}\b', text)
+    for word in long_words:
         if word.upper() not in ALLOWED_ENGLISH_TERMS:
             return True
     return False

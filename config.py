@@ -312,6 +312,28 @@ REJECTION_KEYWORDS = [
     "مقدم بواسطة", "crossposted from",
 ]
 
+# أنماط أخبار تغير السعر الروتينية — تُرفض تلقائياً
+_PRICE_NOISE_PATTERNS = [
+    # أنماط إنجليزية
+    r"(bitcoin|btc|ethereum|eth|solana|sol|xrp|bnb|doge|dogecoin)\s+(?:price\s+)?(?:rises?|falls?|drops?|gains?|climbs?|surges?|dips?|slides?|slumps?)\s+(?:to|above|below|past|near|by|over|under)",
+    r"(bitcoin|btc|ethereum|eth|solana|sol|xrp|bnb)\s+(?:trading\s+(?:at|near|around|above|below)|hovering\s+(?:near|around|at)|reaches?\s+(?:new|a|all-time|weekly|monthly))",
+    r"(?:trading|currently|now)\s+at\s+\$[\d,]+(?:\.[\d]+)?",
+    r"(?:price\s+(?:of|for|action|update|movement|watch|analysis))",
+    r"(?:drops?|gains?|rises?|falls?)\s+(?:\d+\.?\d*)%",
+    r"(?:hits|touches|reaches|breaks|crosses)\s+\$[\d,]+",
+    r"(?:bullish|bearish)\s+(?:momentum|trend|signal|bias|outlook)",
+    r"(?:support|resistance)\s+(?:level|zone|at|held|broken)",
+    r"(?:slight|small|modest|minor)\s+(?:(?:price\s+)?(?:change|move|shift|drop|gain|rise|fall))",
+    r"(?:daily|weekly|monthly)\s+(?:price\s+)?(?:chart|analysis|outlook)",
+    # أنماط عربية
+    r"(?:سعر|أسعار)\s+(?:البيتكوين|الإيثيريوم|بيتكوين|إيثيريوم|سولانا|العملات)\s+(?:يرتفع|ينخفض|يتراجع|يصل|يصل إلى)",
+    r"(?:يرتفع|ينخفض|يتراجع|يستقر)\s+(?:سعر|بـ|إلى)\s+(?:\d|%)",
+    r"(?:تحليل|توقعات|توقعات?)\s+(?:السعر|الأسعار|الفني|سعر|أسعار)",
+    r"(?:مستوى|منطقة)\s+(?:الدعم|المقاومة)",
+    r"(?:تغير\s+)?(?:طفيف|بسيط|محدود|سلس|سلس?)\s+(?:في\s+)?(?:السعر|الأسعار|سعر|أسعار)",
+    r"(?:سعر|أسعار)\s+(?:يرتفع|ينخفض|يتراجع|يستقر|يشهد|يسجل)",
+]
+
 # كلمات السياق الكريبتوي
 CRYPTO_CONTEXT_KEYWORDS = [
     "bitcoin", "btc", "ethereum", "eth", "crypto", "cryptocurrency",
@@ -402,7 +424,8 @@ def gist_set(gist_id: str, filename: str, content: str) -> bool:
 # ═══════════════════════════════════════════════════════════
 class State:
     """حالة البوت العامّة"""
-    sent_news_hashes: Set[str] = set()
+    sent_news_hashes: Set[str] = set()       # title hashes
+    sent_fact_hashes: Set[str] = set()       # fact hashes — لكشف التكرار الدلالي
     bot_shutdown: bool = False
     channel_enabled: Optional[bool] = None
     allowed_users: Set[int] = set()
@@ -413,6 +436,7 @@ state = State()
 def load_sent_hashes():
     """تحميل الأخبار المُرسلة سابقاً"""
     all_hashes = set()
+    all_fact_hashes = set()
     # Gist
     if cfg.GIST_ID_SENT_NEWS:
         content = gist_get(cfg.GIST_ID_SENT_NEWS, "sent_news.json")
@@ -420,6 +444,7 @@ def load_sent_hashes():
             try:
                 data = json.loads(content)
                 all_hashes.update(set(data.get("hashes", [])))
+                all_fact_hashes.update(set(data.get("fact_hashes", [])))
             except:
                 pass
     # محلي
@@ -427,15 +452,20 @@ def load_sent_hashes():
         with open(os.path.join(cfg.PERSISTENT_DIR, "sent_news.json"), "r") as f:
             data = json.load(f)
             all_hashes.update(set(data.get("hashes", [])))
+            all_fact_hashes.update(set(data.get("fact_hashes", [])))
     except:
         pass
     state.sent_news_hashes = all_hashes
-    log.info(f"📊 Loaded {len(state.sent_news_hashes)} sent hashes")
+    state.sent_fact_hashes = all_fact_hashes
+    log.info(f"📊 Loaded {len(state.sent_news_hashes)} text hashes + {len(state.sent_fact_hashes)} fact hashes")
 
 
 def save_sent_hashes():
     """حفظ الأخبار المُرسلة"""
-    content = json.dumps({"hashes": list(state.sent_news_hashes)[-500:]})
+    content = json.dumps({
+        "hashes": list(state.sent_news_hashes)[-500:],
+        "fact_hashes": list(state.sent_fact_hashes)[-500:],
+    })
     try:
         with open(os.path.join(cfg.PERSISTENT_DIR, "sent_news.json"), "w") as f:
             f.write(content)

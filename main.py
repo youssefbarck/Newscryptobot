@@ -199,8 +199,12 @@ class NewsPipeline:
             if check_duplicate(item, self.db):
                 stats.deduplicated += 1
                 continue
-            # فحص hash المُرسلة سابقاً
+            # فحص hash المُرسلة سابقاً (title hash + fact hash)
             if item.hash in state.sent_news_hashes:
+                stats.deduplicated += 1
+                continue
+            fact_hash = item.get_fact_hash()
+            if fact_hash and fact_hash in state.sent_fact_hashes:
                 stats.deduplicated += 1
                 continue
             unique_items.append(item)
@@ -262,6 +266,31 @@ class NewsPipeline:
 
         # حد أقصى للنشر
         to_publish = scored_items[:cfg.MAX_NEWS_PER_SCAN]
+
+        # حد أقصى: خبران فقط لكل عملة في الدورة الواحدة
+        _MAX_PER_COIN = 2
+        coin_count: Dict[str, int] = {}
+        filtered = []
+        for item in to_publish:
+            coins = item.facts.coins if item.facts else []
+            # إذا لم تكن هناك عملات محددة → نسمح بها
+            if not coins:
+                filtered.append(item)
+                continue
+            # إضافة خبر فقط إذا لم نتجاوز الحد
+            dominant_coin = coins[0] if coins else ""
+            if coin_count.get(dominant_coin, 0) < _MAX_PER_COIN:
+                filtered.append(item)
+                coin_count[dominant_coin] = coin_count.get(dominant_coin, 0) + 1
+            else:
+                log.debug(f"⏭️ تخطي: حد العملات ({dominant_coin}): {item.title[:50]}")
+                stats.rejected.append({
+                    "title": item.title[:60],
+                    "reason": f"حد العملات: {dominant_coin} ({coin_count[dominant_coin]}/{_MAX_PER_COIN})",
+                    "source": item.source,
+                })
+        to_publish = filtered
+
         log.info(f"📊 Scored: {stats.scored_above_threshold}/{stats.scored} above threshold, publishing {len(to_publish)}")
 
         # ━━━ المرحلة 6: إعادة الصياغة بالعربية ━━━
@@ -296,8 +325,11 @@ class NewsPipeline:
                 if msg:
                     stats.formatted += 1
 
-                    # تسجيل في hash المُرسلة
+                    # تسجيل في hash المُرسلة (title + fact)
                     state.sent_news_hashes.add(item.hash)
+                    fact_h = item.get_fact_hash()
+                    if fact_h:
+                        state.sent_fact_hashes.add(fact_h)
                     register_news(item, self.db)
 
                     # إرسال للقناة
@@ -310,11 +342,10 @@ class NewsPipeline:
                         )
                         await self.message_queue.put(channel_msg)
 
-                    # إرسال نسخة للمالك مع معلومات التقييم
+                    # إرسال نسخة للمالك (بدون معلومات التقييم)
                     if cfg.CHAT_ID:
-                        type_ar = _NEWS_TYPE_AR.get(item.news_type.value, "")
                         owner_msg = OutgoingMessage(
-                            text=msg.text + f"\n📊 [{item.score}/100] {type_ar}",
+                            text=msg.text,
                             image_url=msg.image_url,
                             chat_id=cfg.CHAT_ID,
                             priority=msg.priority,

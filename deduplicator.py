@@ -137,9 +137,9 @@ def merge_sources(items: List[NewsItem]) -> List[NewsItem]:
 
 def _is_same_event(a: NewsItem, b: NewsItem, now: float) -> bool:
     """هل الخبران يمثلان نفس الحدث؟"""
-    # فحص الوقت: لا تدمج أخبار يفصل بينها أكثر من 2 ساعة
+    # فحص الوقت: لا تدمج أخبار يفصل بينها أكثر من 6 ساعات
     if a.timestamp and b.timestamp:
-        if abs(a.timestamp - b.timestamp) > 7200:
+        if abs(a.timestamp - b.timestamp) > 21600:
             return False
 
     # فحص hash الحقائق
@@ -158,14 +158,25 @@ def _is_same_event(a: NewsItem, b: NewsItem, now: float) -> bool:
         entity_overlap = len(entities_a & entities_b)
         coin_overlap = len(coins_a & coins_b)
 
-        # شرط الدمج: كيانتان مشتركتان أو كيانة + عملة
+        # شرط الدمج الموسع:
+        # 1. كيانتان مشتركتان
         if entity_overlap >= 2:
             return True
+        # 2. كيانة + عملة (مثل: Bitcoin + SEC)
         if entity_overlap >= 1 and coin_overlap >= 1:
             return True
-        # إذا تطابقت العملات + نوع الخبر
-        if coin_overlap >= 2 and a.news_type == b.news_type:
+        # 3. عملة واحدة مشتركة + نفس نوع الخبر → نفس الموضوع
+        if coin_overlap >= 1 and a.news_type == b.news_type:
             return True
+        # 4. عملتان مشتركتان → نفس الموضوع الكريبتوي
+        if coin_overlap >= 2:
+            return True
+
+    # فحص التشابه النصي — آخر طبقة حماية
+    text_a = _normalize_for_similarity(f"{a.clean_title or a.title} {a.clean_summary or a.summary}")
+    text_b = _normalize_for_similarity(f"{b.clean_title or b.title} {b.clean_summary or b.summary}")
+    if text_a and text_b and text_a == text_b:
+        return True
 
     return False
 

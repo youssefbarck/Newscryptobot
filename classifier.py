@@ -12,7 +12,11 @@ import time
 from typing import Dict, List, Tuple
 
 from models import NewsItem, NewsType, ScoreResult, SourceQuality
-from config import TYPE_KEYWORDS, REJECTION_KEYWORDS, CRYPTO_CONTEXT_KEYWORDS, log
+from config import TYPE_KEYWORDS, REJECTION_KEYWORDS, CRYPTO_CONTEXT_KEYWORDS, _PRICE_NOISE_PATTERNS, log
+
+
+# compile أنماط price noise (مرة واحدة عند الاستيراد)
+_PRICE_NOISE_COMPILED = [re.compile(p, re.IGNORECASE) for p in _PRICE_NOISE_PATTERNS]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -337,6 +341,11 @@ def should_reject(item: NewsItem) -> Tuple[bool, str]:
     for kw in REJECTION_KEYWORDS:
         if kw.lower() in text_lower:
             return True, f"كلمة رفض: {kw}"
+
+    # 3b. أخبار تغير السعر الروتينية (price noise)
+    for pattern in _PRICE_NOISE_COMPILED:
+        if pattern.search(text_lower):
+            return True, "تغيير سعر روتيني (price noise)"
 
     # 4. رفض Reddit
     if "reddit" in item.source.lower():

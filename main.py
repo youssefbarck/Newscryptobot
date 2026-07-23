@@ -20,6 +20,15 @@ from telegram_bot import run_bot, run_oneshot
 from translate import translation_cache
 
 
+# ═══════════════════════════════════════════════════════════
+# 🗑️ حذف كاش الترجمة عند كل بدء تشغيل
+# ═══════════════════════════════════════════════════════════
+_cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "translation_cache.json")
+if os.path.exists(_cache_path):
+    os.remove(_cache_path)
+    print(f"🗑️ تم حذف كاش الترجمة القديم: {_cache_path}")
+
+
 async def main():
     """نقطة الدخول الرئيسية"""
 

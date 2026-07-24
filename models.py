@@ -63,6 +63,7 @@ class ExtractedFacts:
     coins: List[str] = field(default_factory=list)
     companies: List[str] = field(default_factory=list)
     people: List[str] = field(default_factory=list)
+    platforms: List[str] = field(default_factory=list)
     numbers: List[str] = field(default_factory=list)
     has_financial_data: bool = False
     sentiment: str = "neutral"  # positive, negative, neutral

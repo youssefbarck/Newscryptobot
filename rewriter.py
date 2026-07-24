@@ -188,16 +188,43 @@ def _restore_entities(text: str, entity_map: Dict[str, str]) -> str:
     return text
 
 
+def _has_orphan_placeholders(text: str) -> bool:
+    """هل يوجد placeholders لم تُستبدل (بقيت من الـ AI)؟"""
+    return bool(re.search(r'§ENT\d{3}§', text))
+
+
+def _has_empty_entity_slots(text: str) -> bool:
+    """هل يوجد فتحات فارغة تدل على أسماء كيانات محذوفة؟"""
+    patterns = [
+        r'\s،\s+(?:الرئيس|المدير|المؤسس|المالك|الرئيس التنفيذي)',
+        r'أفاد\s+[،,]\s+',
+        r'أكد\s+[،,]\s+',
+        r'صرح\s+[،,]\s+',
+        r'على\s+منصات?\s+[و]\s+[و]\s+',
+        r'تطبيق\s+(?:الذي|المرتبط)\s+',
+    ]
+    for pat in patterns:
+        if re.search(pat, text):
+            return True
+    return False
+
+
 def _build_facts_summary(item: NewsItem) -> str:
-    """بناء ملخص الحقائق للـ prompt"""
+    """بناء ملخص الحقائق للـ prompt — يشمل كل الكيانات التي يجب الحفاظ عليها"""
     if not item.facts:
         return "لا توجد حقائق مستخرجة"
 
     parts: List[str] = []
     if item.facts.main_entities:
-        parts.append(f"الكيانات: {', '.join(item.facts.main_entities)}")
+        parts.append(f"الكيانات الرئيسية: {', '.join(item.facts.main_entities)}")
     if item.facts.coins:
         parts.append(f"العملات: {', '.join(item.facts.coins)}")
+    if item.facts.companies:
+        parts.append(f"الشركات: {', '.join(item.facts.companies)}")
+    if item.facts.people:
+        parts.append(f"الأشخاص: {', '.join(item.facts.people)}")
+    if item.facts.platforms:
+        parts.append(f"المنصات: {', '.join(item.facts.platforms)}")
     if item.facts.numbers:
         parts.append(f"الأرقام: {', '.join(item.facts.numbers[:5])}")
     if item.facts.sentiment and item.facts.sentiment != "neutral":
@@ -225,15 +252,17 @@ def _build_prompt(item: NewsItem) -> str:
         f"النص الأصلي:\n"
         f"العنوان: {title}\n"
         f"المحتوى: {summary}\n\n"
-        f"القواعد:\n"
+        f"القواعد الصارمة:\n"
         f"1. اكتب فقط: عنوان قصير جداً (سطر واحد فقط، أقل من 15 كلمة) + فقرة واحدة مختصرة (3-5 جمل)\n"
         f"2. لا تضف تعليقات أو تحليلات شخصية\n"
         f"3. لا تذكر اسم المصدر في النص (لا تقل 'وفقاً لمصادر' أو 'بحسب تقرير')\n"
-        f"4. احتفظ بأسماء الأشخاص والشركات والعملات كما هي (لا تترجمها)\n"
+        f"4. احتفظ بأسماء الأشخاص والشركات والعملات كما هي — لا تحذف أي اسم واستبدله بفارغ أو بفاصلة\n"
         f"5. لا تضيف هاشتاغ أو إيموجي أو تسميات مثل 'أخبار عاجلة'\n"
-        f"6. لا تستخدم أي كلمة إنجليزية إلا أسماء العملات والشركات (مثل BTC, BlackRock)\n"
+        f"6. لا تستخدم أي كلمة إنجليزية أو صينية أو يابانية إلا أسماء العملات والشركات (مثل BTC, BlackRock)\n"
         f"7. العنوان يجب أن يكون مختلفاً تماماً عن المحتوى — لا تكرر نفس الجمل أو الكلمات\n"
-        f'8. أعد النتيجة كـ JSON فقط:\n{{"headline": "...", "body": "..."}}'
+        f"8. لا تكرر نفس الجملة أو العبارة أكثر من مرة في المحتوى\n"
+        f"9. اكتب بأسلوب عربي سليم — لا تخلط العربية بغيرها من اللغات\n"
+        f'10. أعد النتيجة كـ JSON فقط:\n{{"headline": "...", "body": "..."}}'
     )
     return prompt
 
@@ -327,12 +356,14 @@ def _clean_translated_text(headline: str, body: str) -> Tuple[str, str]:
     طبقة تنظيف نهائية AFTER الترجمة.
     تُنفّذ على النص العربي المُترجم قبل التنسيق.
 
-    تحل 5 مشاكل:
+    تحل 7 مشاكل:
     1. تسرب تصنيف المنشور ("أخبار عاجلة: ...")
     2. تسرب أسماء المصادر ("وفقاً لمصادر..." / "CoinDesk")
     3. كلمات إنجليزية فاسدة (market, exchange, platform)
     4. هاشتاقات مُضمّنة (#بيتكوين) — formatter يبنيها
     5. إيموجي زائدة — formatter يضيفها
+    6. أحرف صينية/يابانية/كورية متسربة
+    7. جمل مكررة داخل نفس المحتوى
     """
     # ── تنظيف العنوان ──
     headline = _clean_one_line(headline)
@@ -345,6 +376,13 @@ def _clean_translated_text(headline: str, body: str) -> Tuple[str, str]:
         if line.strip():
             cleaned_lines.append(line)
     body = "\n".join(cleaned_lines)
+
+    # 6️⃣ إزالة الأحرف الصينية/اليابانية/الكورية (CJK)
+    headline = re.sub(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]+', '', headline)
+    body = re.sub(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]+', '', body)
+
+    # 7️⃣ إزالة الجمل المكررة في المحتوى
+    body = _deduplicate_sentences(body)
 
     # تنظيف المسافات الأخيرة
     headline = headline.strip()
@@ -390,6 +428,9 @@ def _clean_one_line(text: str) -> str:
 
     # 6️⃣ إزالة أقواس وعلامات markdown
     text = _RE_BRACKETS_MARKDOWN.sub("", text)
+
+    # 6️⃣b إزالة الأحرف الصينية/اليابانية/الكورية (CJK)
+    text = re.sub(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]+', '', text)
 
     # تنظيف المسافات والفواصل المتروكة
     text = re.sub(r"\s*[.,،؛]\s*\.", ".", text)
@@ -480,9 +521,42 @@ def _has_unwanted_english(text: str) -> bool:
     return False
 
 
+def _deduplicate_sentences(body: str) -> str:
+    """
+    إزالة الجمل المكررة في المحتوى.
+    يحتفظ بأول occurrence ويحذف المكررات.
+    """
+    if not body:
+        return body
+    sentences = re.split(r'[.。，]\s*', body)
+    seen: List[str] = []
+    unique: List[str] = []
+    for sent in sentences:
+        sent = sent.strip()
+        if not sent or len(sent) < 10:
+            continue
+        normalized = sent.lower().strip()
+        is_dup = False
+        for prev in seen:
+            words_s = set(re.findall(r'[\w\u0600-\u06FF]+', normalized))
+            words_p = set(re.findall(r'[\w\u0600-\u06FF]+', prev))
+            if not words_s or not words_p:
+                continue
+            common = words_s & words_p
+            sim = len(common) / min(len(words_s), len(words_p))
+            if sim > 0.75 and abs(len(sent) - len(prev)) < max(len(sent), len(prev)) * 0.3:
+                is_dup = True
+                log.debug(f"_deduplicate_sentences: حذف جملة مكررة: '{sent[:50]}...'")
+                break
+        if not is_dup:
+            seen.append(normalized)
+            unique.append(sent)
+    return ". ".join(unique)
+
+
 def _check_quality(headline: str, body: str) -> Tuple[bool, str]:
     """
-    فحص جودة النتيجة.
+    فحص جودة النتيجة — 7 طبقات حماية.
     يُرجع (مقبول، سبب_الرفض)
     """
     if not headline or len(headline.strip()) < 15:
@@ -490,15 +564,42 @@ def _check_quality(headline: str, body: str) -> Tuple[bool, str]:
     if not body or len(body.strip()) < 50:
         return False, f"المحتوى قصير جداً ({len(body) if body else 0} حرف)"
     combined = headline + " " + body
+
+    # ── فحص 1: نسبة العربية ──
     ratio = _arabic_char_ratio(combined)
     if ratio < 0.40:
         return False, f"نسبة العربية منخفضة ({ratio:.0%})"
+
+    # ── فحص 2: كلمات إنجليزية غير مسموحة ──
     if _has_unwanted_english(combined):
         return False, "يوجد كلمات إنجليزية غير مسموحة"
 
-    # فحص الجمل الناقصة — جملة تنتهي بحرف/كلمة مفردة بدون سياق
+    # ── فحص 3: أحرف صينية/يابانية/كورية (CJK) ──
+    if re.search(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', combined):
+        return False, "يوجد أحرف صينية أو يابانية في النص"
+
+    # ── فحص 4: فتحات كيانات فارغة (أسماء محذوفة) ──
+    empty_entity_patterns = [
+        r'\s،\s+(?:الرئيس|المدير|المؤسس|المالك|الرئيس التنفيذي|المسؤول|المتحدث)',
+        r'(?:الرئيس|المدير|المؤسس|المالك|الرئيس التنفيذي|المسؤول|المتحدث)\s+ل(?:ـ)?(?:شركة|مؤسسة|منصة|صندوق|مجموعة)\s+[.،]\s*',
+        r'أفاد\s+[،,]\s+',                      # "أفاد ،" بدون اسم
+        r'أكد\s+[،,]\s+',                      # "أكد ،" بدون اسم
+        r'صرح\s+[،,]\s+',                      # "صرح ،" بدون اسم
+        r'أعلن\s+[،,]\s+',                      # "أعلن ،" بدون اسم
+        r'ذكر\s+[،,]\s+',                       # "ذكر ،" بدون اسم
+        r'كشف\s+[،,]\s+',                       # "كشف ،" بدون اسم
+        r'على\s+منصات?\s+[و]\s+[و]\s+',          # "على منصات و و" — أسماء منصات محذوفة
+        r'تطبيق\s+(?:الذي|المرتبط|المشفر)\s+(?:بـ|ال)',  # "تطبيق الذي" بدون اسم التطبيق
+        r'حصة\s+(?:فيه|فيها)\s+[،,]',           # حصة بدون وضوح
+        r'واتسابت?\s+(?:الذي|المرتبط)\s+',       # واتساب بدون اسم التطبيق
+    ]
+    for pat in empty_entity_patterns:
+        if re.search(pat, body):
+            return False, "اسم كيان محذوف — فتحة فارغة في النص"
+
+    # ── فحص 5: جمل ناقصة في نهاية المحتوى ──
     broken_patterns = [
-        r'\s[a-zA-Z]\s*$',            # حرف إنجليزي وحيد في النهاية (مثل "o" في النهاية)
+        r'\s[a-zA-Z]\s*$',            # حرف إنجليزي وحيد في النهاية
         r'\s[أ-ي]\s*[.،]$',            # حرف عربي وحيد + نقطة/فاصلة
         r'\sفي\s*[.،]\s*$',          # "في." أو "في،" في النهاية
         r'\sمن\s*[.،]\s*$',          # "من." في النهاية
@@ -506,22 +607,30 @@ def _check_quality(headline: str, body: str) -> Tuple[bool, str]:
         r'\sعلى\s*[.،]\s*$',         # "على." في النهاية
         r'\sفي\s+ال[.،]\s*$',        # "في ال." في النهاية
         r'\sأن\s+تم\s+[.،]\s*$',    # "أن تم." في النهاية بدون تفصيل
+        r'\sوقد\s+تم\s+[.،]\s*$',   # "وقد تم." بدون تفصيل
     ]
     for pat in broken_patterns:
         if re.search(pat, body):
             return False, "جملة ناقصة في نهاية المحتوى"
 
-    # فحص المحتوى المبهم — فقرة بدون أسماء/كيانات محددة
-    # المحتوى الجيد يجب أن يحتوي على تفاصيل محددة (أرقام، أسماء، أماكن)
+    # ── فحص 6: تكرار مفرط لنفس العبارة ──
+    words_body = re.findall(r'[\w\u0600-\u06FF]+', body)
+    if len(words_body) >= 10:
+        for i in range(len(words_body) - 3):
+            phrase = " ".join(words_body[i:i+4])
+            count = body.lower().count(phrase.lower())
+            if count >= 3:
+                return False, f"تكرار مفرط: '{phrase}' تكررت {count} مرات"
+
+    # ── فحص 7: المحتوى المبهم بدون تفاصيل ──
     has_specifics = (
         re.search(r'[\$][\d,]+', combined) or       # مبالغ "$48M"
         re.search(r'\d{2,}', combined) or          # أرقام (تواريخ، كميات)
         re.search(r'(\d+\.\d+)%', combined) or   # نسب مئوية
-        any(ent in combined for ent in ['Bitcoin', 'Ethereum', 'SEC', 'Binance', 'BTC', 'ETH'])  # كيانات معروفة
+        any(ent in combined for ent in ['Bitcoin', 'Ethereum', 'SEC', 'Binance', 'BTC', 'ETH', 'SOL', 'SUI'])
     )
     if not has_specifics:
-        # فحص إضافي: إذا كان المحتوى عام جداً بدون تفاصيل
-        vague_words = ["شيء", "أمر", "عمل", "تطور", "حدث"]
+        vague_words = ["شيء", "أمر", "عمل", "تطور", "حدث", "أحداث"]
         if sum(1 for w in vague_words if w in combined) >= 2:
             return False, "محتوى مبهم بدون تفاصيل محددة"
 

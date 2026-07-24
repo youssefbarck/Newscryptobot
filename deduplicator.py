@@ -10,7 +10,7 @@ import time
 from typing import List, Optional
 from dataclasses import dataclass
 
-from models import NewsItem, SourceQuality
+from models import NewsItem, SourceQuality, NewsType
 from database import NewsDatabase, NewsRecord
 from config import log, MERGE_SOURCE_GROUPS
 
@@ -168,21 +168,34 @@ def _is_same_event(a: NewsItem, b: NewsItem, now: float) -> bool:
         # 3. عملة واحدة مشتركة + نفس نوع الخبر → نفس الموضوع
         if coin_overlap >= 1 and a.news_type == b.news_type:
             return True
+        # 3b. كيانة واحدة مشتركة + نفس نوع الخبر الهام (regulation, hack, etf)
+        _IMPORTANT_TYPES = {NewsType.REGULATION, NewsType.HACK, NewsType.ETF,
+                           NewsType.ECONOMIC_DATA, NewsType.FUNDING, NewsType.STABLECOIN}
+        if entity_overlap >= 1 and a.news_type == b.news_type and a.news_type in _IMPORTANT_TYPES:
+            return True
         # 4. عملتان مشتركتان → نفس الموضوع الكريبتوي
         if coin_overlap >= 2:
             return True
 
-    # فحص التشابه النصي — Jaccard similarity (التقاط الأخبار نفسها بصياغات مختلفة)
+    # فحص التشابه النصي — احتواء الكلمات فقط
+    # (الكيانات فُحصت بالفعل أعلاه — هنا نلتقط فقط ما فات)
     text_a = f"{a.clean_title or a.title} {a.clean_summary or a.summary}"
     text_b = f"{b.clean_title or b.title} {b.clean_summary or b.summary}"
     if text_a.strip() and text_b.strip():
-        jaccard = _word_jaccard(text_a, text_b)
-        if jaccard >= 0.50:
-            log.debug(
-                f"📊 Same event (text Jaccard {jaccard:.0%}): "
-                f"{a.title[:40]} ≈ {b.title[:40]}"
-            )
-            return True
+        norm_a = _normalize_for_similarity(text_a)
+        norm_b = _normalize_for_similarity(text_b)
+        words_a = set(norm_a.split()) if norm_a else set()
+        words_b = set(norm_b.split()) if norm_b else set()
+        if words_a and words_b:
+            intersection = len(words_a & words_b)
+            smaller = min(len(words_a), len(words_b))
+            containment = intersection / smaller if smaller > 0 else 0.0
+            if containment >= 0.50:
+                log.debug(
+                    f"📊 Same event (word containment {containment:.0%}): "
+                    f"{a.title[:40]} ≈ {b.title[:40]}"
+                )
+                return True
 
     return False
 
@@ -237,58 +250,140 @@ _ARABIC_STOPWORDS = {
     "اي", "والتي", "والذي", "التى", "تم",
 }
 
+_EN_STOPWORDS = frozenset({
+    "the", "a", "an", "is", "are", "was", "were", "have", "has",
+    "had", "do", "does", "did", "will", "would", "could", "should",
+    "may", "might", "to", "of", "in", "for", "on", "with", "at",
+    "by", "from", "as", "into", "through", "during", "before",
+    "after", "between", "under", "then", "once", "here", "there",
+    "when", "where", "why", "how", "all", "each", "few", "more",
+    "most", "other", "some", "such", "no", "nor", "not", "only",
+    "own", "same", "so", "than", "too", "very", "just", "and",
+    "but", "if", "or", "because", "until", "while", "this", "that",
+})
+_ALL_STOPWORDS = _EN_STOPWORDS | _ARABIC_STOPWORDS
+
+# تطبيع أسماء العملات والشركات (كل الصيغ: Bitcoin/btc/BTC → btc)
+_ENTITY_NORMALIZE = {
+    "bitcoin": "btc", "btc": "btc",
+    "ethereum": "eth", "eth": "eth",
+    "solana": "sol", "sol": "sol",
+    "ripple": "xrp", "xrp": "xrp",
+    "cardano": "ada", "ada": "ada",
+    "dogecoin": "doge", "doge": "doge",
+    "avalanche": "avax", "avax": "avax",
+    "polkadot": "dot", "dot": "dot",
+    "chainlink": "link", "link": "link",
+    "polygon": "pol", "pol": "pol",
+    "litecoin": "ltc", "ltc": "ltc",
+    "tron": "trx", "trx": "trx",
+    "uniswap": "uni", "uni": "uni",
+    "binance": "binance", "coinbase": "coinbase",
+    "blackrock": "blackrock", "sec": "sec",
+    "grayscale": "grayscale", "fidelity": "fidelity",
+    "microstrategy": "microstrategy", "tether": "usdt",
+    "usdt": "usdt", "usdc": "usdc",
+    "cz": "cz", "van eck": "vaneck",
+}
+
 
 def _normalize_for_similarity(text: str) -> str:
-    """تطبيع النص للمقارنة الدلالية — يدعم العربية والإنجليزية"""
+    """تطبيع النص — تطبيع الكيانات + إزالة stopwords + إزالة الأرقام والرموز"""
     import re
-    text = text.lower()
-    text = re.sub(r'\d+', ' ', text)
-    text = re.sub(r'[^\w\s\u0600-\u06FF]', ' ', text)
-    stopwords = {
-        "the", "a", "an", "is", "are", "was", "were", "have", "has",
-        "had", "do", "does", "did", "will", "would", "could", "should",
-        "may", "might", "to", "of", "in", "for", "on", "with", "at",
-        "by", "from", "as", "into", "through", "during", "before",
-        "after", "between", "under", "then", "once", "here", "there",
-        "when", "where", "why", "how", "all", "each", "few", "more",
-        "most", "other", "some", "such", "no", "nor", "not", "only",
-        "own", "same", "so", "than", "too", "very", "just", "and",
-        "but", "if", "or", "because", "until", "while", "this", "that",
-    }
-    stopwords.update(_ARABIC_STOPWORDS)
-    words = [w for w in text.split() if w not in stopwords and len(w) > 1]
+    text = text.lower().strip()
+    # تطبيع أسماء الكيانات المعروفة
+    for name, normalized in _ENTITY_NORMALIZE.items():
+        text = re.sub(r'\b' + re.escape(name) + r'\b', normalized, text)
+    # إزالة الأرقام والرموز — نبقي الكلمات المعنوية فقط
+    text = re.sub(r'\d+[,\.]?\d*', ' ', text)
+    text = re.sub(r'[$€£¥%#,.]', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    words = [w for w in text.split() if w not in _ALL_STOPWORDS and len(w) > 1]
     return " ".join(sorted(set(words)))
 
 
-def _word_jaccard(text_a: str, text_b: str) -> float:
-    """حساب تشابه Jaccard بين نصين بناءً على الكلمات المعنوية"""
+def _extract_char_ngrams(text: str, n: int = 3) -> set:
+    """استخراج character n-grams من نص — يربط بين الكلمات بمحدد"""
+    import re
+    text = text.lower().strip()
+    # استبدال المسافات بـ _ لربط حدود الكلمات
+    text = re.sub(r'\s+', '_', text)
+    if len(text) < n:
+        return set()
+    return set(text[i:i+n] for i in range(len(text) - n + 1))
+
+
+def _text_similarity_multi(text_a: str, text_b: str) -> float:
+    """
+    تشابه نصي متعدد الإشارات — يجمع 3 مقاييس:
+    1. احتواء الكلمات (40%) — كلمات معنوية مشتركة
+    2. character n-gram (40%) — تشابه في البنية
+    3. تطابق الكيانات المطبعّة (20%) — أسماء معروفة
+    """
     if not text_a or not text_b:
         return 0.0
+
+    # إشارة 1: احتواء الكلمات المعنوية
     norm_a = _normalize_for_similarity(text_a)
     norm_b = _normalize_for_similarity(text_b)
     words_a = set(norm_a.split()) if norm_a else set()
     words_b = set(norm_b.split()) if norm_b else set()
-    if not words_a or not words_b:
-        return 0.0
-    intersection = len(words_a & words_b)
-    union = len(words_a | words_b)
-    return intersection / union if union > 0 else 0.0
+    word_score = 0.0
+    if words_a and words_b:
+        intersection = len(words_a & words_b)
+        smaller = min(len(words_a), len(words_b))
+        word_score = intersection / smaller if smaller > 0 else 0.0
+
+    # إشارة 2: character 3-gram containment
+    ngrams_a = _extract_char_ngrams(text_a, n=3)
+    ngrams_b = _extract_char_ngrams(text_b, n=3)
+    char_score = 0.0
+    if ngrams_a and ngrams_b:
+        intersection = len(ngrams_a & ngrams_b)
+        smaller = min(len(ngrams_a), len(ngrams_b))
+        char_score = intersection / smaller if smaller > 0 else 0.0
+
+    # إشارة 3: تطابق الكيانات المعروفة (أسماء الشركات/العملات)
+    import re
+    entities_a = set()
+    entities_b = set()
+    text_a_lower = text_a.lower()
+    text_b_lower = text_b.lower()
+    for name, normalized in _ENTITY_NORMALIZE.items():
+        if name in text_a_lower:
+            entities_a.add(normalized)
+        if name in text_b_lower:
+            entities_b.add(normalized)
+    entity_score = 0.0
+    if entities_a and entities_b:
+        entity_score = len(entities_a & entities_b) / min(len(entities_a), len(entities_b))
+
+    #加权组合
+    # entity score is the strongest signal
+    if entity_score >= 0.5:
+        # Same entity detected → lower text threshold needed
+        combined = 0.25 * word_score + 0.25 * char_score + 0.50 * entity_score
+    else:
+        combined = 0.40 * word_score + 0.40 * char_score + 0.20 * entity_score
+    return combined
 
 
 def compute_text_fingerprint(text: str) -> str:
-    """حساب بصمة نصية مطبعّة لكشف التكرار"""
+    """حساب بصمة نصية مطبعّة لكشف التكرار — كلمات معنوية فقط"""
     return _normalize_for_similarity(text)
 
 
 def check_text_similarity(text: str, stored_fingerprints: list, threshold: float = 0.50) -> bool:
     """
     فحص تشابه النص ضد بصمات مخزنة.
-    يُستخدم لكشف التكرار الدلالي عبر الدورات والنشرات.
+    يُستخدم لكشف التكرار الدلالي عبر الدورات.
     يُرجع True إذا وجد تشابه >= threshold.
     """
     if not text or not stored_fingerprints:
         return False
-    words_new = set(_normalize_for_similarity(text).split())
+
+    norm_new = _normalize_for_similarity(text)
+    words_new = set(norm_new.split()) if norm_new else set()
     if not words_new:
         return False
 
@@ -299,7 +394,8 @@ def check_text_similarity(text: str, stored_fingerprints: list, threshold: float
         if not words_stored:
             continue
         intersection = len(words_new & words_stored)
-        union = len(words_new | words_stored)
-        if union > 0 and (intersection / union) >= threshold:
+        smaller = min(len(words_new), len(words_stored))
+        if smaller > 0 and (intersection / smaller) >= threshold:
             return True
+
     return False

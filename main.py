@@ -353,7 +353,7 @@ class NewsPipeline:
                 continue
             # فحص ضد منشورات سابقة + نفس الدورة
             all_fps = state.sent_text_fingerprints + _batch_fps
-            if check_text_similarity(ar_text, all_fps, threshold=0.50):
+            if check_text_similarity(ar_text, all_fps, threshold=0.40):
                 log.info(f"🔄 تكرار نصي بعد الترجمة: {item.title_ar[:50]}")
                 stats.deduplicated += 1
                 continue

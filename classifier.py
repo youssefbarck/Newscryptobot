@@ -105,26 +105,26 @@ def classify_news(item: NewsItem) -> NewsType:
 # أوزان جودة المصدر
 _SOURCE_SCORES = {
     SourceQuality.TIER_1: 30,
-    SourceQuality.TIER_2: 20,
-    SourceQuality.TIER_3: 10,
-    SourceQuality.TIER_4: 5,
+    SourceQuality.TIER_2: 22,
+    SourceQuality.TIER_3: 18,
+    SourceQuality.TIER_4: 10,
 }
 
 # أوزان الاستعجالية حسب نوع الخبر
 _URGENCY_SCORES = {
-    NewsType.HACK: 20,
-    NewsType.ETF: 15,
-    NewsType.REGULATION: 15,
-    NewsType.LISTING: 12,
-    NewsType.ECONOMIC_DATA: 15,
-    NewsType.STABLECOIN: 10,
-    NewsType.ON_CHAIN: 10,
-    NewsType.FUNDING: 10,
-    NewsType.PARTNERSHIP: 8,
-    NewsType.ADOPTION: 8,
+    NewsType.HACK: 25,
+    NewsType.ETF: 22,
+    NewsType.REGULATION: 20,
+    NewsType.LISTING: 18,
+    NewsType.ECONOMIC_DATA: 18,
+    NewsType.STABLECOIN: 15,
+    NewsType.ON_CHAIN: 15,
+    NewsType.FUNDING: 15,
+    NewsType.PARTNERSHIP: 12,
+    NewsType.ADOPTION: 12,
     NewsType.MACRO: 12,
-    NewsType.GENERAL: 5,
-    NewsType.TECHNICAL_ANALYSIS: 3,
+    NewsType.GENERAL: 10,
+    NewsType.TECHNICAL_ANALYSIS: 5,
 }
 
 # كيانات رئيسية وأوزانها
@@ -137,8 +137,10 @@ _MAJOR_ENTITIES = {
     "ark invest": 8, "bitwise": 8,
 }
 _MEDIUM_ENTITIES = {
-    "solana": 8, "ethereum": 8, "bitcoin": 8,
-    "uniswap": 6, "aave": 6,
+    "solana": 10, "ethereum": 10, "bitcoin": 10,
+    "uniswap": 8, "aave": 8,
+    "xrp": 8, "cardano": 6, "dogecoin": 6,
+    "avalanche": 6, "polkadot": 6, "chainlink": 6,
 }
 
 # كلمات التحليل/الرأي (خصم)
@@ -210,24 +212,32 @@ def score_news(item: NewsItem) -> ScoreResult:
 
     # تحليل/رأي
     if any(w in text for w in _OPINION_WORDS):
-        result.penalty -= 15
+        result.penalty -= 8
 
     # إشاعة
     if any(w in text for w in _RUMOR_WORDS):
-        result.penalty -= 25
+        result.penalty -= 15
 
     # خبر قديم بدون كيان مهم
     if result.age_score <= 2 and result.entity_score < 8:
-        result.penalty -= 10
+        result.penalty -= 5
 
     # بدون صورة
     if not item.image:
-        result.penalty -= 5
+        result.penalty -= 3
 
     # محتوى قصير جداً
     content_len = len(item.clean_summary or item.summary or "")
     if content_len < 200:
-        result.penalty -= 10
+        result.penalty -= 5
+
+    # مكافأة استخراج الحقائق (bonus for having any facts)
+    if item.facts and (item.facts.facts or item.facts.coins or item.facts.companies):
+        result.bonus += 5
+
+    # مكافأة وجود عملات مذكورة
+    if item.facts and item.facts.coins:
+        result.bonus += 3
 
     # مكافأة الـ merged (من عدة مصادر)
     if item.is_merged and len(item.merged_sources) >= 3:
@@ -275,7 +285,7 @@ def _score_entities(item: NewsItem) -> float:
         elif entity_lower in _MEDIUM_ENTITIES:
             score = max(score, _MEDIUM_ENTITIES[entity_lower])
         else:
-            score = max(score, 3)  # كيانات عادية
+            score = max(score, 5)  # كيانات عادية
 
     # مكافأة إذا كان هناك عدة كيانات
     entity_count = len(item.facts.main_entities)

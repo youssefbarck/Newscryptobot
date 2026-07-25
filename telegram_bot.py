@@ -17,7 +17,6 @@ from config import (
     MAX_NEWS_PER_SCAN, MAX_NEWS_AGE, SCAN_INTERVAL, tz,
     save_sent_news, sent_news_hashes,
 )
-import dedup
 from filters import NewsItem, filter_news_items
 from rss import fetch_all_news, fetch_etf_flows, session_manager
 from translate import TranslationManager, translation_cache, COIN_NAME_TO_TICKER

@@ -1,7 +1,7 @@
 """
-📡 Whale News Bot v2.0 - جلب الأخبار (Async)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-جلب متوازي، connection pooling، و parsing متقدم
+📡 Whale News Bot — جلب الأخبار (مبسّط)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+جلب RSS بسيط بدون تعقيدات.
 """
 
 import re, asyncio
@@ -11,20 +11,14 @@ from xml.etree import ElementTree as ET
 import aiohttp
 from aiohttp import ClientTimeout, TCPConnector
 
-from config import (
-    log, NEWS_SOURCES, HEADERS, REDDIT_HEADERS, 
-    FARSIDE_RATE_LIMITER,
-)
+from config import log, NEWS_SOURCES, HEADERS, FARSIDE_RATE_LIMITER
 from filters import NewsItem
-from source_quality import source_quality
 
 
 # ═══════════════════════════════════════════════════════════
-# 🌐 Session Manager (Connection Pooling)
+# Session Manager
 # ═══════════════════════════════════════════════════════════
 class SessionManager:
-    """مدير الجلسات مع connection pooling"""
-
     def __init__(self):
         self._session: Optional[aiohttp.ClientSession] = None
         self._connector: Optional[TCPConnector] = None
@@ -32,59 +26,35 @@ class SessionManager:
 
     async def get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            # تهيئة كسولة: لا نُنشئ TCPConnector إلا داخل event loop
             if self._connector is None or self._connector.closed:
-                self._connector = TCPConnector(
-                    limit=50,           # إجمالي الاتصالات
-                    limit_per_host=10,  # لكل host
-                    ttl_dns_cache=300,  # cache DNS 5 دقائق
-                    use_dns_cache=True,
-                )
+                self._connector = TCPConnector(limit=50, limit_per_host=10, ttl_dns_cache=300)
             self._session = aiohttp.ClientSession(
-                connector=self._connector,
-                timeout=self._timeout,
-                headers=HEADERS,
+                connector=self._connector, timeout=self._timeout, headers=HEADERS,
             )
         return self._session
 
     async def close(self):
         if self._session and not self._session.closed:
             await self._session.close()
-            self._session = None
         if self._connector and not self._connector.closed:
             await self._connector.close()
-            self._connector = None
 
 
 session_manager = SessionManager()
 
 
 # ═══════════════════════════════════════════════════════════
-# 📅 Date Parsing (محسّن)
+# Date Parsing
 # ═══════════════════════════════════════════════════════════
-_DATE_FORMATS = [
-    "%a, %d %b %Y %H:%M:%S %z",      # RFC 822
-    "%Y-%m-%dT%H:%M:%S%z",           # ISO 8601
-    "%Y-%m-%dT%H:%M:%SZ",            # ISO 8601 with Z
-    "%Y-%m-%d %H:%M:%S",             # Simple
-    "%Y-%m-%d",                       # Date only
-]
-
-
 def parse_date(date_str: str) -> float:
-    """تحويل تاريخ RSS إلى timestamp"""
     if not date_str:
         return 0.0
-
-    # محاولة RFC 822
     try:
         from email.utils import parsedate_to_datetime
         dt = parsedate_to_datetime(date_str)
         return dt.timestamp()
     except Exception:
         pass
-
-    # محاولة ISO 8601
     try:
         clean = date_str.strip().replace("Z", "+00:00")
         dt = datetime.fromisoformat(clean)
@@ -93,23 +63,10 @@ def parse_date(date_str: str) -> float:
         return dt.timestamp()
     except Exception:
         pass
-
-    # محاولة الصيغ الأخرى
-    for fmt in _DATE_FORMATS:
-        try:
-            dt = datetime.strptime(date_str.strip(), fmt)
-            return dt.timestamp()
-        except Exception:
-            pass
-
     return 0.0
 
 
-# ═══════════════════════════════════════════════════════════
-# 🧹 HTML Cleaning
-# ═══════════════════════════════════════════════════════════
 def clean_html(text: str) -> str:
-    """تنظيف HTML"""
     if not text:
         return ""
     clean = re.sub(r'<[^>]+>', ' ', text)
@@ -120,46 +77,34 @@ def clean_html(text: str) -> str:
 
 
 def extract_summary(text: str, max_len: int = 300) -> str:
-    """اختصار النص"""
     clean = clean_html(text)
     if len(clean) <= max_len:
         return clean
-    # قص عند نهاية جملة
     truncated = clean[:max_len]
-    last_sentence = max(
-        truncated.rfind('. '), truncated.rfind('! '), truncated.rfind('? ')
-    )
+    last_sentence = max(truncated.rfind('. '), truncated.rfind('! '), truncated.rfind('? '))
     if last_sentence > max_len * 0.5:
         return truncated[:last_sentence + 1]
     return truncated[:max_len-3] + "..."
 
 
 def extract_image_from_html(html_text: str) -> str:
-    """استخراج رابط الصورة من HTML"""
     if not html_text:
         return ""
-    # img src
     match = re.search(r"""<img[^>]+src=['"]([^'"]+)['"]""", html_text)
-    if match:
-        return match.group(1)
-    return ""
+    return match.group(1) if match else ""
 
 
 def strip_source_from_title(title: str, source_name: str = "") -> str:
-    """إزالة اسم المصدر من العنوان"""
     if not title or not source_name:
         return title
-
     source_lower = source_name.lower()
     cleaned = title
-    separators = [" - ", " | ", " — ", " – ", " :: "]
-
-    for sep in separators:
+    for sep in [" - ", " | ", " — ", " – ", " :: "]:
         if sep in cleaned.lower():
             parts = cleaned.lower().rsplit(sep, 1)
             if len(parts) == 2:
                 last_part = parts[1].strip()
-                if (source_lower in last_part or len(last_part) < 30):
+                if source_lower in last_part or len(last_part) < 30:
                     idx = cleaned.lower().rfind(sep)
                     if idx > 10:
                         cleaned = cleaned[:idx].strip()
@@ -168,32 +113,22 @@ def strip_source_from_title(title: str, source_name: str = "") -> str:
 
 
 # ═══════════════════════════════════════════════════════════
-# 📰 RSS Parser (Async)
+# RSS Parser
 # ═══════════════════════════════════════════════════════════
-async def parse_rss_source(source: "NewsSource") -> List[NewsItem]:
-    """جلب وتحليل مصدر RSS واحد (async)"""
+async def parse_rss_source(source) -> List[NewsItem]:
     items = []
-
     try:
         session = await session_manager.get_session()
-
-        async with session.get(
-            source.url, 
-            headers=REDDIT_HEADERS if "reddit" in source.url.lower() else HEADERS,
-            timeout=ClientTimeout(total=source.timeout)
-        ) as response:
-
+        async with session.get(source.url, timeout=ClientTimeout(total=source.timeout)) as response:
             if response.status != 200:
                 log.warning(f"📰 {source.name}: HTTP {response.status}")
                 return items
 
             content = await response.text()
 
-            # محاولة parse كـ RSS 2.0
             try:
                 root = ET.fromstring(content.encode())
             except ET.ParseError:
-                log.warning(f"📰 {source.name}: XML parse error")
                 return items
 
             # RSS 2.0
@@ -204,7 +139,6 @@ async def parse_rss_source(source: "NewsSource") -> List[NewsItem]:
                     desc = item_elem.findtext('description', '') or ""
                     pub_date = item_elem.findtext('pubDate', '') or ""
 
-                    # استخراج الصورة
                     image = extract_image_from_html(desc)
                     if not image:
                         media = item_elem.find('{http://search.yahoo.com/mrss/}content')
@@ -226,8 +160,7 @@ async def parse_rss_source(source: "NewsSource") -> List[NewsItem]:
                         date_str=pub_date,
                         lang=source.lang,
                     ))
-                except Exception as e:
-                    log.debug(f"Parse item error in {source.name}: {e}")
+                except Exception:
                     continue
 
             # Atom fallback
@@ -238,8 +171,8 @@ async def parse_rss_source(source: "NewsSource") -> List[NewsItem]:
                         title = entry.findtext('atom:title', '', ns) or ""
                         link_elem = entry.find('atom:link', ns)
                         link = link_elem.get('href', '') if link_elem is not None else ""
-                        summary = entry.findtext('atom:summary', '', ns) or entry.findtext('atom:content', '', ns) or ""
-                        pub_date = entry.findtext('atom:updated', '', ns) or entry.findtext('atom:published', '', ns) or ""
+                        summary = entry.findtext('atom:summary', '', ns) or ""
+                        pub_date = entry.findtext('atom:updated', '', ns) or ""
 
                         items.append(NewsItem(
                             title=strip_source_from_title(clean_html(title), source.name),
@@ -252,58 +185,33 @@ async def parse_rss_source(source: "NewsSource") -> List[NewsItem]:
                             date_str=pub_date,
                             lang=source.lang,
                         ))
-                    except Exception as e:
-                        log.debug(f"Parse atom error in {source.name}: {e}")
+                    except Exception:
                         continue
 
         log.info(f"📰 {source.name}: {len(items)} items")
-
     except asyncio.TimeoutError:
-        log.warning(f"📰 {source.name}: timeout ({source.timeout}s)")
+        log.warning(f"📰 {source.name}: timeout")
     except Exception as e:
-        log.warning(f"📰 {source.name}: {type(e).__name__}: {e}")
+        log.warning(f"📰 {source.name}: {e}")
 
     return items
 
 
 # ═══════════════════════════════════════════════════════════
-# 🚀 Parallel Fetching
+# جلب كل الأخبار
 # ═══════════════════════════════════════════════════════════
 async def fetch_all_news(max_concurrent: int = 5) -> List[NewsItem]:
-    """جلب كل الأخبار بشكل متوازي مع semaphore
-    — يُخطّي المصادر المعطّلة منطقيًا
-    — يحاول استرداد المصادر المعطّلة كل 24 ساعة
-    """
     semaphore = asyncio.Semaphore(max_concurrent)
 
-    active_sources = []
-
-    for name, source in NEWS_SOURCES.items():
-        if source_quality.is_source_enabled(name):
-            active_sources.append(source)
-        elif source_quality.should_attempt_recovery(name):
-            # محاولة استرداد: جلب مقال واحد
-            log.info(f"📊 Recovery attempt: {name}")
-            active_sources.append(source)
-
-    async def fetch_with_limit(source):
+    async def fetch_one(source):
         async with semaphore:
-            is_recovery = not source_quality.is_source_enabled(source.name)
             try:
-                items = await source.circuit_breaker.call(parse_rss_source, source)
-
-                # إذا كان مصدرًا معطّلاً وفشل الجلب → خصم
-                if is_recovery and not items:
-                    source_quality.record_parse_failure(source.name, "Recovery fetch failed")
-                    return []
-
-                return items
+                return await parse_rss_source(source)
             except Exception as e:
-                log.warning(f"Circuit breaker for {source.name}: {e}")
-                source_quality.record_parse_failure(source.name, f"Circuit breaker: {type(e).__name__}")
+                log.warning(f"Fetch {source.name} error: {e}")
                 return []
 
-    tasks = [fetch_with_limit(source) for source in active_sources]
+    tasks = [fetch_one(s) for s in NEWS_SOURCES.values()]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_items = []
@@ -311,32 +219,28 @@ async def fetch_all_news(max_concurrent: int = 5) -> List[NewsItem]:
         if isinstance(result, list):
             all_items.extend(result)
 
-    # ترتيب حسب الوقت (الأحدث أولاً)
     all_items.sort(key=lambda x: x.timestamp, reverse=True)
     return all_items
 
 
 # ═══════════════════════════════════════════════════════════
-# 📊 ETF Flows (Async)
+# ETF Flows
 # ═══════════════════════════════════════════════════════════
 _FARSIDE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
 }
 
 
 def _parse_farside_table(html: str, etf_type: str = "btc") -> Optional[Dict]:
-    """تحليل جدول Farside"""
     tables = re.findall(r'<table[^>]*>(.*?)</table>', html, re.DOTALL | re.IGNORECASE)
     if not tables:
         return None
-
     rows = re.findall(r'<tr[^>]*>(.*?)</tr>', tables[0], re.DOTALL | re.IGNORECASE)
     if len(rows) < 4:
         return None
 
     fund_cells = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', rows[1], re.DOTALL | re.IGNORECASE)
-    fund_names = [re.sub(r'<[^>]+>', '', c).strip().replace('&nbsp;', ' ').replace('&amp;', '&').strip() 
-                  for c in fund_cells]
+    fund_names = [re.sub(r'<[^>]+>', '', c).strip().replace('&nbsp;', ' ') for c in fund_cells]
     fund_names = [f for f in fund_names if f]
 
     data_start = 4 if etf_type == "eth" else 3
@@ -345,22 +249,18 @@ def _parse_farside_table(html: str, etf_type: str = "btc") -> Optional[Dict]:
 
     for row_idx in range(data_start, len(rows)):
         cells = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', rows[row_idx], re.DOTALL | re.IGNORECASE)
-        clean = [re.sub(r'<[^>]+>', '', c).strip().replace('&nbsp;', ' ').replace(',', '') for c in cells]
+        clean = [re.sub(r'<[^>]+>', '', c).strip().replace('&nbsp;', '').replace(',', '') for c in cells]
         if not clean:
             continue
-
         label = clean[0].strip()
-        if label in ('Total', 'Average', 'Maximum', 'Minimum', 'Fee', 'Staking fee'):
+        if label in ('Total', 'Average', 'Maximum', 'Minimum', 'Fee'):
             continue
-
         date_match = re.match(r'(\d{1,2})\s+(\w{3})\s+(\d{4})', label)
         if not date_match:
             continue
-
         total_str = clean[-1].strip() if clean else ''
         if total_str == '-' or total_str == '0.0' or not total_str:
             break
-
         latest_date = label
         latest_flows = clean[1:]
 
@@ -373,75 +273,57 @@ def _parse_farside_table(html: str, etf_type: str = "btc") -> Optional[Dict]:
             val_str = latest_flows[i].strip()
             if val_str and val_str != '-':
                 try:
-                    is_negative = val_str.startswith('(')
+                    is_neg = val_str.startswith('(')
                     val_str = val_str.strip('()')
-                    val = float(val_str)
-                    funds[name.strip()] = -val if is_negative else val
+                    funds[name.strip()] = -float(val_str) if is_neg else float(val_str)
                 except ValueError:
                     funds[name.strip()] = 0.0
 
-    total_str = latest_flows[-1].strip() if latest_flows else '0'
     try:
-        is_negative = total_str.startswith('(')
+        total_str = latest_flows[-1].strip()
+        is_neg = total_str.startswith('(')
         total_str = total_str.strip('()')
         net_total = float(total_str)
-        if is_negative:
+        if is_neg:
             net_total = -net_total
-    except ValueError:
+    except (ValueError, IndexError):
         net_total = 0.0
 
     return {"date": latest_date, "total": net_total, "funds": funds}
 
 
-def _farside_day(date_str: str) -> int:
-    """استخراج رقم اليوم من تاريخ مثل '9 Jul 2025' للمقارنة الصحيحة"""
-    try:
-        return int(date_str.strip().split()[0])
-    except (ValueError, IndexError, AttributeError):
-        return 0
-
-
 async def fetch_etf_flows() -> Optional[Dict]:
-    """جلب بيانات ETF بشكل async"""
     result = {"date": None, "btc_total": 0.0, "eth_total": 0.0, "btc_funds": {}, "eth_funds": {}}
-
     await FARSIDE_RATE_LIMITER.acquire()
 
     try:
         session = await session_manager.get_session()
 
-        # BTC
         try:
             async with session.get("https://farside.co.uk/btc/", timeout=ClientTimeout(total=15), headers=_FARSIDE_HEADERS) as resp:
                 if resp.status == 200:
-                    html = await resp.text()
-                    btc_data = _parse_farside_table(html, "btc")
+                    btc_data = _parse_farside_table(await resp.text(), "btc")
                     if btc_data:
                         result["date"] = btc_data["date"]
                         result["btc_total"] = btc_data["total"]
                         result["btc_funds"] = btc_data["funds"]
-                        log.info(f"✅ Farside BTC: {btc_data['date']} → {btc_data['total']}M")
         except Exception as e:
-            log.warning(f"⚠️ Farside BTC: {e}")
+            log.warning(f"ETF BTC: {e}")
 
         await FARSIDE_RATE_LIMITER.acquire()
 
-        # ETH
         try:
             async with session.get("https://farside.co.uk/eth/", timeout=ClientTimeout(total=15), headers=_FARSIDE_HEADERS) as resp:
                 if resp.status == 200:
-                    html = await resp.text()
-                    eth_data = _parse_farside_table(html, "eth")
+                    eth_data = _parse_farside_table(await resp.text(), "eth")
                     if eth_data:
-                        if eth_data["date"] and (not result["date"] or _farside_day(eth_data["date"]) >= _farside_day(result["date"])):
-                            result["date"] = eth_data["date"]
+                        result["date"] = eth_data["date"]
                         result["eth_total"] = eth_data["total"]
                         result["eth_funds"] = eth_data["funds"]
-                        log.info(f"✅ Farside ETH: {eth_data['date']} → {eth_data['total']}M")
         except Exception as e:
-            log.warning(f"⚠️ Farside ETH: {e}")
+            log.warning(f"ETF ETH: {e}")
 
     except Exception as e:
-        log.warning(f"⚠️ ETF flows error: {e}")
+        log.warning(f"ETF flows error: {e}")
 
     return result if result["date"] else None

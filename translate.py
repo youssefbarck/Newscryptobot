@@ -1170,7 +1170,10 @@ GLOSSARY_AR = {
 
 
 def _protect_entities(text: str) -> Tuple[str, Dict[str, Tuple[str, Optional[str]]]]:
-    """حماية الكيانات المهمة قبل الترجمة — نستبدلها بعلامات مؤقتة"""
+    """حماية الكيانات المهمة قبل الترجمة — نستبدلها بعلامات مؤقتة
+    نستخدم حدود الكلمات لمنع المطابقة الجزئية.
+    نحمي أيضاً الجمع بإضافة s/es بعد الاسم.
+    """
     restore_map = {}
     protected = text
     counter = 0
@@ -1180,18 +1183,47 @@ def _protect_entities(text: str) -> Tuple[str, Dict[str, Tuple[str, Optional[str
         all_terms.append((term, trans))
     for term in CRITICAL_NAMES:
         if term not in GLOSSARY_AR:
-            all_terms.append((term, None))
+                all_terms.append((term, None))
 
+    # ترتيب حسب الطول (الأطول أولاً لمنع التداخل)
     all_terms.sort(key=lambda x: len(x[0]), reverse=True)
 
     for term, trans in all_terms:
-        pattern = re.compile(re.escape(term), re.IGNORECASE)
+        # حماية الكلمة مع حدود الكلمات
+        pattern = re.compile(r'(\b|[^a-zA-Z])' + re.escape(term) + r'(\b|[^a-zA-Z])', re.IGNORECASE)
+        matches = list(pattern.finditer(protected))
+        if matches:
+            for match in reversed(matches):
+                # احتفظ بالأحرف المحيطة
+                prefix = match.group(1) if match.group(1) else ""
+                suffix = match.group(2) if match.group(2) else ""
+                placeholder = f"§§{counter:03d}§§"
+                protected = protected[:match.start()] + prefix + placeholder + suffix + protected[match.end():]
+                restore_map[placeholder] = (match.group(0).strip(), trans)
+                counter += 1
+
+    # حماية إضافية: صيغ الجمع الشائعة لأسماء العملات والبروتوكولات
+    plural_terms = [
+        "bitcoins", "ethereums", "altcoins", "stablecoins", "memecoins",
+        "shitcoins", "tokens", "coins", "nfts", "etfs", "daos",
+        "hackers", "whales", "investors", "traders", "validators",
+        "miners", "exchanges", "wallets", "bridges", "oracles",
+        "blockchains", "protocols", "platforms", "networks", "ecosystems",
+        "inflows", "outflows", "deposits", "withdrawals",
+        "regulators", "lawmakers", "officials", "authorities",
+        "futures", "options", "swaps", "pools",
+        "contracts", "transactions", "blocks",
+    ]
+    for term in plural_terms:
+        if term in GLOSSARY_AR:
+            continue
+        pattern = re.compile(r'\b' + re.escape(term) + r'\b', re.IGNORECASE)
         matches = list(pattern.finditer(protected))
         if matches:
             for match in reversed(matches):
                 placeholder = f"§§{counter:03d}§§"
                 protected = protected[:match.start()] + placeholder + protected[match.end():]
-                restore_map[placeholder] = (match.group(0), trans)
+                restore_map[placeholder] = (match.group(0), None)
                 counter += 1
 
     return protected, restore_map

@@ -133,7 +133,10 @@ async def _send_telegram(msg: QueuedMessage):
 # 🧹 تنظيف بسيط قبل الإرسال
 # ═══════════════════════════════════════════════════════════
 def clean_message(text: str) -> Optional[str]:
-    """تنظيف بسيط: كشف الترجمة الفاسدة + إبقاء التوقيع"""
+    """تنظيف بسيط: كشف الترجمة الفاسدة + إبقاء التوقيع
+    — تنظيف الكلمات المدمجة بدل حظر الرسالة كلها
+    — السماح بالكلمات الإنجليزية الشائعة في سياق الأخبار
+    """
     if not text or not text.strip():
         return None
 
@@ -141,7 +144,7 @@ def clean_message(text: str) -> Optional[str]:
     cleaned = []
     signature_found = False
 
-    # أسماء إنجليزية مسموحة
+    # أسماء إنجليزية مسموحة — قائمة واسعة جداً
     _allowed = {
         # عملات رئيسية
         "Bitcoin", "Ethereum", "Solana", "Binance", "Coinbase", "USDT", "USDC",
@@ -184,7 +187,7 @@ def clean_message(text: str) -> Optional[str]:
         "CoinShares", "Galaxy", "HashDex", "Paxos",
         "Spot", "Bitcoin", "Ethereum", "Solana",
         # منظمين وشخصيات
-        "Powell", "Yellen", "FOMC", "FTX", "FTX", "SBF",
+        "Powell", "Yellen", "FOMC", "FTX", "SBF",
         "Armstrong", "Garlinghouse", "Silbert", "Winklevoss",
         "Nakamoto", "Hayden", "Stani", "Gavin", "Charles",
         "Federal", "Reserve", "Treasury", "CFTC",
@@ -193,15 +196,14 @@ def clean_message(text: str) -> Optional[str]:
         "Etherscan", "BscScan", "Solscan", "DexScreener", "DexTools",
         "CoinGecko", "CoinMarketCap", "TradingView", "Glassnode",
         "Nansen", "Dune", "Arkham", "Whale", "DeFiLlama",
-        "Lookonchain", "Scam", "Bubblemaps",
+        "Lookonchain", "Bubblemaps",
         # مصطلحات تقنية
-        "mainnet", "testnet", "mainnet", "testnet",
-        "staking", "mining", "halving", "restaking",
+        "mainnet", "testnet", "staking", "mining", "halving", "restaking",
         "DePIN", "GameFi", "SocialFi", "RWA",
         "rollup", "zkSync", "zk",
         "memecoin", "stablecoin", "altcoin",
         "airdrop", "token", "tokens", "coins",
-        "blockchain", "crypto", "cryptocurrency",
+        "blockchain", "crypto", "cryptocurrency", "cryptocurrencies",
         "hack", "exploit", "vulnerability",
         "inflows", "outflows", "whales",
         "liquidation", "leverage", "futures",
@@ -246,7 +248,62 @@ def clean_message(text: str) -> Optional[str]:
         "DeFi", "RWA", "AI", "GPU",
         "Firedancer", "Solayer", "Sanctum", "Marinade",
         "Fragment", "Bond", "Solv", "Berkshire",
-        "Strategy", "Strategy",
+        "Strategy",
+        # ── كلمات إنجليزية شائعة في الأخبار ──
+        "after", "before", "during", "while", "since", "until",
+        "with", "from", "into", "onto", "upon", "over", "under", "above",
+        "about", "against", "between", "through", "without", "within",
+        "also", "just", "only", "very", "still", "even", "back", "down",
+        "more", "most", "less", "much", "well", "then", "than", "that",
+        "this", "these", "those", "each", "every", "some", "such", "many",
+        "been", "were", "have", "will", "would", "could", "should",
+        "does", "done", "goes", "went", "come", "came", "made", "took",
+        "said", "says", "told", "asks", "wants", "needs", "uses",
+        "first", "last", "next", "recent", "latest", "earliest",
+        "year", "years", "month", "months", "week", "weeks", "days",
+        "today", "yesterday", "time", "times",
+        "data", "numbers", "figure", "figures", "level", "levels",
+        "high", "highs", "lows", "peak", "peaks", "bottom",
+        "drop", "drops", "rise", "rises", "fall", "falls",
+        "gain", "gains", "loss", "losses", "profit", "profits",
+        "fund", "funds", "capital", "revenue", "asset", "assets",
+        "firm", "company", "companies", "group", "industry", "sector",
+        "user", "users", "client", "clients", "share", "shares",
+        "plan", "plans", "rule", "rules", "law", "laws",
+        "court", "judge", "case", "action", "actions",
+        "city", "state", "country", "region", "global", "world", "north", "south",
+        "east", "west", "asia", "europe", "america", "africa",
+        "bank", "banks", "finance", "financial", "economy", "economic",
+        "bill", "billion", "million", "thousand", "percent",
+        "government", "political", "policy", "public", "private",
+        "tech", "technology", "digital", "internet", "software", "system",
+        "chief", "executive", "director", "founder", "leader",
+        "news", "media", "press", "blog", "social",
+        "risk", "risks", "threat", "threats", "concern", "impact",
+        "growth", "decline", "increase", "decrease",
+        "change", "changes", "move", "moves", "shift", "turn",
+        "ahead", "behind", "close", "open", "near", "far",
+        "strong", "weak", "fast", "slow", "sharp", "steady",
+        "area", "space", "field", "range", "zone",
+        "effort", "push", "pull", "force", "power",
+        "role", "part", "step", "stage", "phase",
+        "base", "core", "key", "major", "minor",
+        "deal", "offer", "trade", "sales", "buy", "sell",
+        "hold", "keep", "give", "take", "send",
+        "show", "shows", "point", "points",
+        "likely", "unlikely", "possible", "sure",
+        "real", "true", "false", "clear",
+        "great", "huge", "tiny", "small", "large",
+        "four", "three", "five", "eight", "nine",
+        "half", "double", "single", "total",
+        "according", "following", "including", "despite",
+        "however", "although", "therefore", "because",
+        "recently", "reported", "announced", "revealed",
+        "confirmed", "stated", "noted", "added",
+        "remains", "continues", "reached", "hit",
+        "passed", "crossed", "surpassed", "exceeded",
+        "breaks", "hits", "sets", "gets",
+        "reuters", "associated", "press",
     }
 
     for line in lines:
@@ -266,7 +323,7 @@ def clean_message(text: str) -> Optional[str]:
             continue
 
         # سطر هاشتاغات — نحتفظ به
-        if re.match(r'^#[A-Z]+', stripped):
+        if re.match(r'^#', stripped):
             cleaned.append(stripped)
             continue
 
@@ -275,28 +332,39 @@ def clean_message(text: str) -> Optional[str]:
             log.warning(f"🧹 Blocked: wrong Unicode script")
             return None
 
-        # (2) كلمة واحدة تحتوي عربي + إنجليزي = ترجمة فاسدة
-        # مثل: اختراقers ، Developerات ، Protocolية
-        has_corrupted_word = False
-        for word in stripped.split():
+        # (2) كلمات مدمجة عربي + إنجليزي = تنظيفها بدل حظرها
+        cleaned_words = []
+        words = stripped.split()
+        for word in words:
             # تجاهل الهاشتاغات والرموز
             if word.startswith('#') or word.startswith('@') or word.startswith('http'):
+                cleaned_words.append(word)
                 continue
-            word_has_arabic = bool(re.search(r'[\u0600-\u06FF]', word))
-            word_has_latin = bool(re.search(r'[a-zA-Z]', word))
+            # تنظيف علامات الترقيم من الكلمة للفحص
+            bare = word.strip('.,!?;:()-[]{}"\'').strip()
+            word_has_arabic = bool(re.search(r'[\u0600-\u06FF]', bare))
+            word_has_latin = bool(re.search(r'[a-zA-Z]', bare))
             if word_has_arabic and word_has_latin:
-                log.warning(f"🧹 Blocked: corrupted word '{word}'")
-                has_corrupted_word = True
-                break
-        if has_corrupted_word:
-            return None
+                # كلمة مدمجة — احتفظ بالجزء العربي فقط
+                arabic_part = re.sub(r'[a-zA-Z]+', '', bare)
+                if len(arabic_part) >= 2:
+                    cleaned_words.append(arabic_part)
+                log.info(f"🧹 Cleaned corrupted word: '{word}' → '{arabic_part}'")
+                continue
+            cleaned_words.append(word)
 
-        # (3) كلمات إنجليزية مشبوهة (ليست في القائمة المسموحة)
-        english_words = re.findall(r'\b([a-zA-Z]{4,})\b', stripped)
-        suspicious = [w for w in english_words if w not in _allowed]
-        if suspicious:
-            log.info(f"🧹 Removed line with unknown English: {suspicious}")
+        stripped = " ".join(cleaned_words)
+        if not stripped:
             continue
+
+        # (3) كلمات إنجليزية مشبوهة — نسامح بـ 2 كلمة فقط
+        english_words = re.findall(r'\b([a-zA-Z]{3,})\b', stripped)
+        suspicious = [w for w in english_words if w not in _allowed]
+        if len(suspicious) > 2:
+            log.info(f"🧹 Removed line with {len(suspicious)} unknown English: {suspicious[:5]}")
+            continue
+        if suspicious:
+            log.info(f"🧹 Allowed line with {len(suspicious)} unknown English: {suspicious}")
 
         cleaned.append(stripped)
 
@@ -307,10 +375,10 @@ def clean_message(text: str) -> Optional[str]:
 
     # فحص أدنى: يجب أن يكون فيه عربي
     arabic_chars = sum(1 for c in result if '\u0600' <= c <= '\u06FF')
-    if arabic_chars < 10:
+    if arabic_chars < 5:
         return None
 
-    return result if len(result) > 15 else None
+    return result if len(result) > 10 else None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -413,17 +481,19 @@ async def scan_news_loop(config: BotConfig, state: BotState, translator: Transla
                 # ترجمة
                 await translator.translate_item(item)
                 if not item.title_ar:
+                    log.debug(f"  ⏭️ No translation: {item.title[:60]}")
                     continue
 
                 # تنسيق
                 msg = format_news_item(item)
                 if not msg:
+                    log.debug(f"  ⏭️ No format: {item.title_ar[:60]}")
                     continue
 
                 # تنظيف بسيط — كشف الترجمة الفاسدة
                 msg = clean_message(msg)
                 if not msg:
-                    log.info(f"🧹 Blocked: {item.title[:60]}")
+                    log.info(f"  🧹 Cleaned out: {item.title[:60]}")
                     continue
 
                 # منع التكرار بعد الترجمة (نفس الخبر من مصدرين مختلفين)
@@ -610,14 +680,17 @@ async def run_oneshot(config: BotConfig, state: BotState):
 
         await translator.translate_item(item)
         if not item.title_ar:
+            log.debug(f"  ⏭️ No translation: {item.title[:60]}")
             continue
 
         msg = format_news_item(item)
         if not msg:
+            log.debug(f"  ⏭️ No format: {item.title_ar[:60]}")
             continue
 
         msg = clean_message(msg)
         if not msg:
+            log.info(f"  🧹 Cleaned out: {item.title[:60]}")
             continue
 
         # منع التكرار بعد الترجمة

@@ -62,6 +62,286 @@ message_queue = MessageQueue()
 
 
 # ═══════════════════════════════════════════════════════════
+# 🔍 نظام المراجعة بالأزرار التفاعلية
+# ═══════════════════════════════════════════════════════════
+_pending_news: Dict[int, dict] = {}  # msg_id → {"item": NewsItem, "text": str, "image": str}
+_editing_msg_id: Optional[int] = None  # message_id للخبر اللي يتم تعديله
+
+
+def _build_review_keyboard():
+    """بناء أزرار المراجعة التفاعلية"""
+    return {
+        "inline_keyboard": [[
+            {"text": "✅ إرسال للقناة", "callback_data": "approve"},
+            {"text": "✏️ تعديل", "callback_data": "edit"},
+            {"text": "❌ رفض", "callback_data": "reject"},
+        ]]
+    }
+
+
+async def _send_review_message(chat_id, text, image_url, item):
+    """إرسال خبر للمراجعة مع أزرار تفاعلية — يُرجّع message_id"""
+    keyboard = _build_review_keyboard()
+
+    # محاولة إرسال كصورة
+    if image_url:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_url, timeout=ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        img_data = await resp.read()
+                        img_payload = {
+                            "chat_id": chat_id,
+                            "photo": aiohttp.payload.BytesPayload(img_data, content_type="image/jpeg"),
+                            "caption": text[:1024],
+                            "parse_mode": "HTML",
+                            "reply_markup": keyboard,
+                        }
+                        async with session.post(
+                            f"https://api.telegram.org/bot{config.TOKEN}/sendPhoto",
+                            data=img_payload,
+                            timeout=ClientTimeout(total=30),
+                        ) as resp:
+                            if resp.status == 200:
+                                result = await resp.json()
+                                return result.get("result", {}).get("message_id")
+        except Exception as e:
+            log.warning(f"Review photo failed: {e}")
+
+    # إرسال كنص
+    await TELEGRAM_RATE_LIMITER.acquire()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"https://api.telegram.org/bot{config.TOKEN}/sendMessage",
+                json={"chat_id": chat_id, "text": text[:4096], "parse_mode": "HTML", "reply_markup": keyboard},
+                timeout=ClientTimeout(total=30),
+            ) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    return result.get("result", {}).get("message_id")
+                else:
+                    error = await resp.text()
+                    log.warning(f"Review send failed: {resp.status} {error[:200]}")
+    except Exception as e:
+        log.warning(f"Review send error: {e}")
+
+    return None
+
+
+async def _answer_callback(callback_query, text, show_alert=False):
+    """الرد على ضغطة الزر"""
+    callback_id = callback_query.get("id")
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                f"https://api.telegram.org/bot{config.TOKEN}/answerCallbackQuery",
+                json={"callback_query_id": callback_id, "text": text, "show_alert": show_alert},
+                timeout=ClientTimeout(total=10),
+            )
+    except Exception as e:
+        log.warning(f"Answer callback error: {e}")
+
+
+async def _remove_keyboard(chat_id, msg_id):
+    """إزالة أزرار المراجعة من الرسالة"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                f"https://api.telegram.org/bot{config.TOKEN}/editMessageReplyMarkup",
+                json={"chat_id": chat_id, "message_id": msg_id, "reply_markup": {"inline_keyboard": []}},
+                timeout=ClientTimeout(total=10),
+            )
+    except Exception as e:
+        log.warning(f"Remove keyboard error: {e}")
+
+
+async def _approve_news(chat_id, msg_id):
+    """الموافقة على الخبر وإرساله للقناة"""
+    if msg_id not in _pending_news:
+        return
+
+    info = _pending_news.pop(msg_id)
+    item = info["item"]
+    text = info["text"]
+    image = info["image"]
+
+    # تسجيل كمرسّل
+    sent_news_hashes.add(item.hash)
+    title_ar_hash = hashlib.md5((item.title_ar or "").encode()).hexdigest()[:12]
+    sent_news_hashes.add(title_ar_hash)
+    state.last_alerts_hashes[item.hash] = time.time()
+
+    # إرسال للقناة
+    if state.is_channel_enabled(config):
+        await message_queue.put(QueuedMessage(
+            text=text, image_url=image, chat_id=config.CHANNEL_ID, priority=2,
+        ))
+
+    # تعديل الرسالة الأصلية لإظهار الموافقة
+    approved_text = f"✅ تمت الموافقة وإرساله للقناة\n\n{text}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                f"https://api.telegram.org/bot{config.TOKEN}/editMessageText",
+                json={"chat_id": chat_id, "message_id": msg_id, "text": approved_text[:4096], "parse_mode": "HTML"},
+                timeout=ClientTimeout(total=10),
+            )
+    except Exception as e:
+        log.warning(f"Edit approved msg error: {e}")
+
+    save_sent_news()
+    log.info(f"✅ Approved and sent: {item.title[:60]}")
+
+
+async def _start_edit(chat_id, msg_id):
+    """بدء وضع التعديل — يطلب من المستخدم إرسال النص الجديد"""
+    global _editing_msg_id
+    if msg_id not in _pending_news:
+        return
+
+    _editing_msg_id = msg_id
+
+    # تعديل الرسالة الأصلية لإظهار حالة الانتظار
+    try:
+        info = _pending_news[msg_id]
+        item = info["item"]
+        waiting_text = f"✏️ في انتظار التعديل...\n\n{info['text']}"
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                f"https://api.telegram.org/bot{config.TOKEN}/editMessageText",
+                json={"chat_id": chat_id, "message_id": msg_id, "text": waiting_text[:4096], "parse_mode": "HTML", "reply_markup": {"inline_keyboard": []}},
+                timeout=ClientTimeout(total=10),
+            )
+    except Exception as e:
+        log.warning(f"Edit waiting msg error: {e}")
+
+    # إرسال رسالة تذكير
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                f"https://api.telegram.org/bot{config.TOKEN}/sendMessage",
+                json={"chat_id": chat_id, "text": "✏️ أرسل النسخة المعدّلة لهذا الخبر الآن.\n(أي رسالة نصية ترسلها ستكون النص الجديد)\n\n💡 لإلغاء التعديل، أرسل /cancel", "parse_mode": "HTML"},
+                timeout=ClientTimeout(total=10),
+            )
+    except Exception as e:
+        log.warning(f"Edit prompt error: {e}")
+
+
+async def _handle_edit_submission(chat_id, new_text):
+    """معالجة النص المعدّل من المستخدم"""
+    global _editing_msg_id
+    msg_id = _editing_msg_id
+    if msg_id is None or msg_id not in _pending_news:
+        _editing_msg_id = None
+        return
+
+    info = _pending_news.pop(msg_id)
+    item = info["item"]
+
+    # بناء الرسالة النهائية من النص الجديد
+    msg = new_text.strip()
+    if not msg:
+        _editing_msg_id = None
+        return
+
+    # إضافة المصدر إذا مش موجود
+    source = item.source or ""
+    if source and source not in msg:
+        msg += f"\n\n📰 المصدر: {source}"
+
+    # إضافة هاشتاغات العملات
+    if item.coins:
+        seen = set()
+        unique = []
+        for c in item.coins:
+            canonical = COIN_NAME_TO_TICKER.get(c.lower(), c.upper())
+            if canonical not in seen:
+                seen.add(canonical)
+                unique.append(canonical)
+        if unique:
+            coins_str = " ".join([f"#{c}" for c in unique[:5]])
+            msg += f"\n\n{coins_str}"
+
+    # إضافة التوقيع
+    if "@newscrypto1m" not in msg:
+        msg += "\n\n✉️ @newscrypto1m"
+
+    # تسجيل كمرسّل
+    sent_news_hashes.add(item.hash)
+    title_ar_hash = hashlib.md5((item.title_ar or new_text).encode()).hexdigest()[:12]
+    sent_news_hashes.add(title_ar_hash)
+    state.last_alerts_hashes[item.hash] = time.time()
+
+    # إرسال للقناة
+    if state.is_channel_enabled(config):
+        await message_queue.put(QueuedMessage(
+            text=msg, image_url=info["image"], chat_id=config.CHANNEL_ID, priority=2,
+        ))
+
+    # تعديل الرسالة الأصلية
+    final_text = f"✏️ تم إرسال النسخة المعدّلة للقناة\n\n{msg}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                f"https://api.telegram.org/bot{config.TOKEN}/editMessageText",
+                json={"chat_id": chat_id, "message_id": msg_id, "text": final_text[:4096], "parse_mode": "HTML"},
+                timeout=ClientTimeout(total=10),
+            )
+    except Exception as e:
+        log.warning(f"Edit final msg error: {e}")
+
+    _editing_msg_id = None
+    save_sent_news()
+    log.info(f"✏️ Edited and sent: {item.title[:60]}")
+
+
+async def _reject_news(chat_id, msg_id):
+    """رفض الخبر وحذفه"""
+    if msg_id in _pending_news:
+        info = _pending_news.pop(msg_id)
+        log.info(f"❌ Rejected: {info['item'].title[:60]}")
+
+    # حذف رسالة المراجعة
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                f"https://api.telegram.org/bot{config.TOKEN}/deleteMessage",
+                json={"chat_id": chat_id, "message_id": msg_id},
+                timeout=ClientTimeout(total=10),
+            )
+    except Exception as e:
+        log.warning(f"Delete message error: {e}")
+
+
+async def handle_callback(callback_query: dict):
+    """معالجة ضغطات الأزرار التفاعلية"""
+    data = callback_query.get("data", "")
+    message = callback_query.get("message", {})
+    msg_id = message.get("message_id")
+    from_id = str(callback_query.get("from", {}).get("id", ""))
+    chat_id = str(message.get("chat", {}).get("id", ""))
+
+    # التحقق من صلاحية المستخدم
+    if from_id != config.CHAT_ID:
+        await _answer_callback(callback_query, "❌ غير مصرح لك", show_alert=True)
+        return
+
+    if data == "approve":
+        await _answer_callback(callback_query, "✅ تم الإرسال للقناة!")
+        await _remove_keyboard(chat_id, msg_id)
+        await _approve_news(chat_id, msg_id)
+
+    elif data == "edit":
+        await _answer_callback(callback_query, "✏️ أرسل النص المعدّل")
+        await _start_edit(chat_id, msg_id)
+
+    elif data == "reject":
+        await _answer_callback(callback_query, "❌ تم رفض الخبر")
+        await _reject_news(chat_id, msg_id)
+
+
+# ═══════════════════════════════════════════════════════════
 # 📨 إرسال Telegram
 # ═══════════════════════════════════════════════════════════
 async def _send_telegram(msg: QueuedMessage):
@@ -537,30 +817,28 @@ async def scan_news_loop(config: BotConfig, state: BotState, translator: Transla
                     log.info(f"🧹 Duplicate after translation: {item.title[:60]}")
                     continue
 
-                # إرسال
-                sent_news_hashes.add(item.hash)
-                sent_news_hashes.add(title_ar_hash)
-                state.last_alerts_hashes[item.hash] = now
+                # فحص إذا كان الخبر مُعلّق مراجعة سابقاً
+                already_pending = any(
+                    p["item"].hash == item.hash for p in _pending_news.values()
+                )
+                if already_pending:
+                    continue
 
-                # للقناة
-                if state.is_channel_enabled(config):
-                    await message_queue.put(QueuedMessage(
-                        text=msg, image_url=item.image, chat_id=config.CHANNEL_ID, priority=2,
-                    ))
+                # إرسال للمراجعة بالأزرار (بدل الإرسال المباشر)
+                sent_msg_id = await _send_review_message(
+                    config.CHAT_ID, msg, item.image, item
+                )
+                if sent_msg_id:
+                    _pending_news[sent_msg_id] = {
+                        "item": item, "text": msg, "image": item.image,
+                    }
+                    alerts_sent += 1
+                    log.info(f"  🔍 Review sent: {item.title[:60]}")
 
-                # للمالك
-                await message_queue.put(QueuedMessage(
-                    text=msg, image_url=item.image, chat_id=config.CHAT_ID, priority=2,
-                ))
+            log.info(f"📊 Scan: {len(news)} fetched, {len(filtered)} filtered, {alerts_sent} for review")
 
-                alerts_sent += 1
-                log.info(f"  ✉️ {item.title[:60]}")
-
-            log.info(f"📊 Scan: {len(news)} fetched, {len(filtered)} filtered, {alerts_sent} sent")
-
-            # حفظ الهاشات
-            if alerts_sent > 0:
-                save_sent_news()
+            # حفظ الهاشات (فقط بعد الموافقة)
+            save_sent_news()
 
             # ETF flows
             try:
@@ -601,20 +879,24 @@ async def handle_command(text: str, chat_id: str) -> Optional[str]:
                 "/stats — إحصائيات")
 
     elif text == "/status":
-        enabled = "✅ يعمل" if config.state.auto_alerts_enabled else "⏸️ متوقف"
-        channel = "✅" if config.state.is_channel_enabled(config) else "❌"
+        enabled = "✅ يعمل" if state.auto_alerts_enabled else "⏸️ متوقف"
+        channel = "✅" if state.is_channel_enabled(config) else "❌"
+        pending = len(_pending_news)
+        editing = "✏️ نعم" if _editing_msg_id else "لا"
         return (f"📊 حالة البوت\n\n"
                 f"الحالة: {enabled}\n"
                 f"القناة: {channel}\n"
                 f"المصادر: {len(NEWS_SOURCES)}\n"
-                f"المُرسلة: {len(sent_news_hashes)}")
+                f"المُرسلة: {len(sent_news_hashes)}\n"
+                f"بانتظار المراجعة: {pending}\n"
+                f"وضع التعديل: {editing}")
 
     elif text == "/pause":
-        config.state.auto_alerts_enabled = False
+        state.auto_alerts_enabled = False
         return "⏸️ تم الإيقاف المؤقت."
 
     elif text == "/resume":
-        config.state.auto_alerts_enabled = True
+        state.auto_alerts_enabled = True
         return "✅ تم الاستئناف."
 
     elif text == "/stats":
@@ -664,11 +946,36 @@ async def run_bot(config: BotConfig, state: BotState):
 
                     for update in data.get("result", []):
                         offset = update.get("update_id", 0) + 1
+
+                        # (1) معالجة ضغطات الأزرار التفاعلية
+                        callback_query = update.get("callback_query", {})
+                        if callback_query:
+                            await handle_callback(callback_query)
+                            continue
+
+                        # (2) معالجة الرسائل النصية
                         message = update.get("message", {})
                         text = message.get("text", "")
                         chat_id = str(message.get("chat", {}).get("id", ""))
 
+                        # فحص صلاحية المستخدم
+                        if chat_id != config.CHAT_ID:
+                            continue
+
+                        # أوامر
                         if text.startswith("/"):
+                            if text.strip() == "/cancel":
+                                # إلغاء وضع التعديل
+                                global _editing_msg_id
+                                if _editing_msg_id is not None:
+                                    _editing_msg_id = None
+                                    await session.post(
+                                        f"https://api.telegram.org/bot{config.TOKEN}/sendMessage",
+                                        json={"chat_id": chat_id, "text": "❌ تم إلغاء التعديل."},
+                                        timeout=ClientTimeout(total=10),
+                                    )
+                                    continue
+
                             reply = await handle_command(text, chat_id)
                             if reply:
                                 await TELEGRAM_RATE_LIMITER.acquire()
@@ -680,6 +987,12 @@ async def run_bot(config: BotConfig, state: BotState):
                                     )
                                 except Exception:
                                     pass
+                            continue
+
+                        # (3) معالجة النص المعدّل (وضع التعديل)
+                        if _editing_msg_id is not None:
+                            await _handle_edit_submission(chat_id, text)
+                            continue
         except Exception as e:
             log.warning(f"Polling error: {e}")
             await asyncio.sleep(10)

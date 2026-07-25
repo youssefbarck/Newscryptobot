@@ -357,10 +357,10 @@ def clean_message(text: str) -> Optional[str]:
         if not stripped:
             continue
 
-        # (3) كلمات إنجليزية مشبوهة — نسامح بـ 2 كلمة فقط
+        # (3) كلمات إنجليزية مشبوهة — نسامح بـ 3 كلمة (الملخص أطول)
         english_words = re.findall(r'\b([a-zA-Z]{3,})\b', stripped)
         suspicious = [w for w in english_words if w not in _allowed]
-        if len(suspicious) > 2:
+        if len(suspicious) > 3:
             log.info(f"🧹 Removed line with {len(suspicious)} unknown English: {suspicious[:5]}")
             continue
         if suspicious:
@@ -384,8 +384,31 @@ def clean_message(text: str) -> Optional[str]:
 # ═══════════════════════════════════════════════════════════
 # 📝 تنسيق الخبر
 # ═══════════════════════════════════════════════════════════
+def _clean_summary_text(text: str, max_len: int = 400) -> str:
+    """تنظيف واختصار الملخص المترجم"""
+    if not text:
+        return ""
+    text = text.strip()
+    # إزالة الأسطر الفارغة المتكررة
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    # إزالة التكرارات
+    text = re.sub(r'(.\.{3,})', '...', text)
+    # قص النص الطويل عند الجملة الأقرب
+    if len(text) <= max_len:
+        return text
+    truncated = text[:max_len]
+    last_sentence = max(
+        truncated.rfind('. '),
+        truncated.rfind('! '),
+        truncated.rfind('؟ '),
+    )
+    if last_sentence > max_len * 0.4:
+        return truncated[:last_sentence + 1]
+    return truncated[:max_len-3] + "..."
+
+
 def format_news_item(item: NewsItem) -> Optional[str]:
-    """تنسيق الخبر: عنوان فقط + هاشتاغات + توقيع"""
+    """تنسيق الخبر: عنوان + ملخص + مصدر + هاشتاغات + توقيع"""
     title_ar = item.title_ar or item.title
 
     if not title_ar or title_ar == item.title:
@@ -396,8 +419,20 @@ def format_news_item(item: NewsItem) -> Optional[str]:
     if title_clean and title_clean[-1] not in ".؟!؟.؟\u06d4":
         title_clean += "."
 
-    # رمز بسيط
+    # البناء: عنوان + ملخص + مصدر
     msg = f"🔵 {title_clean}"
+
+    # إضافة الملخص المترجم (يحتوي على التفاصيل: من قال، لمن، والسبب)
+    summary_ar = getattr(item, 'summary_ar', '') or ''
+    if summary_ar and summary_ar != getattr(item, 'summary', ''):
+        summary_clean = _clean_summary_text(summary_ar)
+        if summary_clean:
+            msg += f"\n\n📝 {summary_clean}"
+
+    # إضافة المصدر
+    source = getattr(item, 'source', '') or ''
+    if source:
+        msg += f"\n\n📰 المصدر: {source}"
 
     # إضافة العملات
     if item.coins:

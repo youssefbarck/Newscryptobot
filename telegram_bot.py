@@ -133,12 +133,121 @@ async def _send_telegram(msg: QueuedMessage):
 # 🧹 تنظيف بسيط قبل الإرسال
 # ═══════════════════════════════════════════════════════════
 def clean_message(text: str) -> Optional[str]:
-    """تنظيف بسيط: إزالة الأشياء غير المفهومة"""
+    """تنظيف بسيط: كشف الترجمة الفاسدة + إبقاء التوقيع"""
     if not text or not text.strip():
         return None
 
     lines = text.strip().split("\n")
     cleaned = []
+    signature_found = False
+
+    # أسماء إنجليزية مسموحة
+    _allowed = {
+        # عملات رئيسية
+        "Bitcoin", "Ethereum", "Solana", "Binance", "Coinbase", "USDT", "USDC",
+        "BlackRock", "MicroStrategy", "Grayscale", "Fidelity", "SEC", "ETF",
+        "DeFi", "NFT", "Web3", "Litecoin", "Dogecoin", "Avalanche", "Polkadot",
+        "Chainlink", "Polygon", "Tron", "Uniswap", "Aptos", "Arbitrum",
+        "Optimism", "Stellar", "Hedera", "Cosmos", "Fantom", "Aave", "Tether",
+        "Circle", "OKX", "Kraken", "Bybit", "Ripple", "Cardano", "Toncoin",
+        "Near", "Sui", "Sei", "Shiba", "Pepe", "Vitalik", "Satoshi", "Saylor",
+        "Gensler", "CZ", "Dorsey", "Buterin", "Musk",
+        "BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX", "DOT",
+        "LINK", "POL", "LTC", "TRX", "UNI", "APT", "ARB", "SUI", "SEI",
+        "TON", "FTM", "ATOM", "XLM", "HBAR", "SHIB", "PEPE", "DAI", "OP",
+        "IBIT", "FBTC", "GBTC", "ETHA", "HODL", "NEAR",
+        # عملات إضافية
+        "Monero", "Tezos", "VeChain", "Filecoin", "Zcash", "EOS",
+        "Algorand", "Kaspa", "Worldcoin", "Injective", "Render",
+        "Jupiter", "Raydium", "Drift", "Hyperliquid", "EigenLayer",
+        "Ondo", "Berachain", "Bittensor", "Bonk", "Floki",
+        "BOME", "Pengu", "WIF", "Virtuals", "AI16z",
+        "Celestia", "Starknet", "Manta", "Linea", "Mantle", "Scroll",
+        "Maker", "Lido", "Curve", "Synthetix", "Compound", "GMX", "dYdX",
+        "Pendle", "Jito", "EtherFi", "Renzo", "Morpho", "Aerodrome",
+        "Decentraland", "Sandbox", "Axie", "Graph", "Helium",
+        "XMR", "XTZ", "VET", "FIL", "ZEC", "ALGO", "ICP", "KAS", "WLD",
+        "STRK", "TIA", "INJ", "RENDER", "FET", "RUNE", "JUP", "RAY",
+        "HYPE", "EIGEN", "ETHFI", "REZ", "AERO", "TAO",
+        "MANA", "SAND", "AXS", "GRT", "HNT", "MKR", "CRV", "SNX", "COMP",
+        # بروتوكولات ومنصات
+        "Wormhole", "LayerZero", "Stargate", "OpenSea", "Blur",
+        "MetaMask", "Ledger", "Trezor", "Trust",
+        "Bitfinex", "Bitstamp", "Gemini", "Bitget", "MEXC", "Deribit",
+        "Sushi", "Pancake", "Curve", "Balancer", "Rocket",
+        "Pyth", "Band", "Akash", "Fetch",
+        "CoinDesk", "CoinTelegraph", "Decrypt", "BeInCrypto", "Coinpedia",
+        "Blockworks", "Bitcoinist",
+        # ETF tickers
+        "EZET", "BITB", "BITX", "ARKB", "BTCO", "BITQ", "BKCH",
+        "VanEck", "Invesco", "Bitwise", "WisdomTree", "ProShares",
+        "CoinShares", "Galaxy", "HashDex", "Paxos",
+        "Spot", "Bitcoin", "Ethereum", "Solana",
+        # منظمين وشخصيات
+        "Powell", "Yellen", "FOMC", "FTX", "FTX", "SBF",
+        "Armstrong", "Garlinghouse", "Silbert", "Winklevoss",
+        "Nakamoto", "Hayden", "Stani", "Gavin", "Charles",
+        "Federal", "Reserve", "Treasury", "CFTC",
+        "PayPal", "Visa", "Mastercard",
+        # مستكشفات وأدوات
+        "Etherscan", "BscScan", "Solscan", "DexScreener", "DexTools",
+        "CoinGecko", "CoinMarketCap", "TradingView", "Glassnode",
+        "Nansen", "Dune", "Arkham", "Whale", "DeFiLlama",
+        "Lookonchain", "Scam", "Bubblemaps",
+        # مصطلحات تقنية
+        "mainnet", "testnet", "mainnet", "testnet",
+        "staking", "mining", "halving", "restaking",
+        "DePIN", "GameFi", "SocialFi", "RWA",
+        "rollup", "zkSync", "zk",
+        "memecoin", "stablecoin", "altcoin",
+        "airdrop", "token", "tokens", "coins",
+        "blockchain", "crypto", "cryptocurrency",
+        "hack", "exploit", "vulnerability",
+        "inflows", "outflows", "whales",
+        "liquidation", "leverage", "futures",
+        "liquidity", "yield", "farming",
+        "launch", "upgrade", "fork", "roadmap",
+        "audit", "sanction", "compliance",
+        "CBDC", "ETF", "ETFs", "NFTs", "DAO",
+        "DAOs", "DEX", "CEX", "FOMO", "FUD",
+        "REKT", "WAGMI", "LAMBO",
+        "bullish", "bearish", "rally", "crash", "surge", "plunge",
+        "correction", "breakout", "consolidation",
+        "support", "resistance", "volume",
+        "market", "price", "trading", "investors", "traders",
+        "analysts", "experts", "regulators",
+        "inflation", "deflation", "recession",
+        "interest", "rate", "monetary",
+        "launchpad", "presale", "minting",
+        "partnership", "integration", "ecosystem", "network",
+        "protocol", "platform", "project", "community",
+        "announcement", "report", "analysis",
+        "approved", "rejected", "banned", "regulated",
+        "investigation", "lawsuit", "settlement",
+        "significant", "substantial", "notable", "massive",
+        "expected", "anticipated", "scheduled",
+        "record", "milestone", "benchmark",
+        "weekly", "monthly", "quarterly",
+        "bull", "bear", "pump", "dump",
+        "long", "short", "position",
+        "smart", "contract", "wallet",
+        "gas", "fee", "fees", "hash", "nonce",
+        "node", "nodes", "block", "blocks",
+        "proof", "consensus", "validator",
+        "bridge", "bridges", "oracle", "oracles",
+        "wrapped", "WBTC", "WETH", "LSD", "LRT", "LST",
+        "FOMC", "CPI", "GDP", "NASDAQ", "DXY",
+        "Bitmain", "Antminer", "Marathon", "Riot",
+        "Foundry", "Mining", "Pool", "Antpool",
+        "Convex", "Tokemak", "Bancor", "Numeraire",
+        "Radix", "Aleph", "Neon", "Zeta", "Kinto", "Lumia",
+        "Morpheus", "Ritual", "Arc",
+        "Stablecoins", "Altcoins", "Cryptocurrencies",
+        "DeFi", "RWA", "AI", "GPU",
+        "Firedancer", "Solayer", "Sanctum", "Marinade",
+        "Fragment", "Bond", "Solv", "Berkshire",
+        "Strategy", "Strategy",
+    }
 
     for line in lines:
         stripped = line.strip()
@@ -149,33 +258,42 @@ def clean_message(text: str) -> Optional[str]:
                 cleaned.append("")
             continue
 
-        # توقيع
+        # سطر التوقيع — نحتفظ به مرة واحدة فقط
         if "@newscrypto1m" in stripped:
+            if not signature_found:
+                cleaned.append(stripped)
+                signature_found = True
             continue
 
-        # سكريبتات خاطئة (Telugu, Devanagari...)
+        # سطر هاشتاغات — نحتفظ به
+        if re.match(r'^#[A-Z]+', stripped):
+            cleaned.append(stripped)
+            continue
+
+        # (1) سكريبتات خاطئة (Telugu, Devanagari...)
         if re.search(r'[\u0C00-\u0C7F\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0E00-\u0E7F]', stripped):
+            log.warning(f"🧹 Blocked: wrong Unicode script")
             return None
 
-        # كلمات إنجليزية مشبوهة (ليست أسماء عملات/بروتوكولات)
-        # قائمة الأسماء المسموحة
-        allowed = {
-            "Bitcoin", "Ethereum", "Solana", "Binance", "Coinbase", "USDT", "USDC",
-            "BlackRock", "MicroStrategy", "Grayscale", "Fidelity", "SEC", "ETF",
-            "DeFi", "NFT", "Web3", "Litecoin", "Dogecoin", "Avalanche", "Polkadot",
-            "Chainlink", "Polygon", "Tron", "Uniswap", "Aptos", "Arbitrum",
-            "Optimism", "Stellar", "Hedera", "Cosmos", "Fantom", "Aave", "Tether",
-            "Circle", "OKX", "Kraken", "Bybit", "Ripple", "Cardano", "Toncoin",
-            "Near", "Sui", "Sei", "Shiba", "Pepe", "Vitalik", "Satoshi", "Saylor",
-            "Gensler", "CZ", "Dorsey", "Buterin", "Musk",
-            "BTC", "ETH", "SOL", "XRP", "BNB", "ADA", "DOGE", "AVAX", "DOT",
-            "LINK", "POL", "LTC", "TRX", "UNI", "APT", "ARB", "SUI", "SEI",
-            "TON", "FTM", "ATOM", "XLM", "HBAR", "SHIB", "PEPE", "DAI", "OP",
-            "IBIT", "FBTC", "GBTC", "ETHA", "HODL", "NEAR",
-        }
+        # (2) كلمة واحدة تحتوي عربي + إنجليزي = ترجمة فاسدة
+        # مثل: اختراقers ، Developerات ، Protocolية
+        has_corrupted_word = False
+        for word in stripped.split():
+            # تجاهل الهاشتاغات والرموز
+            if word.startswith('#') or word.startswith('@') or word.startswith('http'):
+                continue
+            word_has_arabic = bool(re.search(r'[\u0600-\u06FF]', word))
+            word_has_latin = bool(re.search(r'[a-zA-Z]', word))
+            if word_has_arabic and word_has_latin:
+                log.warning(f"🧹 Blocked: corrupted word '{word}'")
+                has_corrupted_word = True
+                break
+        if has_corrupted_word:
+            return None
 
+        # (3) كلمات إنجليزية مشبوهة (ليست في القائمة المسموحة)
         english_words = re.findall(r'\b([a-zA-Z]{4,})\b', stripped)
-        suspicious = [w for w in english_words if w not in allowed]
+        suspicious = [w for w in english_words if w not in _allowed]
         if suspicious:
             log.info(f"🧹 Removed line with unknown English: {suspicious}")
             continue
@@ -302,14 +420,21 @@ async def scan_news_loop(config: BotConfig, state: BotState, translator: Transla
                 if not msg:
                     continue
 
-                # تنظيف بسيط
+                # تنظيف بسيط — كشف الترجمة الفاسدة
                 msg = clean_message(msg)
                 if not msg:
                     log.info(f"🧹 Blocked: {item.title[:60]}")
                     continue
 
+                # منع التكرار بعد الترجمة (نفس الخبر من مصدرين مختلفين)
+                title_ar_hash = hashlib.md5(item.title_ar.encode()).hexdigest()[:12]
+                if title_ar_hash in sent_news_hashes:
+                    log.info(f"🧹 Duplicate after translation: {item.title[:60]}")
+                    continue
+
                 # إرسال
                 sent_news_hashes.add(item.hash)
+                sent_news_hashes.add(title_ar_hash)
                 state.last_alerts_hashes[item.hash] = now
 
                 # للقناة
@@ -495,7 +620,13 @@ async def run_oneshot(config: BotConfig, state: BotState):
         if not msg:
             continue
 
+        # منع التكرار بعد الترجمة
+        title_ar_hash = hashlib.md5(item.title_ar.encode()).hexdigest()[:12]
+        if title_ar_hash in sent_news_hashes:
+            continue
+
         sent_news_hashes.add(item.hash)
+        sent_news_hashes.add(title_ar_hash)
 
         if state.is_channel_enabled(config):
             await message_queue.put(QueuedMessage(text=msg, image_url=item.image, chat_id=config.CHANNEL_ID))

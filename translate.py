@@ -711,6 +711,12 @@ GLOSSARY_AR = {
 
     # ── مصطلحات البلوكتشين ──
     "blockchain": "سلسلة الكتل",
+    "blockchains": "سلاسل الكتل",
+    "crypto": "كريبتو",
+    "cryptocurrency": "عملة رقمية",
+    "stable": "عملة مستقرة",
+    "stablecoin": "عملة مستقرة",
+    "stablecoins": "عملات مستقرة",
     "block": "كتلة",
     "blocks": "كتل",
     "blockchain network": "شبكة البلوكتشين",
@@ -724,6 +730,7 @@ GLOSSARY_AR = {
     "seed phrase": "عبارة البذرة",
     "gas fee": "رسوم الغاز",
     "gas fees": "رسوم الغاز",
+    "gas": "رسوم الغاز",
     "transaction fee": "رسوم المعاملة",
     "mainnet": "الشبكة الرئيسية",
     "testnet": "شبكة الاختبار",
@@ -1169,6 +1176,99 @@ GLOSSARY_AR = {
 }
 
 
+# ═══════════════════════════════════════════════════════════
+# 🌐 خريطة أسماء الكيانات بالعربي
+# ═══════════════════════════════════════════════════════════
+# تُستخدم لترجمة أسماء العملات والمنصات عند الاستعادة بعد الترجمة
+# الأسماء اللي ما نبي نترجمها (رموز مثل BTC, ETH) مش موجودة هنا
+ENTITY_AR_NAMES = {
+    # ── عملات رئيسية ──
+    "bitcoin": "بيتكوين", "btc": "بيتكوين", "bitcoin cash": "بيتكوين كاش",
+    "bch": "بيتكوين كاش", "ethereum": "إيثيريوم", "eth": "إيثيريوم",
+    "ether": "إيثر", "ethereum classic": "إيثيريوم كلاسيك", "etc": "إيثيريوم كلاسيك",
+    "solana": "سولانا", "sol": "سولانا", "xrp": "ريبل", "ripple": "ريبل",
+    "cardano": "كاردانو", "ada": "كاردانو", "dogecoin": "دوجكوين", "doge": "دوجكوين",
+    "avalanche": "أفالانش", "avax": "أفالانش", "polkadot": "بولكادوت", "dot": "بولكادوت",
+    "chainlink": "شاين لينك", "link": "شاين لينك", "polygon": "بوليجون", "matic": "بوليجون",
+    "litecoin": "لايتكوين", "ltc": "لايتكوين", "tron": "ترون", "trx": "ترون",
+    "uniswap": "يوني سواب", "aave": "إيفي", "near protocol": "نير بروتوكول",
+    "near": "نير", "aptos": "أبتوس", "apt": "أبتوس",
+    "arbitrum": "أربيتروم", "arb": "أربيتروم", "optimism": "أوبتيميزم", "op": "أوبتيميزم",
+    "sui": "سوي", "sei": "سي", "pepe": "بيبي", "shiba": "شيبا", "shib": "شيبا",
+    "toncoin": "تونكوين", "ton": "تون",
+    "fantom": "فانتوم", "ftm": "فانتوم", "cosmos": "كوزموس", "atom": "كوزموس",
+    "stellar": "ستيلار", "xlm": "ستيلار", "hedera": "هيدرا", "hbar": "هيدرا",
+    "binance coin": "باينانس كوين", "bnb": "باينانس كوين",
+    "usdt": "تيثر", "tether": "تيثر", "usdc": "يوس دي سي",
+    "dai": "داي", "monero": "مونيرو", "xmr": "مونيرو",
+    "tezos": "تيزوس", "xtz": "تيزوس", "vechain": "فيشين", "vet": "فيشين",
+    "filecoin": "فيلكوين", "fil": "فيلكوين", "zcash": "زد كاش", "zec": "زد كاش",
+    "eos": "إيوس", "algorand": "ألغوراند", "algo": "ألغوراند",
+    "flow": "فلو", "kaspa": "كاسبا", "kas": "كاسبا",
+    "worldcoin": "ورلد كوين", "wld": "ورلد كوين",
+    "starknet": "ستارك نت", "strk": "ستارك نت",
+    "celestia": "سيليستيا", "tia": "سيليستيا",
+    "injective": "إنجيكتف", "inj": "إنجيكتف",
+    "render": "ريندر", "rndr": "ريندر",
+    "thorchain": "ثور تشين", "rune": "رن",
+    "jupiter": "جوبيتر", "jup": "جوبيتر", "raydium": "ريديوم", "ray": "ريديوم",
+    "drift": "دريفت", "hyperliquid": "هايبر ليكويد", "hype": "هايبر ليكويد",
+    "eigenlayer": "إيجن لاير", "eigen": "إيجن",
+    "etherfi": "إيثر فاي", "ethfi": "إيثر فاي",
+    "renzo": "رينزو", "pendle": "بندل",
+    "ondo": "أوندو", "berachain": "بيرا تشين", "bera": "بيرا تشين",
+    "sonic": "سونيك", "virtuals": "فيرتشوالز",
+    "bittensor": "بيتنسور", "tao": "بيتنسور",
+    "bonk": "بونك", "wif": "ويف", "floki": "فلولكي",
+    "decentraland": "ديسنترالاند", "mana": "ديسنترالاند",
+    "sandbox": "ساند بوكس", "sand": "ساند بوكس",
+    "maker": "ميكر", "mkr": "ميكر", "lido": "ليدو", "ldo": "ليدو",
+    "curve": "كيرف", "crv": "كيرف", "synthetix": "سينثيتيكس", "snx": "سينثيتيكس",
+    "compound": "كومباوند", "comp": "كومباوند",
+    "gmx": "جي إم إكس", "dydx": "دي واي دي إكس",
+    "jito": "جيتو", "morpho": "مورفو", "aerodrome": "أيرو دروم", "aero": "أيرو دروم",
+    "fetch.ai": "فيتش أيه", "fet": "فيتش",
+    # ─ـ منصات ──
+    "binance": "بايننس", "coinbase": "كوين بيس",
+    "kraken": "كراكن", "bybit": "باي بت", "okx": "أو كي إكس", "kucoin": "كوكوين",
+    "bitfinex": "بتفينيكس", "bitstamp": "بت ستامب", "gemini": "جيميني",
+    "bitget": "بتجيت", "mexc": "إم إكس سي",
+    "upbit": "أوبت", "bithumb": "بيثامب", "deribit": "ديربت",
+    "crypto.com": "كريبتو دوت كوم", "huobi": "هويوبي", "htx": "إتش تي إكس",
+    "opensea": "أوبن سي", "metamask": "ميتا ماسك",
+    "ledger": "ليجر", "trezor": "تريزور",
+    "pancakeswap": "بان كيك سواب", "sushiswap": "سوشي سواب",
+    # ─ـ شركات ومؤسسات ──
+    "blackrock": "بلاك روك", "black rock": "بلاك روك",
+    "fidelity": "فيديليتي", "grayscale": "غري سكيل",
+    "microstrategy": "مايكرو استراتيجي", "strategy": "مايكرو استراتيجي",
+    "bitwise": "بت وايز", "vaneck": "فان إيك",
+    "invesco": "إنفيسكو", "21shares": "توينتي ون شيرز",
+    "proshares": "برو شيرز", "galaxy digital": "غالاكسي ديجيتال",
+    "coinshares": "كوين شيرز", "blockstream": "بلوك ستريم",
+    "consensys": "كونسينسيس", "circle": "سيركل", "paxos": "باكسوس",
+    "paypal": "باي بال", "visa": "فيزا", "mastercard": "ماستركارد",
+    # ─ـ أشخاص ──
+    "satoshi": "ساتوشي", "vitalik": "فيتاليك", "buterin": "فيتاليك",
+    "saylor": "سيلور", "musk": "إيلون ماسك",
+    "changpeng zhao": "تشانغ بينغ تشاو", "cz": "سي زد",
+    "dorsey": "جاك دورسي", "gensler": "جينسلر",
+    "powell": "باول", "yellen": "يلين",
+    "brian armstrong": "برايان أرمسترونغ", "garlinghouse": "جارلينغ هاوس",
+    "sam bankman-fried": "سام بانكمان فرايد", "sbf": "إس بي إف",
+    # ─ـ منظمين ──
+    "sec": "هيئة الأوراق المالية", "cftc": "هيئة تداول السلع",
+    "federal reserve": "الاحتياطي الفيدرالي", "fomc": "لجنة السوق الفيدرالية",
+    # ── مصادر الأخبار ──
+    "coindesk": "كوين ديسك", "cointelegraph": "كوين تيليغراف",
+    "decrypt": "ديكريبت", "beincrypto": "بي إن كريبتو",
+    "coinpedia": "كوين بيديا", "blockworks": "بلوك ووركس",
+    "bitcoinist": "بيتكوينيست", "crypto.news": "كريبتو نيوز",
+}
+
+# بناء نسخة lowercase للبحث السريع
+_ENTITY_AR_LOWER = {k.lower(): v for k, v in ENTITY_AR_NAMES.items()}
+
 def _protect_entities(text: str) -> Tuple[str, Dict[str, Tuple[str, Optional[str]]]]:
     """حماية الكيانات المهمة قبل الترجمة — نستبدلها بعلامات مؤقتة
     نستخدم حدود الكلمات لمنع المطابقة الجزئية.
@@ -1183,7 +1283,9 @@ def _protect_entities(text: str) -> Tuple[str, Dict[str, Tuple[str, Optional[str
         all_terms.append((term, trans))
     for term in CRITICAL_NAMES:
         if term not in GLOSSARY_AR:
-                all_terms.append((term, None))
+            # بحث عن ترجمة عربية من ENTITY_AR_NAMES
+            ar_name = _ENTITY_AR_LOWER.get(term.lower(), None)
+            all_terms.append((term, ar_name))
 
     # ترتيب حسب الطول (الأطول أولاً لمنع التداخل)
     all_terms.sort(key=lambda x: len(x[0]), reverse=True)

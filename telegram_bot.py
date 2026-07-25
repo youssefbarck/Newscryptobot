@@ -525,14 +525,24 @@ def final_editorial_review(text: str) -> Optional[str]:
 
     result = "\n".join(result_lines).strip()
 
-    # ═══ فحص نهائي ═══
-    if not headline and not result:
+    # ═══ فحص نهائي صارم ═══
+    # يجب أن يكون فيه عنوان أو محتوى حقيقي — ليس فقط توقيع أو هاشتاغات
+    # حساب المحتوى الحقيقي (بدون توقيع وبدون هاشتاغات وبدون سطور فارغة)
+    real_content = [l for l in result_lines if l.strip()
+                    and not l.strip().startswith("@")
+                    and not re.match(r'^#\w+', l.strip())]
+    if not headline and len(real_content) == 0:
         return None
 
     # حذف سطور فارغة متعددة
     result = re.sub(r'\n{3,}', '\n\n', result)
 
-    return result if len(result) > 10 else None
+    # minimum: عنوان + على الأقل 20 حرف عربي
+    arabic_chars = sum(1 for c in result if '\u0600' <= c <= '\u06FF')
+    if arabic_chars < 15:
+        return None
+
+    return result if len(result) > 20 else None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -555,29 +565,17 @@ def format_news_item(item: NewsItem, show_summary: bool = True) -> Optional[str]
     # نوع التنسيق
     news_format = getattr(item, 'news_format', 'standard') or 'standard'
 
-    # بناء الرسالة حسب نوع التنسيق
-    if news_format == "economic" and summary_ar:
+    # بناء الرسالة — عنوان فقط بدون نص شرحي
+    title_clean = title_ar.strip()
+    # التأكد أن العنوان ينتهي بنقطة
+    if title_clean and title_clean[-1] not in ".؟!؟.؟":
+        title_clean += "."
+
+    if news_format == "economic":
         prefix = "🚨" if importance == "breaking" else "📊"
-        msg = f"{prefix} {title_ar.strip()}\n\n{summary_ar.strip()}"
-    elif news_format == "bullets" and summary_ar:
-        msg = f"{emoji} {title_ar.strip()}\n\n{summary_ar.strip()}"
+        msg = f"{prefix} {title_clean}"
     else:
-        msg = f"{emoji} {title_ar.strip()}"
-        if show_summary and summary_ar:
-            clean_summary = summary_ar.strip()
-            if is_complete_news(clean_summary):
-                if len(clean_summary) > 800:
-                    cut_at = clean_summary[:800].rfind(".")
-                    if cut_at > 200:
-                        clean_summary = clean_summary[:cut_at + 1]
-                    else:
-                        cut_at = clean_summary[:800].rfind(" ")
-                        if cut_at > 200:
-                            clean_summary = clean_summary[:cut_at] + "..."
-                        else:
-                            clean_summary = clean_summary[:800] + "..."
-                if clean_summary:
-                    msg += f"\n\n{clean_summary}"
+        msg = f"{emoji} {title_clean}"
 
     # (إصلاح #5) إضافة العملات — توحيد مرادفات جذري (#BITCOIN → #BTC)
     if item.coins:

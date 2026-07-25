@@ -91,11 +91,10 @@ async def _send_review_message(chat_id, text, image_url, item):
                     if resp.status == 200:
                         img_data = await resp.read()
                         img_payload = {
-                            "chat_id": chat_id,
+                            "chat_id": str(chat_id),
                             "photo": aiohttp.payload.BytesPayload(img_data, content_type="image/jpeg"),
                             "caption": text[:1024],
-                            "parse_mode": "HTML",
-                            "reply_markup": keyboard,
+                            "reply_markup": json.dumps(keyboard),
                         }
                         async with session.post(
                             f"https://api.telegram.org/bot{config.TOKEN}/sendPhoto",
@@ -108,13 +107,13 @@ async def _send_review_message(chat_id, text, image_url, item):
         except Exception as e:
             log.warning(f"Review photo failed: {e}")
 
-    # إرسال كنص
+    # إرسال كنص (بدون parse_mode — نص عادي مع إيموجي)
     await TELEGRAM_RATE_LIMITER.acquire()
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"https://api.telegram.org/bot{config.TOKEN}/sendMessage",
-                json={"chat_id": chat_id, "text": text[:4096], "parse_mode": "HTML", "reply_markup": keyboard},
+                json={"chat_id": chat_id, "text": text[:4096], "reply_markup": keyboard},
                 timeout=ClientTimeout(total=30),
             ) as resp:
                 if resp.status == 200:
@@ -184,7 +183,7 @@ async def _approve_news(chat_id, msg_id):
         async with aiohttp.ClientSession() as session:
             await session.post(
                 f"https://api.telegram.org/bot{config.TOKEN}/editMessageText",
-                json={"chat_id": chat_id, "message_id": msg_id, "text": approved_text[:4096], "parse_mode": "HTML"},
+                json={"chat_id": chat_id, "message_id": msg_id, "text": approved_text[:4096]},
                 timeout=ClientTimeout(total=10),
             )
     except Exception as e:
@@ -210,7 +209,7 @@ async def _start_edit(chat_id, msg_id):
         async with aiohttp.ClientSession() as session:
             await session.post(
                 f"https://api.telegram.org/bot{config.TOKEN}/editMessageText",
-                json={"chat_id": chat_id, "message_id": msg_id, "text": waiting_text[:4096], "parse_mode": "HTML", "reply_markup": {"inline_keyboard": []}},
+                json={"chat_id": chat_id, "message_id": msg_id, "text": waiting_text[:4096], "reply_markup": {"inline_keyboard": []}},
                 timeout=ClientTimeout(total=10),
             )
     except Exception as e:
@@ -221,7 +220,7 @@ async def _start_edit(chat_id, msg_id):
         async with aiohttp.ClientSession() as session:
             await session.post(
                 f"https://api.telegram.org/bot{config.TOKEN}/sendMessage",
-                json={"chat_id": chat_id, "text": "✏️ أرسل النسخة المعدّلة لهذا الخبر الآن.\n(أي رسالة نصية ترسلها ستكون النص الجديد)\n\n💡 لإلغاء التعديل، أرسل /cancel", "parse_mode": "HTML"},
+                json={"chat_id": chat_id, "text": "✏️ أرسل النسخة المعدّلة لهذا الخبر الآن.\n(أي رسالة نصية ترسلها ستكون النص الجديد)\n\n💡 لإلغاء التعديل، أرسل /cancel"},
                 timeout=ClientTimeout(total=10),
             )
     except Exception as e:
@@ -285,7 +284,7 @@ async def _handle_edit_submission(chat_id, new_text):
         async with aiohttp.ClientSession() as session:
             await session.post(
                 f"https://api.telegram.org/bot{config.TOKEN}/editMessageText",
-                json={"chat_id": chat_id, "message_id": msg_id, "text": final_text[:4096], "parse_mode": "HTML"},
+                json={"chat_id": chat_id, "message_id": msg_id, "text": final_text[:4096]},
                 timeout=ClientTimeout(total=10),
             )
     except Exception as e:

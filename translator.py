@@ -4,7 +4,6 @@
 
 import re
 import asyncio
-import urllib.parse
 import aiohttp
 from typing import Optional
 
@@ -12,59 +11,81 @@ from config import PROTECTED_NAMES, TICKER_PATTERN, log
 
 
 # ═══════════════════════════════════════════════════════════
-# تجميع الـ Entities التي يجب حمايتها من الترجمة
+#_placeholder format: [[N]]  (لا تترجمه Google لأنه يبدو كود)
+# ملاحظة: كان السابق §N§ لكن § تُترجم لـ "الفقرة"!
 # ═══════════════════════════════════════════════════════════
+_PH_OPEN = "[["
+_PH_CLOSE = "]]"
+_PH_REGEX = re.compile(r'\[\[(\d+)\]\]')
+
+
 def _build_protected_entities(text: str) -> dict:
     """
-    اكتشاف كل الكيانات المحمية في النص وإرجاع:
-      {placeholder: original_text}
+    استبدال كل الكيانات المحمية بـ [[0]], [[1]], ...
+    يرجع {"text": ..., "entities": {"[[0]]": "Ethereum", ...}}
     """
     entities = {}
-    counter = 0
+    counter = [0]  # closure-friendly
 
     def _add(match_str: str) -> str:
-        nonlocal counter
         if not match_str:
             return match_str
-        key = f"§{counter}§"
+        key = f"{_PH_OPEN}{counter[0]}{_PH_CLOSE}"
         entities[key] = match_str
-        counter += 1
+        counter[0] += 1
         return key
 
-    # 1) الأسماء المحمية (Michael Saylor, CZ, Vitalik Buterin...)
-    # نرتبها بالطول التنازلي حتى نلتقط الأطول أولاً (Vitalik Buterin قبل Vitalik)
+    # 1) الأسماء المحمية (الأطول أولاً)
     sorted_names = sorted(PROTECTED_NAMES, key=len, reverse=True)
     for name in sorted_names:
         pattern = re.compile(r'\b' + re.escape(name) + r'\b', re.IGNORECASE)
         text = pattern.sub(lambda m: _add(m.group(0)), text)
 
-    # 2) التوكنات (BTC, ETH, SOL...)
+    # 2) التوكنات (BTC, ETH...)
     text = re.sub(TICKER_PATTERN, lambda m: _add(m.group(0)), text)
 
-    # 3) الأرقام والنسب المئوية والأسعار ($100K, 25%, 1.5B...)
-    text = re.sub(r'\$\d[\d,.]*\s*(?:K|M|B|T|million|billion)?', lambda m: _add(m.group(0)), text, flags=re.IGNORECASE)
-    text = re.sub(r'\b\d[\d,.]*\s*(?:K|M|B|T|million|billion)\b', lambda m: _add(m.group(0)), text, flags=re.IGNORECASE)
+    # 3) الأسعار والنسب
+    text = re.sub(r'\$\d[\d,.]*\s*(?:K|M|B|T|million|billion)?',
+                  lambda m: _add(m.group(0)), text, flags=re.IGNORECASE)
+    text = re.sub(r'\b\d[\d,.]*\s*(?:K|M|B|T|million|billion)\b',
+                  lambda m: _add(m.group(0)), text, flags=re.IGNORECASE)
     text = re.sub(r'\b\d[\d,.]*\s*%', lambda m: _add(m.group(0)), text)
 
     # 4) الروابط
     text = re.sub(r'https?://\S+', lambda m: _add(m.group(0)), text)
 
-    # 5) الهاشتاجات الإنجليزية (#Bitcoin, #ETH)
+    # 5) الهاشتاجات
     text = re.sub(r'#\w+', lambda m: _add(m.group(0)), text)
 
     return {"text": text, "entities": entities}
 
 
 def _restore_entities(translated: str, entities: dict) -> str:
-    """إعادة الكيانات المحمية إلى مكانها في النص المترجم"""
-    # نرتب الـ placeholders بالطول التنازلي حتى لا يحدث تعارض (§10§ قبل §1§)
-    for placeholder in sorted(entities.keys(), key=len, reverse=True):
+    """
+    إعادة الكيانات المحمية إلى مكانها.
+    Google Translate يحافظ عادةً على [[N]] كما هو.
+    نتعامل أيضاً مع الحالات الشاذة (مسافات إضافية، إزاحة).
+    """
+    if not entities:
+        return translated
+
+    # 1) الاستبدال المباشر (الأطول أولاً لتفادي تعارض [[10]] مع [[1]])
+    for placeholder in sorted(entities.keys(), key=lambda p: -int(p[2:-2])):
         original = entities[placeholder]
         translated = translated.replace(placeholder, original)
-        # أحياناً Google Translate يضيف مسافات حول الـ placeholder
-        translated = translated.replace(placeholder.replace("§", " § "), original)
-        translated = translated.replace(placeholder.replace("§", "§ "), original)
-        translated = translated.replace(placeholder.replace("§", " §"), original)
+
+    # 2) تنظيف أي بقايا placeholder لم تُستبدل
+    #    (قد يحدث لو Google حذف الرقم أو عدّله)
+    #    نحاول إيجاد أي [[digit]] متبقي ونستبدله بأقرب entity غير مستخدم
+    remaining_placeholders = _PH_REGEX.findall(translated)
+    if remaining_placeholders:
+        log.warning(f"⚠️ Leaked placeholders: {remaining_placeholders}")
+        # إزالة أي placeholder متبقي (نُبقي النص نظيفاً)
+        translated = _PH_REGEX.sub("", translated)
+        # تنظيف مسافات مزدوجة ناتجة
+        translated = re.sub(r'\s{2,}', ' ', translated).strip()
+        translated = re.sub(r'\s+([.،,!؟?])', r'\1', translated)
+
     return translated
 
 
@@ -72,10 +93,7 @@ def _restore_entities(translated: str, entities: dict) -> str:
 # Google Translate (مجاني عبر web API)
 # ═══════════════════════════════════════════════════════════
 async def google_translate(text: str, source_lang: str = "en", target_lang: str = "ar") -> Optional[str]:
-    """
-    ترجمة عبر Google Translate web API.
-    يرجع النص المترجم أو None عند الفشل.
-    """
+    """ترجمة عبر Google Translate web API مع حماية الكيانات"""
     if not text or not text.strip():
         return None
 
@@ -83,13 +101,12 @@ async def google_translate(text: str, source_lang: str = "en", target_lang: str 
     protected = _build_protected_entities(text)
     text_to_translate = protected["text"]
 
-    # تقسيم النص إذا كان طويلاً (Google limit ~2000 حرف لكل طلب)
+    # تقسيم النص الطويل
     max_chunk = 1800
     chunks = []
     if len(text_to_translate) <= max_chunk:
         chunks = [text_to_translate]
     else:
-        # تقسيم عند حدود الجمل
         sentences = re.split(r'(?<=[.!?])\s+', text_to_translate)
         current = ""
         for sent in sentences:
@@ -124,7 +141,6 @@ async def google_translate(text: str, source_lang: str = "en", target_lang: str 
                             log.warning(f"🌐 Translate HTTP {resp.status}")
                             return None
                         data = await resp.json(content_type=None)
-                        # الرد: [[[جملة مترجمة, جملة أصلية, ...], ...], ...]
                         if isinstance(data, list) and data and isinstance(data[0], list):
                             translated_text = "".join(
                                 sentence[0] for sentence in data[0] if sentence and sentence[0]
@@ -136,10 +152,9 @@ async def google_translate(text: str, source_lang: str = "en", target_lang: str 
                 except Exception as e:
                     log.warning(f"🌐 Translate chunk error: {e}")
                     return None
-                await asyncio.sleep(0.3)  # تجنب الحظر
+                await asyncio.sleep(0.3)
 
             translated = " ".join(translated_chunks)
-            # إعادة الكيانات
             return _restore_entities(translated, protected["entities"])
     except Exception as e:
         log.warning(f"🌐 Translate error: {e}")
@@ -150,15 +165,13 @@ async def google_translate(text: str, source_lang: str = "en", target_lang: str 
 # ترجمة كائن الخبر
 # ═══════════════════════════════════════════════════════════
 async def translate_news_item(item) -> bool:
-    """ترجمة عنوان الخبر وملخصه — يُعدّل الكائن مباشرة"""
+    """ترجمة عنوان الخبر وملخصه"""
     try:
-        # ترجمة العنوان
         title_ar = await google_translate(item.title)
         if not title_ar:
             return False
         item.title_ar = title_ar.strip()
 
-        # ترجمة الملخص (إن وُجد)
         if item.summary:
             summary_ar = await google_translate(item.summary)
             item.summary_ar = (summary_ar or "").strip()

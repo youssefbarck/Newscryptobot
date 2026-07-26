@@ -62,22 +62,61 @@ def parse_date(date_str: str) -> float:
         return 0.0
 
 
+# أسماء مصادر معروفة — تُزال من نهاية العنوان (مع أو بدون فاصل)
+KNOWN_SOURCE_NAMES = [
+    # مواقع أخبار كريبتو
+    "Cryptonews.net", "Cryptonews", "CryptoRank", "CryptoSlate",
+    "CoinDesk", "Cointelegraph", "Decrypt", "The Block", "Blockworks",
+    "Bitcoin.com", "Bitcoinist", "NewsBTC", "CryptoNews",
+    "BeInCrypto", "CryptoPotato", "CoinGape", "CoinQuora",
+    "The Daily Hodl", "Live Bitcoin News", "CryptoGlobe",
+    "FXStreet", "Benzinga", "Yahoo Finance", "MarketWatch",
+    "Bloomberg", "Reuters", "CNBC", "Forbes", "The Street",
+    "Investing.com", "CoinJournal", "CryptoBriefing",
+    # امتدادات شائعة
+    ".com", ".net", ".io", ".org", ".co",
+]
+
+
 def strip_source_from_title(title: str, source_name: str) -> str:
-    """إزالة اسم الموقع من نهاية العنوان"""
-    if not title or not source_name:
+    """
+    إزالة اسم الموقع من نهاية العنوان بثلاث طرق:
+    1) الفواصل: " - CoinDesk" / " | Reuters"
+    2) بدون فاصل: "...Big Deal Cryptonews.net"
+    3) امتدادات: "...report.com"
+    """
+    if not title:
         return title
+
+    # 1) الفواصل الكلاسيكية
     title_lower = title.lower()
-    source_lower = source_name.lower()
-    for sep in [" - ", " | ", " — ", " – "]:
+    source_lower = (source_name or "").lower()
+    for sep in [" - ", " | ", " — ", " – ", " — ", " - "]:
         if sep in title_lower:
             parts = title_lower.rsplit(sep, 1)
             if len(parts) == 2:
                 last_part = parts[1].strip()
-                if source_lower in last_part or len(last_part) < 30:
+                if (source_lower and source_lower in last_part) or len(last_part) < 30:
                     idx = title_lower.rfind(sep)
                     if idx > 10:
                         return title[:idx].strip()
-    return title
+
+    # 2) إزالة أسماء المصادر المعروفة من النهاية (بدون فاصل)
+    for src in KNOWN_SOURCE_NAMES:
+        if title.endswith(src):
+            new_title = title[:-len(src)].rstrip(" -|–—").strip()
+            if len(new_title) > 10:
+                return new_title
+        # حالة insensitive
+        if title_lower.endswith(src.lower()):
+            new_title = title[:-len(src)].rstrip(" -|–—").strip()
+            if len(new_title) > 10:
+                return new_title
+
+    # 3) إزالة "Source: XXX" أو "via XXX" في النهاية
+    title = re.sub(r'\s*[—–\-]\s*(?:Source|via|Image)[:\s].*$', '', title, flags=re.IGNORECASE)
+
+    return title.strip()
 
 
 def extract_image(item_elem) -> str:

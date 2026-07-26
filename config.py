@@ -27,6 +27,8 @@ class BotConfig:
     TIMEZONE: str = "Africa/Algiers"
     GITHUB_ACTIONS: bool = False
     RUN_MODE: str = "polling"
+    WEBHOOK_URL: str = ""  # لوضع webhook (Vercel)
+    CRON_SECRET: str = ""  # سر Vercel Cron
 
     def validate(self) -> List[str]:
         errors = []
@@ -94,6 +96,8 @@ CHANNEL_LINK = os.environ.get("CHANNEL_LINK", "https://t.me/whale_signals_channe
 CHANNEL_NAME = os.environ.get("CHANNEL_NAME", "🐋 قناة الحيتان")
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "")
 SEND_TO_CHANNEL = os.environ.get("SEND_TO_CHANNEL", "false").lower() == "true"
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
+CRON_SECRET = os.environ.get("CRON_SECRET", "")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("NewsBot")
@@ -451,10 +455,9 @@ SUMMARY_MINUTE = 59
 _GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 _GIST_ID_SENT_NEWS = os.environ.get("GIST_ID_SENT_NEWS", "")
 
-if os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("RUN_MODE") == "oneshot":
-    _PERSISTENT_DIR = os.getcwd()
-else:
-    _PERSISTENT_DIR = "/tmp"
+# ⚠️ مهم: مجلد ثابت لحفظ sent_news.json — لا نستخدم /tmp لأنه يُمحى عند إعادة التشغيل
+# نستخدم مجلد المشروع نفسه دائماً
+_PERSISTENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 SENT_NEWS_FILE = os.path.join(_PERSISTENT_DIR, "sent_news.json")
 sent_news_hashes = set()
@@ -503,91 +506,144 @@ def _gist_set(gist_id, filename, content):
         return False
 
 
+# ═══════════════════════════════════════════════════════════
+# 🔄 Auto-Gist Discovery — إنشاء/بحث تلقائي (يحتاج GITHUB_TOKEN فقط)
+# ═══════════════════════════════════════════════════════════
+_AUTO_GIST_ID = None  # يُخزّن مؤقتاً أثناء التشغيل
+_AUTO_GIST_SEARCHED = False
+_GIST_LABEL = "whale-news-bot-hashes"
+
+
+def _find_or_create_storage_gist():
+    """البحث عن Gist تخزين تلقائياً أو إنشاء واحد جديد"""
+    global _AUTO_GIST_ID, _AUTO_GIST_SEARCHED
+    if _AUTO_GIST_ID:
+        return _AUTO_GIST_ID
+    if _AUTO_GIST_SEARCHED:
+        return _AUTO_GIST_ID
+    _AUTO_GIST_SEARCHED = True
+
+    if not _GITHUB_TOKEN:
+        log.warning("⚠️ GITHUB_TOKEN غير موجود — لن يتم حفظ الهاشات بين مرات التشغيل!")
+        log.warning("   ➜ اذهب: https://github.com/settings/tokens")
+        log.warning("   ➤ أنشئ توكن → أضفه في Vercel كـ GITHUB_TOKEN")
+        return None
+
+    try:
+        # 1) البحث عن Gist موجود بالوصف المميز
+        page = 1
+        while page <= 3:  # أقصى 3 صفحات = 300 gist
+            try:
+                r = requests.get(
+                    "https://api.github.com/gists",
+                    headers={
+                        "Authorization": f"token {_GITHUB_TOKEN}",
+                        "Accept": "application/vnd.github.v3+json"
+                    },
+                    params={"per_page": 100, "page": page},
+                    timeout=10
+                )
+                if r.status_code != 200:
+                    break
+                gists = r.json()
+                if not gists:
+                    break
+                for gist in gists:
+                    if isinstance(gist, dict) and gist.get("description") == _GIST_LABEL:
+                        _AUTO_GIST_ID = gist["id"]
+                        log.info(f"✅ Auto-Gist found: {_AUTO_GIST_ID}")
+                        return _AUTO_GIST_ID
+                page += 1
+            except Exception:
+                break
+
+        # 2) إنشاء Gist جديد
+        r = requests.post(
+            "https://api.github.com/gists",
+            headers={
+                "Authorization": f"token {_GITHUB_TOKEN}",
+                "Accept": "application/vnd.github.v3+json"
+            },
+            json={
+                "description": _GIST_LABEL,
+                "public": False,
+                "files": {
+                    "sent_news.json": {
+                        "content": json.dumps({"hashes": [], "last_updated": 0})
+                    }
+                }
+            },
+            timeout=15
+        )
+        if r.status_code == 201:
+            _AUTO_GIST_ID = r.json()["id"]
+            log.info(f"✅ Auto-Gist created: {_AUTO_GIST_ID}")
+            return _AUTO_GIST_ID
+        else:
+            log.warning(f"Gist create failed: {r.status_code} {r.text[:200]}")
+    except Exception as e:
+        log.warning(f"Auto-Gist error: {e}")
+
+    return None
+
+
+def _get_active_gist_id():
+    """إرجاع معرّف الـ Gist النشط — يدووي أو تلقائي"""
+    if _GIST_ID_SENT_NEWS:
+        return _GIST_ID_SENT_NEWS
+    return _find_or_create_storage_gist()
+
+
 def load_sent_news():
-    """تحميل الأخبار المُرسلة سابقاً"""
+    """تحميل الأخبار المُرسلة سابقاً — من ملف محلي ثابت
+    
+    ⚠️ مهم: نستخدم clear()+update() بدلاً من = لإبقاء نفس المرجع
+    لأن باقي الملفات تستورد sent_news_hashes مرة واحدة عند بدء التشغيل.
+    """
     global sent_news_hashes
     all_hashes = set()
 
-    # Gist
-    if _GIST_ID_SENT_NEWS:
-        content = _gist_get(_GIST_ID_SENT_NEWS, "sent_news.json")
-        if content:
-            try:
-                data = json.loads(content)
-                hashes = set(data.get("hashes", []))
-                if hashes:
-                    all_hashes.update(hashes)
-                    log.info(f"✅ Gist: {len(hashes)} hashes")
-            except Exception as e:
-                log.warning(f"Gist parse err: {e}")
-
-    # ملف محلي
+    # المصدر الأساسي: ملف محلي ثابت في مجلد المشروع
     try:
-        with open(SENT_NEWS_FILE, "r") as f:
-            data = json.load(f)
-            hashes = set(data.get("hashes", []))
-            if hashes:
-                all_hashes.update(hashes)
-                log.info(f"✅ Local: {len(hashes)} hashes")
-    except Exception:
-        pass
-
-    # ملف الريبو
-    repo_file = os.path.join(os.getcwd(), "sent_news.json")
-    if os.path.exists(repo_file) and repo_file != SENT_NEWS_FILE:
-        try:
-            with open(repo_file, "r") as f:
+        if os.path.exists(SENT_NEWS_FILE):
+            with open(SENT_NEWS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 hashes = set(data.get("hashes", []))
                 if hashes:
                     all_hashes.update(hashes)
-        except Exception:
-            pass
+                    log.info(f"✅ Local file: {len(hashes)} hashes from {SENT_NEWS_FILE}")
+                else:
+                    log.info(f"ℹ️ Local file exists but empty: {SENT_NEWS_FILE}")
+        else:
+            log.info(f"ℹ️ No sent_news.json yet — first run. Path: {SENT_NEWS_FILE}")
+    except Exception as e:
+        log.warning(f"❌ Local load error: {e}")
 
-    sent_news_hashes = all_hashes
-    log.info(f"📊 Dedup: {len(sent_news_hashes)} total loaded")
+    # ⚠️ الإصلاح: تحديث المجموعة الموجودة بدلاً من إنشاء واحدة جديدة
+    sent_news_hashes.clear()
+    sent_news_hashes.update(all_hashes)
+    log.info(f"📊 Dedup loaded: {len(sent_news_hashes)} hashes total")
 
 
 def save_sent_news(force: bool = False):
-    """حفظ الأخبار المُرسلة"""
+    """حفظ الأخبار المُرسلة — ملف محلي ثابت فقط"""
     global _sent_news_dirty
-    import subprocess
 
     try:
         content = json.dumps(
             {"hashes": list(sent_news_hashes)[-2000:], "last_updated": time.time()},
             ensure_ascii=False, indent=2,
         )
-        with open(SENT_NEWS_FILE, "w") as f:
+        # التأكد من أن المجلد موجود
+        os.makedirs(os.path.dirname(SENT_NEWS_FILE), exist_ok=True)
+        with open(SENT_NEWS_FILE, "w", encoding="utf-8") as f:
             f.write(content)
+        log.info(f"💾 Saved {len(sent_news_hashes)} hashes → {SENT_NEWS_FILE}")
     except Exception as e:
-        log.warning(f"Local save error: {e}")
-
-    # Git push (GitHub Actions)
-    pushed = False
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        try:
-            subprocess.run(["git", "config", "user.name", "news-bot[bot]"],
-                           capture_output=True, check=True, timeout=10)
-            subprocess.run(["git", "config", "user.email", "news-bot[bot]@users.noreply.github.com"],
-                           capture_output=True, check=True, timeout=10)
-            subprocess.run(["git", "add", "sent_news.json"],
-                           capture_output=True, check=True, timeout=10)
-            result = subprocess.run(["git", "status", "--porcelain", "sent_news.json"],
-                                   capture_output=True, text=True, timeout=10)
-            if result.stdout.strip():
-                subprocess.run(["git", "commit", "-m", f"dedup: {len(sent_news_hashes)} hashes"],
-                               capture_output=True, check=True, timeout=15)
-                subprocess.run(["git", "push"],
-                               capture_output=True, check=True, timeout=30)
-                pushed = True
-        except Exception as e:
-            log.warning(f"Git push failed: {e}")
-
-    # Gist
-    if not pushed:
-        _gist_set(_GIST_ID_SENT_NEWS, "sent_news.json",
-                  json.dumps({"hashes": list(sent_news_hashes)[-2000:]}))
+        log.error(f"❌ Save error: {e}")
+        log.error(f"   Path: {SENT_NEWS_FILE}")
+        log.error(f"   Dir exists: {os.path.exists(os.path.dirname(SENT_NEWS_FILE))}")
+        log.error(f"   Writable: {os.access(os.path.dirname(SENT_NEWS_FILE), os.W_OK)}")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -600,6 +656,7 @@ config = BotConfig(
     PORT=PORT, TIMEZONE=TIMEZONE,
     GITHUB_ACTIONS=os.environ.get("GITHUB_ACTIONS") == "true",
     RUN_MODE=os.environ.get("RUN_MODE", "polling"),
+    WEBHOOK_URL=WEBHOOK_URL, CRON_SECRET=CRON_SECRET,
 )
 
 state = BotState()

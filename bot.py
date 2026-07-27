@@ -1,7 +1,9 @@
 """
 🤖 البوت الرئيسي — ينسق بين كل الوحدات
+يشمل: أخبار الكريبتو + مؤشرات السوق الأمريكية
 """
 
+import os
 import asyncio
 import time
 import aiohttp
@@ -37,60 +39,89 @@ def check_config() -> bool:
 
 
 # ═══════════════════════════════════════════════════════════
-# إرسال المنشور للقناة مع الصورة
+# إرسال المنشور للقناة — يدعم URL وملف محلي
 # ═══════════════════════════════════════════════════════════
-async def send_post(text: str, image_url: str = "") -> bool:
+async def send_post(text: str, image: str = "", is_file: bool = False) -> bool:
     """
     إرسال المنشور للقناة:
-    - إذا وُجدت صورة صالحة → sendPhoto مع caption
-    - وإلا → sendMessage
+    - image URL → validate ثم sendPhoto
+    - image file path → sendPhoto بملف مباشر
+    - بدون صورة → sendMessage
     """
     if not text:
         return False
 
-    # التحقق من الصورة أولاً
-    has_valid_image = False
-    if image_url and image_url.startswith("http"):
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.head(
-                    image_url,
-                    timeout=aiohttp.ClientTimeout(total=5),
-                    headers={"User-Agent": "Mozilla/5.0"},
-                ) as resp:
-                    if resp.status == 200 and "image" in resp.headers.get("Content-Type", ""):
-                        has_valid_image = True
-        except Exception:
-            has_valid_image = False
-
     try:
         async with aiohttp.ClientSession() as session:
-            # محاولة إرسال كصورة
-            if has_valid_image:
+            # ═══════════════════════════════════
+            # إرسال صورة من ملف محلي (chart)
+            # ═══════════════════════════════════
+            if is_file and image and os.path.exists(image):
                 try:
                     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-                    data = aiohttp.FormData()
-                    data.add_field("chat_id", TELEGRAM_CHAT_ID)
-                    data.add_field("photo", image_url)
-                    data.add_field("caption", text[:1024])  # حد caption للصور 1024
-                    data.add_field("parse_mode", "HTML")
-                    async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                        if resp.status == 200:
-                            log.info(f"📸 Sent with image")
-                            return True
-                        else:
-                            err = await resp.text()
-                            log.warning(f"📸 Photo failed: {err[:200]}")
+                    with open(image, 'rb') as f:
+                        data = aiohttp.FormData()
+                        data.add_field("chat_id", TELEGRAM_CHAT_ID)
+                        data.add_field("photo", f,
+                                       filename='chart.png',
+                                       content_type='image/png')
+                        data.add_field("caption", text[:1024])
+                        async with session.post(url, data=data,
+                                                timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                            if resp.status == 200:
+                                log.info(f"📊 Sent chart image")
+                                return True
+                            else:
+                                err = await resp.text()
+                                log.warning(f"📊 Chart photo failed: {err[:200]}")
                 except Exception as e:
-                    log.warning(f"📸 Photo error: {e}")
+                    log.warning(f"📊 Chart photo error: {e}")
 
-            # إرسال كنص (احتياطي أو لا توجد صورة)
+            # ═══════════════════════════════════
+            # إرسال صورة من URL (أخبار RSS)
+            # ═══════════════════════════════════
+            elif image and image.startswith("http"):
+                # التحقق من الصورة
+                has_valid_image = False
+                try:
+                    async with session.head(
+                        image,
+                        timeout=aiohttp.ClientTimeout(total=5),
+                        headers={"User-Agent": "Mozilla/5.0"},
+                    ) as resp:
+                        if resp.status == 200 and "image" in resp.headers.get("Content-Type", ""):
+                            has_valid_image = True
+                except Exception:
+                    has_valid_image = False
+
+                if has_valid_image:
+                    try:
+                        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+                        data = aiohttp.FormData()
+                        data.add_field("chat_id", TELEGRAM_CHAT_ID)
+                        data.add_field("photo", image)
+                        data.add_field("caption", text[:1024])
+                        async with session.post(url, data=data,
+                                                timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                            if resp.status == 200:
+                                log.info(f"📸 Sent with image")
+                                return True
+                            else:
+                                err = await resp.text()
+                                log.warning(f"📸 Photo failed: {err[:200]}")
+                    except Exception as e:
+                        log.warning(f"📸 Photo error: {e}")
+
+            # ═══════════════════════════════════
+            # إرسال كنص (احتياطي أو بدون صورة)
+            # ═══════════════════════════════════
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
             payload = {
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": text[:4096],
             }
-            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.post(url, json=payload,
+                                    timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 if resp.status == 200:
                     log.info(f"💬 Sent as text")
                     return True
@@ -107,7 +138,7 @@ async def send_post(text: str, image_url: str = "") -> bool:
 # الدورة الرئيسية
 # ═══════════════════════════════════════════════════════════
 async def run_cycle():
-    """دورة واحدة كاملة: جلب → فلترة → ترجمة → تنسيق → إرسال"""
+    """دورة واحدة كاملة: مؤشرات → أخبار → إرسال"""
     log.info("=" * 60)
     log.info("🚀 Cycle started")
     start_time = time.time()
@@ -115,9 +146,25 @@ async def run_cycle():
     if not check_config():
         return
 
+    # ═══════════════════════════════════════════════
+    # الجزء 1: مؤشرات السوق الأمريكية (chart)
+    # ═══════════════════════════════════════════════
+    try:
+        from market_chart import run_market_update
+        log.info("📊 Fetching market indices...")
+        await run_market_update(send_post)
+        await asyncio.sleep(3)  # فاصل بين المؤشرات والأخبار
+    except ImportError:
+        log.info("📊 market_chart module not found — skipping market update")
+    except Exception as e:
+        log.warning(f"📊 Market update error: {e}")
+
+    # ═══════════════════════════════════════════════
+    # الجزء 2: أخبار الكريبتو
+    # ═══════════════════════════════════════════════
     # 1) تحميل الهاشات المحفوظة
     sent_hashes = load_hashes()
-    recent_titles = []  # العناوين المُرسلة في هذه الدورة فقط
+    recent_titles = []
     sent_count = 0
 
     # 2) جلب الأخبار
@@ -129,6 +176,10 @@ async def run_cycle():
 
     if not news:
         log.info("ℹ️ No news fetched")
+        save_hashes(sent_hashes)
+        elapsed = time.time() - start_time
+        log.info(f"📊 Done: {sent_count} posts sent in {elapsed:.1f}s")
+        log.info("=" * 60)
         return
 
     # 3) فلترة العمر
@@ -166,7 +217,7 @@ async def run_cycle():
             log.warning(f"📝 Invalid post: {getattr(item, 'title_ar', '')[:60]}")
             continue
 
-        # فحص التكرار بعد الترجمة (للعناوين العربية)
+        # فحص التكرار بعد الترجمة
         if is_duplicate(item.title_ar, sent_hashes, recent_titles):
             continue
 
@@ -174,18 +225,16 @@ async def run_cycle():
         ok = await send_post(post_text, item.image)
         if ok:
             sent_count += 1
-            # تسجيل الهاشات
             sent_hashes.add(compute_hash(title))
             sent_hashes.add(compute_hash(item.title_ar))
             recent_titles.append(title)
             recent_titles.append(item.title_ar)
             log.info(f"✅ [{sent_count}/{MAX_POSTS_PER_RUN}] {item.title_ar[:60]}")
-            # انتظار قصير بين المنشورات (لتجنب rate limit)
             await asyncio.sleep(3)
         else:
             log.error(f"❌ Send failed: {item.title_ar[:60]}")
 
-    # 5) حفظ الهاشات (دائماً، حتى لو لم نرسل شيئاً — لتحديث الأ timestamp)
+    # 5) حفظ الهاشات
     save_hashes(sent_hashes)
 
     elapsed = time.time() - start_time

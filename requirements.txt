@@ -1,1 +1,3 @@
 aiohttp==3.9.1
+yfinance>=0.2.31
+matplotlib>=3.8.0

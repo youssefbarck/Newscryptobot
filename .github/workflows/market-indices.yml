@@ -1,0 +1,47 @@
+name: 📊 US Market Indices
+
+on:
+  schedule:
+    - cron: '30 13 * * 1-5'
+    - cron: '0 20 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      session:
+        description: 'Session type'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - open
+          - close
+
+jobs:
+  market-indices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Market Indices
+        working-directory: ./
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          SESSION="${{ github.event.inputs.session }}"
+          if [ -z "$SESSION" ]; then
+            SESSION="auto"
+          fi
+          echo "Running session: $SESSION"
+          python market_indices.py "$SESSION"

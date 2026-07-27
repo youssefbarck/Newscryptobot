@@ -1,6 +1,7 @@
 """
-📊 المؤشرات الأمريكية — رسم بياني احترافي بالعربية
-يجلب بيانات حقيقية من yfinance ويرسم chart لـ SPX, NDQ, DJI
+📊 المؤشرات الأمريكية — عرض قائمة بالأرقام والتغييرات
+يجلب بيانات حقيقية من yfinance لـ DJI, SPX, NDQ
+يُرسل فقط عند افتتاح وإغلاق السوق الأمريكي
 """
 
 import os
@@ -9,35 +10,32 @@ import time
 import logging
 import tempfile
 import traceback
+from datetime import datetime, timezone, timedelta
 
 import matplotlib
-matplotlib.use('Agg')  # بدون واجهة رسومية — ضروري لـ GitHub Actions
+matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
-import matplotlib.dates as mdates
-import matplotlib.ticker as mticker
-from matplotlib.patches import FancyBboxPatch
+import matplotlib.patches as patches
 import numpy as np
 
 # ═══════════════════════════════════════════════════════════
-# إعداد الخطوط العربية
+# إعداد الخطوط
 # ═══════════════════════════════════════════════════════════
 _font_loaded = False
 
 def _load_fonts():
-    """تحميل خطوط عربية إن وُجدت"""
     global _font_loaded
     if _font_loaded:
         return
 
-    # مسارات الخطوط المرشحة (حسب النظام)
     font_candidates = [
-        '/usr/share/fonts/truetype/chinese/NotoSansSC[wght].ttf',
-        '/usr/share/fonts/truetype/chinese/NotoSansSC-Regular.ttf',
-        '/usr/share/fonts/truetype/noto-serif-sc/NotoSerifSC-Regular.ttf',
         '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-        '/usr/share/fonts/truetype/lxgw-wenkai/LXGWWenKai-Regular.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',
+        '/usr/share/fonts/truetype/chinese/NotoSansSC-Regular.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
     ]
     for fp in font_candidates:
         if os.path.exists(fp):
@@ -46,49 +44,47 @@ def _load_fonts():
             except Exception:
                 pass
 
-    # تعيين الخط الافتراضي — يُغطي الإنجليزية + الرموز
-    # ملاحظة: النص في الرسم بالإنجليزية (SPX, NDQ, DJI, أرقام)
-    # لذلك DejaVu Sans كافٍ ومتوفر في GitHub Actions
-    plt.rcParams['font.family'] = ['DejaVu Sans', 'sans-serif']
+    plt.rcParams['font.family'] = ['DejaVu Sans', 'Liberation Sans', 'sans-serif']
     plt.rcParams['axes.unicode_minus'] = False
-    # كتم تحذيرات الخطوط غير الموجودة
+
     import warnings
     warnings.filterwarnings('ignore', message='.*findfont.*')
-    import logging
     logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
     _font_loaded = True
-
 
 _load_fonts()
 
 log = logging.getLogger("NewsBot")
 
 # ═══════════════════════════════════════════════════════════
-# المؤشرات وتعريفاتها
+# تعريفات المؤشرات
 # ═══════════════════════════════════════════════════════════
 INDICES = {
+    "DJI": {
+        "ticker": "^DJI",
+        "name": "Dow Jones Industrial",
+        "badge_num": "30",
+        "badge_color": "#1E88E5",
+        "value_color": "#E3F2FD",
+    },
     "SPX": {
         "ticker": "^GSPC",
         "name": "S&P 500",
-        "color": "#2196F3",     # أزرق
-        "color_fill": "#2196F320",
+        "badge_num": "500",
+        "badge_color": "#E53935",
+        "value_color": "#FFEBEE",
     },
     "NDQ": {
         "ticker": "^IXIC",
-        "name": "Nasdaq",
-        "color": "#4CAF50",     # أخضر
-        "color_fill": "#4CAF5020",
-    },
-    "DJI": {
-        "ticker": "^DJI",
-        "name": "Dow Jones",
-        "color": "#FF9800",     # برتقالي
-        "color_fill": "#FF980020",
+        "name": "Nasdaq 100",
+        "badge_num": "100",
+        "badge_color": "#00ACC1",
+        "value_color": "#E0F7FA",
     },
 }
 
-CHART_PERIOD = "5d"     # آخر 5 أيام (يومياً)
-CHART_INTERVAL = "1d"
+# ترتيب العرض في الصورة
+DISPLAY_ORDER = ["DJI", "SPX", "NDQ"]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -96,183 +92,211 @@ CHART_INTERVAL = "1d"
 # ═══════════════════════════════════════════════════════════
 def fetch_indices_data() -> dict:
     """
-    جلب بيانات المؤشرات الثلاثة.
+    جلب البيانات الحالية للمؤشرات.
     يرجع: {
-        "SPX": {"dates": [...], "prices": [...], "change": +1.5, "price": 5432.1},
-        "NDQ": {...},
-        "DJI": {...},
+        "DJI": {"current": 52511.25, "change": 559.05, "change_pct": 1.08},
+        ...
     }
     """
     try:
         import yfinance as yf
     except ImportError:
-        log.error("❌ yfinance not installed — run: pip install yfinance")
+        log.error("yfinance not installed")
         return {}
 
     results = {}
-    for key, idx in INDICES.items():
+
+    for key in DISPLAY_ORDER:
+        idx = INDICES[key]
         try:
             ticker = yf.Ticker(idx["ticker"])
-            hist = ticker.history(period=CHART_PERIOD, interval=CHART_INTERVAL)
+            # جلب بيانات آخر يومين لحساب التغيير
+            hist = ticker.history(period="2d", interval="1d")
 
-            if hist.empty:
-                log.warning(f"📊 No data for {key} ({idx['ticker']})")
+            if hist.empty or len(hist) < 1:
+                log.warning(f"No data for {key}")
                 continue
 
-            dates = hist.index.tolist()
-            closes = hist['Close'].tolist()
+            current = hist['Close'].iloc[-1]
 
-            if len(closes) < 2:
-                continue
-
-            current = closes[-1]
-            previous = closes[-2] if len(closes) >= 2 else closes[0]
-            change_pct = ((current - previous) / previous) * 100
+            if len(hist) >= 2:
+                previous = hist['Close'].iloc[-2]
+                change = current - previous
+                change_pct = (change / previous) * 100
+            else:
+                change = 0
+                change_pct = 0
 
             results[key] = {
-                "dates": dates,
-                "prices": closes,
-                "current": round(current, 2),
-                "change": round(change_pct, 2),
+                "current": round(float(current), 2),
+                "change": round(float(change), 2),
+                "change_pct": round(float(change_pct), 2),
             }
-            log.info(f"📊 {key}: {current:.2f} ({change_pct:+.2f}%)")
+            log.info(f"{key}: {current:.2f} ({change_pct:+.2f}%)")
 
         except Exception as e:
-            log.warning(f"📊 Failed to fetch {key}: {e}")
+            log.warning(f"Failed to fetch {key}: {e}")
 
     return results
 
 
 # ═══════════════════════════════════════════════════════════
-# رسم البياني
+# إنشاء صورة عرض القائمة
 # ═══════════════════════════════════════════════════════════
-def create_chart(data: dict) -> str:
+def create_list_image(data: dict, session_type: str = "open") -> str:
     """
-    إنشاء رسم بياني احترافي.
-    يرجع مسار الملف المؤقت أو سلسلة base64.
+    إنشاء صورة عرض قائمة احترافية.
+    session_type: "open" أو "close"
+    يرجع مسار الملف المؤقت.
     """
     if not data:
         return ""
 
-    fig, ax = plt.subplots(figsize=(14, 7), dpi=120)
-    fig.patch.set_facecolor('#0D1117')
-    ax.set_facecolor('#0D1117')
+    fig, ax = plt.subplots(figsize=(8, 5.5), dpi=200)
+    fig.patch.set_facecolor('#0d1117')
+    ax.set_facecolor('#0d1117')
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 10)
+    ax.axis('off')
 
-    for key, idx in INDICES.items():
+    # ═══════════════════════════════════════════════
+    # العنوان
+    # ═══════════════════════════════════════════════
+    ax.text(5, 9.3, 'US Market Indices', ha='center', va='center',
+            color='white', fontsize=22, fontweight='bold', fontfamily='DejaVu Sans')
+    ax.text(5, 8.7, 'DJI  ·  SPX  ·  NDQ', ha='center', va='center',
+            color='#8b949e', fontsize=13, fontfamily='DejaVu Sans')
+
+    # حالة السوق (افتتاح / إغلاق)
+    now_utc = datetime.now(timezone.utc)
+    # تحويل إلى توقيت شرق أمريكا (ET)
+    eastern = timezone(timedelta(hours=-4))  # EDT (صيفي)
+    now_et = now_utc.astimezone(eastern)
+
+    if session_type == "open":
+        status_text = f'Market Open  |  {now_et.strftime("%b %d, %Y")}'
+        status_color = '#58a6ff'
+    else:
+        status_text = f'Market Close  |  {now_et.strftime("%b %d, %Y")}'
+        status_color = '#f0883e'
+
+    ax.text(5, 8.15, status_text, ha='center', va='center',
+            color=status_color, fontsize=11, fontfamily='DejaVu Sans', fontstyle='italic')
+
+    # خط فاصل تحت العنوان
+    ax.plot([1, 9], [7.75, 7.75], color='#30363d', linewidth=1.2, zorder=2)
+
+    # ═══════════════════════════════════════════════
+    # بطاقات المؤشرات
+    # ═══════════════════════════════════════════════
+    y_positions = [6.5, 4.5, 2.5]
+
+    for i, key in enumerate(DISPLAY_ORDER):
         if key not in data:
             continue
 
+        idx = INDICES[key]
         d = data[key]
-        prices = np.array(d["prices"])
-        dates = d["dates"]
+        y = y_positions[i]
 
-        # رسم الخط
-        ax.plot(dates, prices, color=idx["color"], linewidth=2.5,
-                label=f'{key} {idx["name"]}', zorder=3)
-
-        # تعبئة تحت الخط
-        ax.fill_between(dates, prices, prices.min() * 0.998,
-                        color=idx["color"], alpha=0.08, zorder=2)
-
-        # نقطة النهاية (السعر الحالي)
-        ax.scatter([dates[-1]], [prices[-1]], color=idx["color"],
-                   s=80, zorder=5, edgecolors='white', linewidths=1.5)
-
-        # ملصق السعر عند النقطة الأخيرة
-        change = d["change"]
-        arrow = "▲" if change >= 0 else "▼"
-        label_text = f'{arrow} {d["current"]:,.2f} ({change:+.2f}%)'
-        text_color = idx["color"]
-
-        # تحديد موقع النص (فوق أو تحت)
-        y_offset = prices[-1] * 0.005
-        va = 'bottom' if change >= 0 else 'top'
-        y_pos = prices[-1] + y_offset if change >= 0 else prices[-1] - y_offset
-
-        ax.annotate(
-            label_text,
-            xy=(dates[-1], prices[-1]),
-            xytext=(10, 15 if change >= 0 else -15),
-            textcoords='offset points',
-            fontsize=10, fontweight='bold', color=text_color,
-            va=va, ha='left',
-            arrowprops=dict(arrowstyle='-', color=text_color, lw=0.8),
+        # خلفية البطاقة
+        card = patches.FancyBboxPatch(
+            (0.8, y - 1.0), 8.4, 2.0,
+            boxstyle='round,pad=0.15',
+            facecolor='#161b22', edgecolor='#30363d',
+            linewidth=0.8, zorder=1
         )
+        ax.add_patch(card)
 
-    # تنسيق المحاور
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
-    ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
-    plt.xticks(fontsize=9, color='#8B949E', rotation=0)
-    plt.yticks(fontsize=9, color='#8B949E')
+        # دائرة ملونة بالرقم
+        circle = plt.Circle((1.8, y), 0.55, color=idx['badge_color'], zorder=3)
+        ax.add_patch(circle)
+        ax.text(1.8, y, idx['badge_num'], ha='center', va='center',
+                color='white', fontsize=13, fontweight='bold',
+                fontfamily='DejaVu Sans', zorder=4)
 
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(
-        lambda x, _: f'{x:,.0f}'
-    ))
+        # رمز المؤشر (tickr)
+        ax.text(3.0, y + 0.35, key, ha='left', va='center',
+                color='white', fontsize=17, fontweight='bold',
+                fontfamily='DejaVu Sans')
 
-    # شبكة
-    ax.grid(True, alpha=0.15, color='#30363D', linestyle='--')
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_color('#30363D')
-    ax.spines['left'].set_color('#30363D')
+        # الاسم الكامل
+        ax.text(3.0, y - 0.25, idx['name'], ha='left', va='center',
+                color='#8b949e', fontsize=10, fontfamily='DejaVu Sans')
 
-    # عنوان الرسم
-    ax.set_title(
-        'US Market Indices  |  SPX · NDQ · DJI',
-        fontsize=16, fontweight='bold', color='#E6EDF3',
-        pad=20, loc='center'
-    )
+        # القيمة الحالية (كبيرة)
+        current_str = f"{d['current']:,.2f}"
+        ax.text(9.0, y + 0.35, current_str, ha='right', va='center',
+                color='white', fontsize=17, fontweight='bold',
+                fontfamily='DejaVu Sans Mono')
 
-    # إضافة وسوم الألوان في الأسفل
-    legend = ax.legend(
-        loc='lower left', fontsize=10,
-        framealpha=0.3, facecolor='#161B22', edgecolor='#30363D',
-        labelcolor='#E6EDF3'
-    )
+        # التغيير + النسبة
+        arrow = "\u25B2" if d['change_pct'] >= 0 else "\u25BC"
+        change_color = '#66BB6A' if d['change_pct'] >= 0 else '#EF5350'
+        sign = "+" if d['change_pct'] >= 0 else ""
 
-    # إضافة watermark
-    fig.text(0.99, 0.01, '@newscrypto1m', fontsize=8,
-             color='#484F58', ha='right', va='bottom', alpha=0.7)
+        change_text = f"{arrow} {sign}{d['change']:,.2f}  ({sign}{d['change_pct']:.2f}%)"
+        ax.text(9.0, y - 0.30, change_text, ha='right', va='center',
+                color=change_color, fontsize=11, fontfamily='DejaVu Sans')
 
-    # تعبئة الرسم
-    plt.tight_layout(pad=1.5)
+    # ═══════════════════════════════════════════════
+    # علامة القناة
+    # ═══════════════════════════════════════════════
+    fig.text(0.98, 0.04, '@newscrypto1m', ha='right', va='bottom',
+             color='#484f58', fontsize=10, fontfamily='DejaVu Sans',
+             fontstyle='italic')
 
-    # حفظ في ملف مؤقت
+    # حفظ الملف
     tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False, prefix='market_')
     tmp_path = tmp.name
     tmp.close()
 
-    fig.savefig(tmp_path, bbox_inches='tight', facecolor=fig.get_facecolor(),
-                dpi=120, format='png')
+    plt.savefig(tmp_path, dpi=200, bbox_inches='tight',
+                facecolor=fig.get_facecolor(), edgecolor='none', pad_inches=0.3)
     plt.close(fig)
 
-    log.info(f"📊 Chart saved: {tmp_path} ({os.path.getsize(tmp_path)} bytes)")
+    log.info(f"List image saved: {tmp_path} ({os.path.getsize(tmp_path)} bytes)")
     return tmp_path
 
 
 # ═══════════════════════════════════════════════════════════
-# بناء نص منشور المؤشرات
+# بناء نص المنشور بالعربية
 # ═══════════════════════════════════════════════════════════
-def build_market_post(data: dict) -> str:
+def build_market_post(data: dict, session_type: str = "open") -> str:
     """بناء نص المنشور بالعربية"""
     if not data:
         return ""
 
-    lines = ["⚡ المؤشرات الأمريكية — آخر تحديث", ""]
+    if session_type == "open":
+        lines = [
+            "⚡ المؤشرات الأمريكية عند الافتتاح",
+            "",
+        ]
+    else:
+        lines = [
+            "📊 المؤشرات الأمريكية عند الإغلاق",
+            "",
+        ]
 
-    for key in ["SPX", "NDQ", "DJI"]:
+    for key in DISPLAY_ORDER:
         if key not in data:
             continue
         d = data[key]
         idx = INDICES[key]
-        arrow = "📈" if d["change"] >= 0 else "📉"
-        direction = "صعوداً" if d["change"] >= 0 else "هبوطاً"
+        arrow = "▲" if d['change_pct'] >= 0 else "▼"
+        direction = "صعوداً" if d['change_pct'] >= 0 else "هبوطاً"
+        sign = "+" if d['change_pct'] >= 0 else ""
         lines.append(
-            f"{arrow} {idx['name']} ({key}): {d['current']:,.2f} — {direction} {abs(d['change']):.2f}%"
+            f"{arrow} {idx['name']} ({key}): {d['current']:,.2f} — {direction} {abs(d['change_pct']):.2f}%"
         )
 
-    lines.append("")
-    lines.append("📊 ترقبوا تطورات الجلسة وتأثيرها على سوق العملات الرقمية")
+    if session_type == "open":
+        lines.append("")
+        lines.append("📈 ترقبوا تطورات الجلسة وتأثيرها على سوق الكريبتو")
+    else:
+        lines.append("")
+        lines.append("📋 ملخص الجلسة — ترقبوا التحليل غداً")
+
     lines.append("")
     lines.append("@newscrypto1m")
 
@@ -282,43 +306,47 @@ def build_market_post(data: dict) -> str:
 # ═══════════════════════════════════════════════════════════
 # الدورة الكاملة: جلب → رسم → إرسال
 # ═══════════════════════════════════════════════════════════
-async def run_market_update(send_func) -> bool:
+async def run_market_update(send_func, session_type: str = "open") -> bool:
     """
-    جلب بيانات المؤشرات ورسم chart وإرسالها.
-    send_func: دالة async(text, image_path_or_url) → bool
+    جلب بيانات المؤشرات وإنشاء صورة القائمة وإرسالها.
+    send_func: دالة async(text, image, is_file) → bool
+    session_type: "open" أو "close"
     """
-    log.info("📊 Starting market indices update...")
+    label = "الافتتاح" if session_type == "open" else "الإغلاق"
+    log.info(f"📊 Starting market update ({label})...")
 
     # 1) جلب البيانات
     data = fetch_indices_data()
     if not data:
-        log.info("📊 No market data available — skipping")
+        log.info("📊 No market data — skipping")
         return False
 
-    # 2) رسم البياني
-    chart_path = create_chart(data)
+    # 2) إنشاء صورة القائمة
+    chart_path = create_list_image(data, session_type=session_type)
     if not chart_path:
-        log.warning("📊 Failed to create chart")
+        log.warning("📊 Failed to create image")
         return False
 
     # 3) بناء النص
-    post_text = build_market_post(data)
+    post_text = build_market_post(data, session_type=session_type)
     if not post_text:
-        os.unlink(chart_path)
+        try:
+            os.unlink(chart_path)
+        except Exception:
+            pass
         return False
 
     # 4) إرسال
     try:
         ok = await send_func(post_text, chart_path, is_file=True)
         if ok:
-            log.info("📊 Market update sent successfully")
+            log.info(f"📊 Market {label} update sent successfully")
         else:
-            log.warning("📊 Failed to send market update")
+            log.warning(f"📊 Failed to send market {label} update")
     except Exception as e:
-        log.error(f"📊 Market update error: {e}")
+        log.error(f"📊 Market {label} error: {e}")
         ok = False
     finally:
-        # تنظيف الملف المؤقت
         try:
             os.unlink(chart_path)
         except Exception:

@@ -147,17 +147,8 @@ async def run_cycle():
         return
 
     # ═══════════════════════════════════════════════
-    # الجزء 1: مؤشرات السوق الأمريكية (chart)
-    # ═══════════════════════════════════════════════
-    try:
-        from market_chart import run_market_update
-        log.info("📊 Fetching market indices...")
-        await run_market_update(send_post)
-        await asyncio.sleep(3)  # فاصل بين المؤشرات والأخبار
-    except ImportError:
-        log.info("📊 market_chart module not found — skipping market update")
-    except Exception as e:
-        log.warning(f"📊 Market update error: {e}")
+    # ملاحظة: المؤشرات الأمريكية لها workflow منفصل
+    # (market-indices.yml) يعمل عند الافتتاح والإغلاق فقط
 
     # ═══════════════════════════════════════════════
     # الجزء 2: أخبار الكريبتو

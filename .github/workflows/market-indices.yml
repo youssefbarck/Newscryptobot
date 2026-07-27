@@ -1,4 +1,4 @@
-name: 📊 US Market Indices
+name: Market Indices
 
 on:
   schedule:
@@ -17,31 +17,18 @@ on:
           - close
 
 jobs:
-  market-indices:
+  run:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-
+    timeout-minutes: 3
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run Market Indices
+      - run: pip install aiohttp matplotlib
+      - name: Run
         working-directory: ./
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          SESSION="${{ github.event.inputs.session }}"
-          if [ -z "$SESSION" ]; then
-            SESSION="auto"
-          fi
-          echo "Running session: $SESSION"
-          python market_indices.py "$SESSION"
+        run: python market_indices.py "${{ github.event.inputs.session || 'auto' }}"

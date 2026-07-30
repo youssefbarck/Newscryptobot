@@ -73,6 +73,7 @@ KNOWN_SOURCE_NAMES = [
     "FXStreet", "Benzinga", "Yahoo Finance", "MarketWatch",
     "Bloomberg", "Reuters", "CNBC", "Forbes", "The Street",
     "Investing.com", "CoinJournal", "CryptoBriefing",
+    "WatcherGuru", "Watcher.Guru",
     # امتدادات شائعة
     ".com", ".net", ".io", ".org", ".co",
 ]

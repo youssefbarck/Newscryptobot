@@ -29,7 +29,13 @@ CHANNEL_TAG = "@newscrypto1m"
 # 📰 مصادر RSS
 # ═══════════════════════════════════════════════════════════
 RSS_SOURCES = [
-    # مصادر رئيسية للأخبار
+    # ⭐ المصدر الأساسي — أخبار سريعة (كريبتو + أسهم)
+    {
+        "name": "WatcherGuru",
+        "url": "https://watcher.guru/news/feed",
+        "type": "news",
+    },
+    # مصادر أخبار كريبتو
     {
         "name": "CoinDesk",
         "url": "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml",
@@ -40,7 +46,7 @@ RSS_SOURCES = [
         "url": "https://cointelegraph.com/rss",
         "type": "news",
     },
-    # متابعة الشخصيات عبر Google News (أكثر موثوقية من Twitter RSS)
+    # متابعة الشخصيات عبر Google News
     {
         "name": "Saylor News",
         "url": "https://news.google.com/rss/search?q=Michael+Saylor+OR+MicroStrategy+bitcoin&hl=en&gl=US&ceid=US:en",

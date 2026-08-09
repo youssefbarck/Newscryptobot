@@ -29,43 +29,23 @@ CHANNEL_TAG = "@newscrypto1m"
 # 📰 مصادر RSS
 # ═══════════════════════════════════════════════════════════
 RSS_SOURCES = [
-    # ⭐ المصدر الأساسي — أخبار سريعة (كريبتو + أسهم)
-    {
-        "name": "WatcherGuru",
-        "url": "https://watcher.guru/news/feed",
-        "type": "news",
-    },
-    # مصادر أخبار كريبتو
+    # ⭐ 1) CoinDesk — المصدر الأول
     {
         "name": "CoinDesk",
         "url": "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml",
         "type": "news",
     },
+    # ⭐ 2) Watcher Guru — المصدر الثاني
     {
-        "name": "Cointelegraph",
-        "url": "https://cointelegraph.com/rss",
+        "name": "WatcherGuru",
+        "url": "https://watcher.guru/news/feed",
         "type": "news",
     },
-    # متابعة الشخصيات عبر Google News
+    # ⭐ 3) The Block — المصدر الثالث
     {
-        "name": "Saylor News",
-        "url": "https://news.google.com/rss/search?q=Michael+Saylor+OR+MicroStrategy+bitcoin&hl=en&gl=US&ceid=US:en",
-        "type": "personality",
-    },
-    {
-        "name": "CZ News",
-        "url": "https://news.google.com/rss/search?q=Changpeng+Zhao+OR+CZ+Binance&hl=en&gl=US&ceid=US:en",
-        "type": "personality",
-    },
-    {
-        "name": "Vitalik News",
-        "url": "https://news.google.com/rss/search?q=Vitalik+Buterin+ethereum&hl=en&gl=US&ceid=US:en",
-        "type": "personality",
-    },
-    {
-        "name": "Musk Crypto News",
-        "url": "https://news.google.com/rss/search?q=Elon+Musk+bitcoin+OR+dogecoin+OR+crypto&hl=en&gl=US&ceid=US:en",
-        "type": "personality",
+        "name": "The Block",
+        "url": "https://www.theblock.co/rss.xml",
+        "type": "news",
     },
 ]
 

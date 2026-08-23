@@ -4,6 +4,7 @@
 """
 
 import re
+import html
 import asyncio
 import aiohttp
 from typing import Optional
@@ -17,7 +18,8 @@ from config import PROTECTED_NAMES, TICKER_PATTERN, log
 # ═══════════════════════════════════════════════════════════
 _PH_OPEN = "[["
 _PH_CLOSE = "]]"
-_PH_REGEX = re.compile(r'\[\[(\d+)\]\]')
+# يلتقط المتغيرات: [[0]], [[0 ]], [[ 0]], [[ 0 ]]
+_PH_REGEX = re.compile(r'\[\[\s*(\d+)\s*\]\]')
 
 
 def _build_protected_entities(text: str) -> dict:
@@ -64,22 +66,46 @@ def _build_protected_entities(text: str) -> dict:
 def _restore_entities(translated: str, entities: dict) -> str:
     """
     إعادة الكيانات المحمية إلى مكانها.
+    يتعامل مع تنويعات MyMemory مثل [[0 ]] و [[ 0]]
     """
     if not entities:
         return translated
 
-    # 1) الاستبدال المباشر (الأطول أولاً لتفادي تعارض [[10]] مع [[1]])
+    # 1) الاستبدال المباشر — الصيغة الأصلية [[N]]
     for placeholder in sorted(entities.keys(), key=lambda p: -int(p[2:-2])):
         original = entities[placeholder]
         translated = translated.replace(placeholder, original)
 
-    # 2) تنظيف أي بقايا placeholder لم تُستبدل
+    # 2) محاولة ثانية: التنويعات بمسافات [[N ]] أو [[ N]]
+    #    (MyMemory قد يضيف مسافة بسبب RTL)
+    for placeholder in sorted(entities.keys(), key=lambda p: -int(p[2:-2])):
+        num = placeholder[2:-2]  # استخراج الرقم
+        original = entities[placeholder]
+        # تجربة كل التنويعات الممكنة
+        variants = [
+            f"[[ {num}]]",
+            f"[[ {num} ]]",
+            f"[[{num} ]]",
+            f"[[{num}] ]",
+            f"[ [{num}]]",
+        ]
+        for variant in variants:
+            if variant in translated:
+                translated = translated.replace(variant, original)
+                break
+
+    # 3) تنظيف أي بقايا placeholder لم تُستبدل
     remaining_placeholders = _PH_REGEX.findall(translated)
     if remaining_placeholders:
         log.warning(f"⚠️ Leaked placeholders: {remaining_placeholders}")
         translated = _PH_REGEX.sub("", translated)
-        translated = re.sub(r'\s{2,}', ' ', translated).strip()
-        translated = re.sub(r'\s+([.،,!؟?])', r'\1', translated)
+
+    # 4) تنظيف HTML entities متبقية (MyMemory قد يُخرج #8230;)
+    translated = html.unescape(translated)
+
+    # 5) تنظيف نهائي
+    translated = re.sub(r'\s{2,}', ' ', translated).strip()
+    translated = re.sub(r'\s+([.،,!؟?])', r'\1', translated)
 
     return translated
 

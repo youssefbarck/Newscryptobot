@@ -4,6 +4,7 @@
 """
 
 import os
+import re
 import asyncio
 import time
 import aiohttp
@@ -19,6 +20,88 @@ from formatter import format_post, validate_post
 from dedup import (
     load_hashes, save_hashes, compute_hash, is_duplicate,
 )
+
+
+# ═══════════════════════════════════════════════════════════
+# 🔥 نظام ترشيح الأخبار — أهمية الخبر
+# ═══════════════════════════════════════════════════════════
+# كلمات مفتاحية عالية التأثير (كل كلمة = نقطة)
+_IMPACT_KEYWORDS = {
+    # تنظيم وتشريع
+    'sec': 3, 'approved': 3, 'approval': 3, 'rejected': 3, 'banned': 3,
+    'regulation': 2, 'lawsuit': 3, 'investigation': 2, 'subpoena': 3,
+    'compliance': 2, 'fine': 2, 'penalty': 2, 'legal': 1,
+    # تحركات سعرية كبيرة
+    'surge': 3, 'soar': 3, 'skyrocket': 3, 'plunge': 3, 'crash': 3,
+    'rally': 2, 'dump': 3, 'pump': 2, 'slump': 2, 'correction': 2,
+    'all-time high': 3, 'ath': 3, 'record high': 3, 'record low': 3,
+    'new high': 2, 'new low': 2, 'breaks': 2, 'surpasses': 2,
+    # ETF واستثمار مؤسسي
+    'etf': 3, 'etfs': 3, 'inflow': 3, 'outflow': 3, 'institutional': 2,
+    'blackrock': 3, 'fidelity': 2, 'grayscale': 2, 'invesco': 2,
+    'spot bitcoin': 3, 'spot eth': 3, 'spot ethereum': 3,
+    # اختراقات وأحداث كبرى
+    'hack': 3, 'hacked': 3, 'exploit': 3, 'breach': 3,
+    'bankrupt': 3, 'bankruptcy': 3, 'collapse': 3,
+    'fork': 2, 'halving': 3, 'upgrade': 2, 'mainnet': 2,
+    'airdrop': 2, 'launch': 1,
+    # شركات كبرى
+    'microstrategy': 2, 'tesla': 2, 'binance': 2, 'coinbase': 2,
+    'ripple': 2, 'tether': 2,
+    # اقتصاد كلوي
+    'federal reserve': 3, 'fed ': 2, 'fomc': 3, 'interest rate': 3,
+    'rate cut': 3, 'rate hike': 3, 'powell': 3, 'inflation': 2,
+    'recession': 2, 'gdp': 1,
+}
+
+# عملات رئيسية (أخبارها أهم)
+_MAJOR_COINS = [
+    'bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol',
+    'xrp', 'binance coin', 'bnb',
+]
+
+# مصادر ذات أولوية (أخبارها أكثر موثوقية)
+_SOURCE_PRIORITY = {
+    'CoinDesk': 2,
+    'Cointelegraph': 2,
+    'WatcherGuru': 1,
+}
+
+
+def score_news_item(item: NewsItem) -> float:
+    """
+    تقييم أهمية الخبر بناءً على:
+    - الكلمات المفتاحية المؤثرة
+    - ذكر عملات رئيسية
+    - جودة المصدر
+    - حداثة الخبر
+    """
+    score = 0.0
+    text = (item.title + ' ' + item.summary).lower()
+
+    # 1) كلمات مفتاحية عالية التأثير
+    for keyword, points in _IMPACT_KEYWORDS.items():
+        if keyword in text:
+            score += points
+
+    # 2) عملات رئيسية
+    for coin in _MAJOR_COINS:
+        if coin in text:
+            score += 1.5
+            break  # نقطة واحدة فقط للعملات
+
+    # 3) أولوية المصدر
+    score += _SOURCE_PRIORITY.get(item.source, 1)
+
+    # 4) حداثة الخبر (أحدث = أعلى)
+    if item.timestamp > 0:
+        age_hours = (time.time() - item.timestamp) / 3600
+        if age_hours < 1:
+            score += 2
+        elif age_hours < 3:
+            score += 1
+
+    return score
 
 
 # ═══════════════════════════════════════════════════════════
@@ -182,24 +265,33 @@ async def run_cycle():
     ]
     log.info(f"📅 After age filter: {len(fresh_news)} fresh / {len(news)} total")
 
-    # 4) معالجة كل خبر
+    # 4) إزالة المكررات أولاً (بدون ترجمة)
+    candidates = []
     for item in fresh_news:
+        title = item.title.strip()
+        if not title:
+            continue
+        if is_duplicate(title, sent_hashes, recent_titles):
+            continue
+        candidates.append(item)
+
+    # 5) ترتيب حسب الأهمية (الأعلى أولاً)
+    candidates.sort(key=lambda x: -score_news_item(x))
+    log.info(f"🔥 Ranked {len(candidates)} candidates by impact")
+    for i, c in enumerate(candidates[:5]):
+        s = score_news_item(c)
+        log.info(f"   [{i+1}] score={s:.1f} | {c.title[:60]}")
+
+    # 6) ترجمة وإرسال الأهم فقط (يُترجم فقط ما سنرسله)
+    for item in candidates:
         if sent_count >= MAX_POSTS_PER_RUN:
             log.info(f"✅ Reached MAX_POSTS_PER_RUN ({MAX_POSTS_PER_RUN})")
             break
 
-        title = item.title.strip()
-        if not title:
-            continue
-
-        # فحص التكرار قبل الترجمة
-        if is_duplicate(title, sent_hashes, recent_titles):
-            continue
-
-        # ترجمة
+        # ترجمة (فقط للأخبار المختارة — تقليل طلبات الترجمة)
         success = await translate_news_item(item)
         if not success or not getattr(item, 'title_ar', ''):
-            log.warning(f"🌐 Translation failed: {title[:60]}")
+            log.warning(f"🌐 Translation failed: {item.title[:60]}")
             continue
 
         # تنسيق المنشور
@@ -216,16 +308,16 @@ async def run_cycle():
         ok = await send_post(post_text, item.image)
         if ok:
             sent_count += 1
-            sent_hashes.add(compute_hash(title))
+            sent_hashes.add(compute_hash(item.title))
             sent_hashes.add(compute_hash(item.title_ar))
-            recent_titles.append(title)
+            recent_titles.append(item.title)
             recent_titles.append(item.title_ar)
             log.info(f"✅ [{sent_count}/{MAX_POSTS_PER_RUN}] {item.title_ar[:60]}")
             await asyncio.sleep(3)
         else:
             log.error(f"❌ Send failed: {item.title_ar[:60]}")
 
-    # 5) حفظ الهاشات
+    # 7) حفظ الهاشات
     save_hashes(sent_hashes)
 
     elapsed = time.time() - start_time

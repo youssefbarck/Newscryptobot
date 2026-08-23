@@ -97,12 +97,13 @@ def _has_arabic_verb_like(text: str) -> bool:
 
 
 def _has_leaked_placeholder(text: str) -> bool:
-    """فحص إن كان النص يحتوي على placeholder متسرب"""
+    """فحص إن كان النص يحتوي على placeholder متسرب (يشمل التنويعات بمسافات)"""
     if not text:
         return False
-    if re.search(r'\[\[\d+\]\]', text):
+    # يلتقط: [[0]], [[0 ]], [[ 0]], [[ 0 ]], [[0] ]
+    if re.search(r'\[\[\s*\d+\s*\]\]', text):
         return True
-    if '§' in text:  # أي رمز § متبقي = تسرب
+    if '§' in text:
         return True
     if re.search(r'\bXX\d+XX\b', text):
         return True

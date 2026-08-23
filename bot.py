@@ -1,7 +1,4 @@
-"""
-🤖 البوت الرئيسي — ينسق بين كل الوحدات
-يشمل: أخبار الكريبتو + مؤشرات السوق الأمريكية
-"""
+"""البوت الرئيسي — خبر عاجل واحد كل دورة"""
 
 import os
 import re
@@ -16,89 +13,93 @@ from config import (
 )
 from sources import fetch_all_news, NewsItem
 from translator import translate_news_item
-from formatter import format_post, validate_post
+from formatter import format_post, validate_post, is_banned_title, is_banned_title_ar
 from dedup import (
     load_hashes, save_hashes, compute_hash, is_duplicate,
 )
 
 
 # ═══════════════════════════════════════════════════════════
-# 🔥 نظام ترشيح الأخبار — أهمية الخبر
+# 🔥 نظام ترشيح الأخبار — أحداث محورية فقط
 # ═══════════════════════════════════════════════════════════
-# كلمات مفتاحية عالية التأثير (كل كلمة = نقطة)
-_IMPACT_KEYWORDS = {
-    # تنظيم وتشريع
-    'sec': 3, 'approved': 3, 'approval': 3, 'rejected': 3, 'banned': 3,
-    'regulation': 2, 'lawsuit': 3, 'investigation': 2, 'subpoena': 3,
-    'compliance': 2, 'fine': 2, 'penalty': 2, 'legal': 1,
-    # تحركات سعرية كبيرة
-    'surge': 3, 'soar': 3, 'skyrocket': 3, 'plunge': 3, 'crash': 3,
-    'rally': 2, 'dump': 3, 'pump': 2, 'slump': 2, 'correction': 2,
-    'all-time high': 3, 'ath': 3, 'record high': 3, 'record low': 3,
-    'new high': 2, 'new low': 2, 'breaks': 2, 'surpasses': 2,
+_EVENT_KEYWORDS = {
+    # اختراقات وسرقات — أعلى أولوية
+    'hack': 5, 'hacked': 5, 'exploit': 5, 'breach': 5, 'stolen': 5,
+    'drained': 5, 'theft': 5,
+    # تنظيم حاسم
+    'sec ': 4, 'approved': 4, 'approval': 4, 'banned': 4,
+    'lawsuit': 4, 'sued': 4, 'subpoena': 4, 'indictment': 4,
+    'arrested': 4, 'court order': 4,
+    # تحركات سعرية صادمة
+    'surge': 4, 'soar': 4, 'skyrocket': 4, 'plunge': 4, 'crash': 4,
+    'all-time high': 4, 'record high': 4, 'record low': 4,
+    'jumps': 3, 'drops': 2,
     # ETF واستثمار مؤسسي
-    'etf': 3, 'etfs': 3, 'inflow': 3, 'outflow': 3, 'institutional': 2,
-    'blackrock': 3, 'fidelity': 2, 'grayscale': 2, 'invesco': 2,
-    'spot bitcoin': 3, 'spot eth': 3, 'spot ethereum': 3,
-    # اختراقات وأحداث كبرى
-    'hack': 3, 'hacked': 3, 'exploit': 3, 'breach': 3,
-    'bankrupt': 3, 'bankruptcy': 3, 'collapse': 3,
-    'fork': 2, 'halving': 3, 'upgrade': 2, 'mainnet': 2,
-    'airdrop': 2, 'launch': 1,
-    # شركات كبرى
-    'microstrategy': 2, 'tesla': 2, 'binance': 2, 'coinbase': 2,
-    'ripple': 2, 'tether': 2,
+    'etf': 3, 'inflow': 4, 'outflow': 4,
+    'blackrock': 3, 'spot bitcoin': 4, 'spot eth': 4,
+    # إفلاس وانهيار
+    'bankrupt': 4, 'bankruptcy': 4, 'collapse': 4,
+    # أحداث تقنية كبرى
+    'halving': 4, 'mainnet': 2, 'airdrop': 2,
     # اقتصاد كلوي
-    'federal reserve': 3, 'fed ': 2, 'fomc': 3, 'interest rate': 3,
-    'rate cut': 3, 'rate hike': 3, 'powell': 3, 'inflation': 2,
-    'recession': 2, 'gdp': 1,
+    'fomc': 4, 'rate cut': 4, 'rate hike': 4,
+    'federal reserve': 3, 'powell': 3,
+    # شراء/بيع كبار
+    'buys': 2, 'bought': 2, 'purchases': 3, 'acquires': 3,
+    'invests': 2, 'sells': 2,
 }
 
-# عملات رئيسية (أخبارها أهم)
-_MAJOR_COINS = [
-    'bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol',
-    'xrp', 'binance coin', 'bnb',
-]
-
-# مصادر ذات أولوية (أخبارها أكثر موثوقية)
-_SOURCE_PRIORITY = {
-    'CoinDesk': 2,
-    'Cointelegraph': 2,
-    'WatcherGuru': 1,
+_PENALTY_KEYWORDS = {
+    'study': -5, 'survey': -5, 'research': -3, 'report says': -3,
+    'opinion': -5, 'analysis': -5, 'commentary': -5,
+    'prediction': -4, 'forecast': -4, 'could': -1, 'may': -1,
+    'weekly roundup': -6, 'daily digest': -6, 'state of crypto': -5,
+    'what happened': -5, 'things to know': -5, 'top 10': -5,
+    'top 5': -5, 'altcoins to watch': -5, 'price prediction': -5,
+    "here's what": -4, 'everything you': -4,
+    'wavers': -4, 'year-end call': -5, 'says it may': -3,
+    'is it time': -4, 'will it': -3, 'should you': -4,
+    'how a ': -3, 'how ': -2,
+    "but altcoin": -2, 'but the ': -1,
 }
 
 
 def score_news_item(item: NewsItem) -> float:
     """
-    تقييم أهمية الخبر بناءً على:
-    - الكلمات المفتاحية المؤثرة
-    - ذكر عملات رئيسية
-    - جودة المصدر
-    - حداثة الخبر
+    تقييم أهمية الخبر:
+    - حدث محوري (اختراق، قرار SEC، ارتفاع صادم) = نقاط عالية
+    - تحليل/رأي/تلميح = عقوبة قاسية
     """
     score = 0.0
     text = (item.title + ' ' + item.summary).lower()
+    title = item.title.strip()
 
-    # 1) كلمات مفتاحية عالية التأثير
-    for keyword, points in _IMPACT_KEYWORDS.items():
+    # 0) سؤال = ممنوع
+    if '?' in title:
+        return -100
+
+    # 1) أحداث محورية
+    for keyword, points in _EVENT_KEYWORDS.items():
         if keyword in text:
             score += points
 
-    # 2) عملات رئيسية
-    for coin in _MAJOR_COINS:
+    # 2) عقوبات (تحليلات / حشو / تلميحات)
+    for keyword, points in _PENALTY_KEYWORDS.items():
+        if keyword in text:
+            score += points
+
+    # 3) عملة رئيسية
+    for coin in ['bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'xrp']:
         if coin in text:
-            score += 1.5
-            break  # نقطة واحدة فقط للعملات
+            score += 1
+            break
 
-    # 3) أولوية المصدر
-    score += _SOURCE_PRIORITY.get(item.source, 1)
-
-    # 4) حداثة الخبر (أحدث = أعلى)
+    # 4) حداثة الخبر
     if item.timestamp > 0:
         age_hours = (time.time() - item.timestamp) / 3600
         if age_hours < 1:
             score += 2
-        elif age_hours < 3:
+        elif age_hours < 2:
             score += 1
 
     return score
@@ -108,7 +109,6 @@ def score_news_item(item: NewsItem) -> float:
 # التحقق من إعدادات البوت
 # ═══════════════════════════════════════════════════════════
 def check_config() -> bool:
-    """فحص أن كل المتغيرات اللازمة موجودة"""
     errors = []
     if not TELEGRAM_BOT_TOKEN:
         errors.append("TELEGRAM_BOT_TOKEN")
@@ -122,35 +122,24 @@ def check_config() -> bool:
 
 
 # ═══════════════════════════════════════════════════════════
-# إرسال المنشور للقناة — يدعم URL وملف محلي
+# إرسال المنشور للقناة
 # ═══════════════════════════════════════════════════════════
 async def send_post(text: str, image: str = "", is_file: bool = False) -> bool:
-    """
-    إرسال المنشور للقناة:
-    - image URL → validate ثم sendPhoto
-    - image file path → sendPhoto بملف مباشر
-    - بدون صورة → sendMessage
-    """
     if not text:
         return False
 
     try:
         async with aiohttp.ClientSession() as session:
-            # ═══════════════════════════════════
-            # إرسال صورة من ملف محلي (chart)
-            # ═══════════════════════════════════
+            # صورة من ملف محلي (chart)
             if is_file and image and os.path.exists(image):
                 try:
                     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
                     with open(image, 'rb') as f:
                         data = aiohttp.FormData()
                         data.add_field("chat_id", TELEGRAM_CHAT_ID)
-                        data.add_field("photo", f,
-                                       filename='chart.png',
-                                       content_type='image/png')
+                        data.add_field("photo", f, filename='chart.png', content_type='image/png')
                         data.add_field("caption", text[:1024])
-                        async with session.post(url, data=data,
-                                                timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                             if resp.status == 200:
                                 log.info(f"📊 Sent chart image")
                                 return True
@@ -160,18 +149,12 @@ async def send_post(text: str, image: str = "", is_file: bool = False) -> bool:
                 except Exception as e:
                     log.warning(f"📊 Chart photo error: {e}")
 
-            # ═══════════════════════════════════
-            # إرسال صورة من URL (أخبار RSS)
-            # ═══════════════════════════════════
+            # صورة من URL
             elif image and image.startswith("http"):
-                # التحقق من الصورة
                 has_valid_image = False
                 try:
-                    async with session.head(
-                        image,
-                        timeout=aiohttp.ClientTimeout(total=5),
-                        headers={"User-Agent": "Mozilla/5.0"},
-                    ) as resp:
+                    async with session.head(image, timeout=aiohttp.ClientTimeout(total=5),
+                                            headers={"User-Agent": "Mozilla/5.0"}) as resp:
                         if resp.status == 200 and "image" in resp.headers.get("Content-Type", ""):
                             has_valid_image = True
                 except Exception:
@@ -184,8 +167,7 @@ async def send_post(text: str, image: str = "", is_file: bool = False) -> bool:
                         data.add_field("chat_id", TELEGRAM_CHAT_ID)
                         data.add_field("photo", image)
                         data.add_field("caption", text[:1024])
-                        async with session.post(url, data=data,
-                                                timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                             if resp.status == 200:
                                 log.info(f"📸 Sent with image")
                                 return True
@@ -195,16 +177,10 @@ async def send_post(text: str, image: str = "", is_file: bool = False) -> bool:
                     except Exception as e:
                         log.warning(f"📸 Photo error: {e}")
 
-            # ═══════════════════════════════════
-            # إرسال كنص (احتياطي أو بدون صورة)
-            # ═══════════════════════════════════
+            # نص فقط
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            payload = {
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": text[:4096],
-            }
-            async with session.post(url, json=payload,
-                                    timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text[:4096]}
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 if resp.status == 200:
                     log.info(f"💬 Sent as text")
                     return True
@@ -221,7 +197,7 @@ async def send_post(text: str, image: str = "", is_file: bool = False) -> bool:
 # الدورة الرئيسية
 # ═══════════════════════════════════════════════════════════
 async def run_cycle():
-    """دورة واحدة كاملة: مؤشرات → أخبار → إرسال"""
+    """دورة واحدة: جلب → ترشيح صارم → ترجمة الأهم → إرسال واحد"""
     log.info("=" * 60)
     log.info("🚀 Cycle started")
     start_time = time.time()
@@ -229,14 +205,7 @@ async def run_cycle():
     if not check_config():
         return
 
-    # ═══════════════════════════════════════════════
-    # ملاحظة: المؤشرات الأمريكية لها workflow منفصل
-    # (market-indices.yml) يعمل عند الافتتاح والإغلاق فقط
-
-    # ═══════════════════════════════════════════════
-    # الجزء 2: أخبار الكريبتو
-    # ═══════════════════════════════════════════════
-    # 1) تحميل الهاشات المحفوظة
+    # 1) تحميل الهاشات
     sent_hashes = load_hashes()
     recent_titles = []
     sent_count = 0
@@ -263,9 +232,9 @@ async def run_cycle():
         n for n in news
         if n.timestamp == 0 or (now - n.timestamp) <= max_age_seconds
     ]
-    log.info(f"📅 After age filter: {len(fresh_news)} fresh / {len(news)} total")
+    log.info(f"📅 Age filter: {len(fresh_news)} fresh / {len(news)} total")
 
-    # 4) إزالة المكررات أولاً (بدون ترجمة)
+    # 4) فلتر صارم: مكرر + ممنوع
     candidates = []
     for item in fresh_news:
         title = item.title.strip()
@@ -273,25 +242,32 @@ async def run_cycle():
             continue
         if is_duplicate(title, sent_hashes, recent_titles):
             continue
+        if is_banned_title(title):
+            log.info(f"🚫 Banned: {title[:60]}")
+            continue
         candidates.append(item)
 
-    # 5) ترتيب حسب الأهمية (الأعلى أولاً)
+    # 5) ترتيب بالأهمية
     candidates.sort(key=lambda x: -score_news_item(x))
-    log.info(f"🔥 Ranked {len(candidates)} candidates by impact")
+    log.info(f"🔥 Ranked {len(candidates)} candidates")
     for i, c in enumerate(candidates[:5]):
         s = score_news_item(c)
         log.info(f"   [{i+1}] score={s:.1f} | {c.title[:60]}")
 
-    # 6) ترجمة وإرسال الأهم فقط (يُترجم فقط ما سنرسله)
+    # 6) ترجمة وإرسال الأهم فقط (خبر واحد)
     for item in candidates:
         if sent_count >= MAX_POSTS_PER_RUN:
-            log.info(f"✅ Reached MAX_POSTS_PER_RUN ({MAX_POSTS_PER_RUN})")
             break
 
-        # ترجمة (فقط للأخبار المختارة — تقليل طلبات الترجمة)
+        # ترجمة
         success = await translate_news_item(item)
         if not success or not getattr(item, 'title_ar', ''):
             log.warning(f"🌐 Translation failed: {item.title[:60]}")
+            continue
+
+        # فلتر العنوان المترجم
+        if is_banned_title_ar(item.title_ar):
+            log.info(f"🚫 Banned AR: {item.title_ar[:60]}")
             continue
 
         # تنسيق المنشور
@@ -325,9 +301,6 @@ async def run_cycle():
     log.info("=" * 60)
 
 
-# ═══════════════════════════════════════════════════════════
-# نقطة الدخول
-# ═══════════════════════════════════════════════════════════
 def main():
     """نقطة دخول البوت — تُستدعى من GitHub Actions"""
     try:

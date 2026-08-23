@@ -103,9 +103,27 @@ def _restore_entities(translated: str, entities: dict) -> str:
     # 4) تنظيف HTML entities متبقية (MyMemory قد يُخرج #8230;)
     translated = html.unescape(translated)
 
-    # 5) تنظيف نهائي
+    # 5) تنظيف عبارات مترجمة حرفياً (Clunky translations)
+    _CLUNKY = [
+        (r'يؤدي الارتفاع إلى ارتفاع', 'ارتفع'),
+        (r'يؤدي إلى ارتفاع', 'رفع'),
+        (r'مع ارتفاع', 'وارتفعت'),
+        (r'حيث إن', 'حيث'),
+        (r'في حين أن', 'بينما'),
+        (r'على الرغم من أن', 'رغم'),
+        (r'من الممكن أن', 'قد'),
+        (r'في هذا السياق', ''),
+        (r'من الجدير بالذكر', ''),
+        (r'تجدر الإشارة إلى', ''),
+        (r'يواصل الارتفاع', 'يواصل الصعود'),
+        (r'بشكل صحيح', ''),
+    ]
+    for pat, repl in _CLUNKY:
+        translated = re.sub(pat, repl, translated)
+
+    # 6) تنظيف نهائي
     translated = re.sub(r'\s{2,}', ' ', translated).strip()
-    translated = re.sub(r'\s+([.،,!؟?])', r'\1', translated)
+    translated = re.sub(r'\s+([.,!,?])', r'\1', translated)
 
     return translated
 

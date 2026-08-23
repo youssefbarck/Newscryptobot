@@ -41,10 +41,10 @@ RSS_SOURCES = [
         "url": "https://watcher.guru/news/feed",
         "type": "news",
     },
-    # ⭐ 3) The Block — المصدر الثالث
+    # ⭐ 3) Cointelegraph — المصدر الثالث (بدلاً من The Block المحجوب)
     {
-        "name": "The Block",
-        "url": "https://www.theblock.co/rss.xml",
+        "name": "Cointelegraph",
+        "url": "https://cointelegraph.com/rss",
         "type": "news",
     },
 ]

@@ -1,5 +1,6 @@
 """
 🌐 الترجمة من الإنجليزية للعربية مع حماية الأسماء والتوكنات
+يدعم: Google Translate (أساسي) + MyMemory (احتياطي عند 429)
 """
 
 import re
@@ -63,8 +64,6 @@ def _build_protected_entities(text: str) -> dict:
 def _restore_entities(translated: str, entities: dict) -> str:
     """
     إعادة الكيانات المحمية إلى مكانها.
-    Google Translate يحافظ عادةً على [[N]] كما هو.
-    نتعامل أيضاً مع الحالات الشاذة (مسافات إضافية، إزاحة).
     """
     if not entities:
         return translated
@@ -75,54 +74,104 @@ def _restore_entities(translated: str, entities: dict) -> str:
         translated = translated.replace(placeholder, original)
 
     # 2) تنظيف أي بقايا placeholder لم تُستبدل
-    #    (قد يحدث لو Google حذف الرقم أو عدّله)
-    #    نحاول إيجاد أي [[digit]] متبقي ونستبدله بأقرب entity غير مستخدم
     remaining_placeholders = _PH_REGEX.findall(translated)
     if remaining_placeholders:
         log.warning(f"⚠️ Leaked placeholders: {remaining_placeholders}")
-        # إزالة أي placeholder متبقي (نُبقي النص نظيفاً)
         translated = _PH_REGEX.sub("", translated)
-        # تنظيف مسافات مزدوجة ناتجة
         translated = re.sub(r'\s{2,}', ' ', translated).strip()
         translated = re.sub(r'\s+([.،,!؟?])', r'\1', translated)
 
     return translated
 
 
+def _split_chunks(text: str, max_chunk: int) -> list:
+    """تقسيم النص الطويل إلى أجزاء عند الجمل"""
+    if len(text) <= max_chunk:
+        return [text]
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    chunks = []
+    current = ""
+    for sent in sentences:
+        if len(current) + len(sent) + 1 <= max_chunk:
+            current = (current + " " + sent).strip()
+        else:
+            if current:
+                chunks.append(current)
+            current = sent
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 # ═══════════════════════════════════════════════════════════
-# Google Translate (مجاني عبر web API)
+# MyMemory API — بديل مجاني (لا يحتاج مفتاح)
+# ═══════════════════════════════════════════════════════════
+async def _mymemory_translate(text: str, source_lang: str = "en", target_lang: str = "ar") -> Optional[str]:
+    """ترجمة عبر MyMemory API"""
+    if not text or not text.strip():
+        return None
+
+    chunks = _split_chunks(text, 500)
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            translated_chunks = []
+            for chunk in chunks:
+                if not chunk.strip():
+                    continue
+                url = "https://api.mymemory.translated.net/get"
+                params = {
+                    "q": chunk,
+                    "langpair": f"{source_lang}|{target_lang}",
+                }
+                headers = {"User-Agent": "Mozilla/5.0 (compatible; WhaleNewsBot/1.0)"}
+                try:
+                    async with session.get(url, params=params, headers=headers) as resp:
+                        if resp.status != 200:
+                            log.warning(f"🌐 MyMemory HTTP {resp.status}")
+                            return None
+                        data = await resp.json(content_type=None)
+                        translated_text = data.get("responseData", {}).get("translatedText", "")
+                        if translated_text:
+                            translated_chunks.append(translated_text)
+                        else:
+                            log.warning(f"🌐 MyMemory empty: {str(data)[:200]}")
+                            return None
+                except Exception as e:
+                    log.warning(f"🌐 MyMemory chunk error: {e}")
+                    return None
+                await asyncio.sleep(0.5)
+
+            return " ".join(translated_chunks)
+    except Exception as e:
+        log.warning(f"🌐 MyMemory error: {e}")
+        return None
+
+
+# ═══════════════════════════════════════════════════════════
+# Google Translate (أساسي) + MyMemory (احتياطي)
 # ═══════════════════════════════════════════════════════════
 async def google_translate(text: str, source_lang: str = "en", target_lang: str = "ar") -> Optional[str]:
-    """ترجمة عبر Google Translate web API مع حماية الكيانات"""
+    """
+    ترجمة عبر Google Translate مع احتياطي MyMemory عند الحجب (429).
+    """
     if not text or not text.strip():
         return None
 
     # حماية الكيانات
     protected = _build_protected_entities(text)
     text_to_translate = protected["text"]
+    chunks = _split_chunks(text_to_translate, 1800)
 
-    # تقسيم النص الطويل
-    max_chunk = 1800
-    chunks = []
-    if len(text_to_translate) <= max_chunk:
-        chunks = [text_to_translate]
-    else:
-        sentences = re.split(r'(?<=[.!?])\s+', text_to_translate)
-        current = ""
-        for sent in sentences:
-            if len(current) + len(sent) + 1 <= max_chunk:
-                current = (current + " " + sent).strip()
-            else:
-                if current:
-                    chunks.append(current)
-                current = sent
-        if current:
-            chunks.append(current)
-
+    # ═══════════════════════════════════════════════
+    # المحاولة 1: Google Translate
+    # ═══════════════════════════════════════════════
     try:
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             translated_chunks = []
+            google_ok = True
             for chunk in chunks:
                 if not chunk.strip():
                     continue
@@ -137,9 +186,14 @@ async def google_translate(text: str, source_lang: str = "en", target_lang: str 
                 headers = {"User-Agent": "Mozilla/5.0 (compatible; WhaleNewsBot/1.0)"}
                 try:
                     async with session.get(url, params=params, headers=headers) as resp:
+                        if resp.status == 429:
+                            log.warning(f"🌐 Google 429 — switching to MyMemory")
+                            google_ok = False
+                            break
                         if resp.status != 200:
                             log.warning(f"🌐 Translate HTTP {resp.status}")
-                            return None
+                            google_ok = False
+                            break
                         data = await resp.json(content_type=None)
                         if isinstance(data, list) and data and isinstance(data[0], list):
                             translated_text = "".join(
@@ -148,17 +202,30 @@ async def google_translate(text: str, source_lang: str = "en", target_lang: str 
                             translated_chunks.append(translated_text)
                         else:
                             log.warning(f"🌐 Unexpected response: {str(data)[:200]}")
-                            return None
+                            google_ok = False
+                            break
                 except Exception as e:
                     log.warning(f"🌐 Translate chunk error: {e}")
-                    return None
+                    google_ok = False
+                    break
                 await asyncio.sleep(0.3)
 
-            translated = " ".join(translated_chunks)
-            return _restore_entities(translated, protected["entities"])
+            if google_ok and translated_chunks:
+                translated = " ".join(translated_chunks)
+                return _restore_entities(translated, protected["entities"])
     except Exception as e:
-        log.warning(f"🌐 Translate error: {e}")
-        return None
+        log.warning(f"🌐 Google Translate error: {e}")
+
+    # ═══════════════════════════════════════════════
+    # المحاولة 2: MyMemory (بديل مجاني)
+    # ═══════════════════════════════════════════════
+    log.info(f"🌐 Trying MyMemory fallback...")
+    full_text = " ".join(chunks)
+    result = await _mymemory_translate(full_text, source_lang, target_lang)
+    if result:
+        return _restore_entities(result, protected["entities"])
+
+    return None
 
 
 # ═══════════════════════════════════════════════════════════

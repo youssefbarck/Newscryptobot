@@ -1,6 +1,14 @@
+# بيئة وأسرار
+.env
+*.session
+*.session-journal
+
+# بيانات محلية (وضع SQLite يرفعها بقوة عبر workflow باستخدام git add -f)
+data/
+
+# بايثون
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
 .venv/
 venv/
-.env
+.pytest_cache/

@@ -1,3 +1,10 @@
-aiohttp==3.9.1
-yfinance>=0.2.31
-matplotlib>=3.8.0
+# مكتبات بوت أخبار Telegram — متوافقة مع Python 3.11 على GitHub Actions
+telethon>=1.36,<2.0          # عميل MTProto لمراقبة قنوات Telegram
+google-genai>=1.16,<2.0      # SDK الرسمي لـ Gemini (إعادة صياغة الأخبار)
+SQLAlchemy[asyncio]>=2.0.30,<3.0   # طبقة قاعدة البيانات (greenlet مضمّن للعمل غير المتزامن)
+aiosqlite>=0.20,<0.22        # تشغيل SQLite بشكل غير متزامن
+asyncpg>=0.29,<0.31          # تشغيل Postgres (Neon) بشكل غير متزامن
+rapidfuzz>=3.9,<4.0          # اكتشاف الأخبار المتشابهة
+PyYAML>=6.0,<7.0             # قراءة settings.yaml
+python-dotenv>=1.0,<2.0      # متغيرات البيئة للتشغيل المحلي
+pydantic>=2.7,<3.0           # مخطط مخرجات الذكاء الاصطناعي (JSON مُقيّد)

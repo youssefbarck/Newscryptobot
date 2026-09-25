@@ -1,121 +1,230 @@
-# 🐋 Crypto News Bot
+# 📰 بوت أخبار Telegram — مراقبة، فهم، إعادة صياغة، ونشر
 
-بوت يلتقط أخبار الكريبتو والعملات الرقمية وشخصياتها الكبار (Saylor, CZ, Buterin, Musk) من مصادر متعددة، يترجمها للعربية مع الحفاظ على الأسماء والتوكنات، وينشرها في قناة تيليجرام.
+نظام احترافي يعمل بالكامل مجاناً على **GitHub Actions** يراقب قنوات Telegram إخبارية، ويفهم الخبر عبر **Gemini**، ثم يعيد كتابته بأسلوب صحفي عربي احترافي (على غرار CoinDesk وThe Block بالعربية)، وينشره في قناتك مع الحفاظ الصارم على الحقائق والأرقام و**بدون اختلاق أي معلومة**.
 
-## ✨ الميزات
+> هذا النظام **ليس مترجماً**: الذكاء الاصطناعي مُوجَّه ببرومبت صحفي صارم يفهم الخبر أولاً، يستخرج المعلومة الأساسية، ثم يعيد كتابتها، مع فحص آلي يتأكد أن كل رقم وسعر ونسبة من المصدر ورد في الخبر الناتج.
 
-- ✅ **جلب من 6 مصادر** (CoinDesk, Cointelegraph, Google News للشخصيات)
-- ✅ **ترجمة عربية** مع الحفاظ على الأسماء والتوكنات بالإنجليزية
-- ✅ **صورة أصلية** من الخبر (من حقل media:content في RSS)
-- ✅ **تنسيق نظيف** — عنوان واضح + نقاط + وسم القناة فقط
-- ✅ **منع التكرار** — هاش + Jaccard similarity (65%)
-- ✅ **حفظ الهاشات** في ملف `sent_news.json` يُcommit تلقائياً
-- ✅ **تشغيل كل 30 دقيقة** عبر GitHub Actions (مجاني)
+---
 
-## 📁 بنية المشروع
+## 1) المزايا
+
+- **مراقبة عدة قنوات** عامة بأقل تأخير ممكن على خطة مجانية (كل 10 دقائق، وقابلة للتعديل).
+- **فهم وإعادة صياغة** وليست ترجمة حرفية + عنوان مختصر واضح لكل خبر.
+- **حفظ صارم للأرقام**: أسعار، نسب، تواريخ، أسماء مشاريع وأشخاص — مع فحص آلي ومحاولة تصحيح.
+- **تصفية ذكية**: تجاهل الإعلانات والسبارم وغير الإخباري + قائمة كلمات ممنوعة قابلة للتعديل.
+- **منع التكرار بثلاث طبقات**: بصمة SHA-256، تشابه نصي (RapidFuzz) على نص المصدر، وتشابه على النص النهائي بعد الصياغة — يلتقط نفس الخبر حتى لو ورد من مصدرين مختلفين بصياغتين.
+- **موثوقية عالية**: حالة كل منشور مخزنة (`pending / processed / published / failed / ignored`)، إعادة محاولة تلقائية بين التشغيلات، لا نشر لأخبار قديمة عند إعادة التفعيل.
+- **وسائط كاملة**: الصور والفيديوهات والألبومات تُنشر مع الخبر (مع تجاهل آمن لقنوات الحماية من النسخ).
+- **Ticker مُتحقَّق منه**: لا يُقبل رمز عملة إلا إذا ورد حرفياً في نص المصدر — لا تخمين.
+- **شفافية**: ملخص لكل تشغيلة يظهر في صفحة Actions (عدد المنشور/المتجاهل/الفاشل + عناوين الأخبار).
+
+## 2) المعمارية
 
 ```
-whale-news-bot/
-├── .github/
-│   └── workflows/
-│       └── cron.yml          # GitHub Actions schedule
-├── bot.py                    # المنسق الرئيسي
-├── sources.py                # جلب RSS
-├── translator.py             # Google Translate + حماية الكيانات
-├── formatter.py              # تنسيق المنشور
-├── dedup.py                  # منع التكرار
-├── config.py                 # الإعدادات
-├── requirements.txt          # المكتبات
-├── README.md
-├── .gitignore
-└── sent_news.json            # يُنشأ تلقائياً
+┌──────────────────────────── GitHub Actions (كل 10 دقائق) ────────────────────────────┐
+│                                                                                      │
+│  اتصال MTProto (Telethon)                                                            │
+│         │                                                                            │
+│         ▼                                                                            │
+│  جلب الجديد فوق Watermark لكل قناة ──► تسجيل pending في القاعدة ──► ترقية Watermark   │
+│         │                                                                            │
+│         ▼                                                                            │
+│  تصفية مسبقة (طول، كلمات ممنوعة، وسائط بلا نص)                                        │
+│         │                                                                            │
+│         ▼                                                                            │
+│  منع التكرار: SHA-256 + RapidFuzz (خام×خام ثم نهائي×نهائي خلال نافذة 72 ساعة)          │
+│         │                                                                            │
+│         ▼                                                                            │
+│  Gemini: فهم الخبر → JSON مُقيّد {is_news, title, body, ticker}                        │
+│         │                                                                            │
+│         ▼                                                                            │
+│  فحص سلامة الأرقام (محاولة تصحيحية عند السقوط) ──► قالب HTML ──► النشر بالوسائط        │
+│         │                                                                            │
+│         ▼                                                                            │
+│  تحديث الحالة (published/failed/ignored) ──► صيانة ──► ملخص Step Summary               │
+└──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 🔧 الإعداد
+**لماذا Watermark Polling بدلاً من الاتصال الدائم؟** بيئة Actions المجانية مؤقتة وتعمل على جدول زمني. بدلاً من اتصال 24/7 (يحتاج سيرفر دائم)، نحفظ لكل قناة `last_message_id`، وكل تشغيلة تجلب فقط ما هو أحدث منه. النتيجة: **لا خسارة منشورات** مهما طال الغياب، و**لا تكرار** لأن كل عنصر يُسجَّل في القاعدة قبل معالجته.
 
-### 1) أنشئ repository على GitHub وارفع الملفات
+**الترتيب الحرج**: الجلب → التسجيل في القاعدة → ترقية العلامة → المعالجة. لو انهارت التشغيلة في أي لحظة، العناصر المسجلة تُستكمل تلقائياً في التشغيلة التالية من حالتها المخزنة.
 
+**قرار التصميم في إعادة المحاولة**: نُفضّل احتمال ضياع خبر نادر جداً (انهيار في الثانية الدقيقة بين الإرسال وحفظ الحالة) على النشر المزدوج. لذلك الصفوف بحالة `processed` لا تُعاد، بينما `pending` و`failed` تُعاد حتى `max_retries`.
+
+## 3) متطلبات مسبقة (كلها مجانية)
+
+| المتطلب | من أين | ملاحظات |
+|---|---|---|
+| حساب GitHub | github.com | يُفضّل أن يكون المستودع **عام** (دقائق Actions غير محدودة) |
+| api_id + api_hash | my.telegram.org → API development tools | بضعة دقائق، مجاني |
+| جلسة Telegram | سكربت `scripts/login.py` | من يملك الجلسة يتحكم بالحساب — انظر الأمان |
+| مفتاح Gemini | aistudio.google.com/apikey | الباقة المجانية تكفي بوفرة |
+| قاعدة Postgres | neon.tech | الخطة المجانية 0.5GB — تسجيل بضغطة زر |
+
+> 💡 **نصيحة أمنية مهمة**: أنشئ حساب Telegram مخصصاً للبوت برقم إضافي (eSIM/رقم افتراضي قانوني)، وأضفه **أدمن بصلاحية نشر فقط** في قناتك. بهذا تُعزل الجلسة عن حسابك الشخصي تماماً.
+
+## 4) خطوات التشغيل (من الصفر إلى أول خبر)
+
+### الخطوة 1 — رفع المشروع إلى GitHub
+1. أنشئ مستودعاً جديداً (يُفضّل عام).
+2. ارفع ملفات هذا المشروع كلها (سحب وإفلات عبر واجهة GitHub تكفي).
+
+### الخطوة 2 — تهيئة القنوات والإعدادات
+عدّل `settings.yaml`:
+```yaml
+source_channels:
+  - "@CoinDesk"
+  - "@cointelegraph"
+destination_channel: "@قناتك"
+```
+- قناة الوجهة يجب أن يكون فيها الحساب المملوك للجلسة **أدمن بصلاحية "نشر الرسائل"**.
+- القنوات المصدر يمكن أن يكون الحساب منضماً إليها أو لا (القنوات العامة تُقرأ بدون انضمام، و`auto_join: true` ينضم تلقائياً عند أول تشغيل).
+
+### الخطوة 3 — توليد الجلسة
+على جهازك:
 ```bash
-cd whale-news-bot
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin https://github.com/USERNAME/whale-news-bot.git
-git push -u origin main
+pip install telethon
+python scripts/login.py
 ```
+أدخل `api_id` و`api_hash` ورقم الهاتف ورمز التحقق. انسخ السلسلة الناتجة.
 
-### 2) احصل على Telegram Bot Token
-
-1. افتح تيليجرام وتحدث مع [@BotFather](https://t.me/BotFather)
-2. أرسل `/newbot` واتبع التعليمات
-3. انسخ الـ Token
-
-### 3) احصل على Channel Chat ID
-
-1. أضف البوت كمشرف في قناتك
-2. أرسل أي رسالة في القناة
-3. افتح هذا الرابط (استبدل TOKEN و USERNAME):
-   ```
-   https://api.telegram.org/bot<TOKEN>/getUpdates
-   ```
-4. ابحث عن `"chat":{"id":-1001234567890}` وانسخ الرقم (يجب أن يبدأ بـ `-100`)
-
-### 4) أضف GitHub Secrets
-
-في صفحة الريبو: **Settings → Secrets and variables → Actions → New repository secret**
+### الخطوة 4 — إضافة الأسرار
+في مستودعك: **Settings → Secrets and variables → Actions → New repository secret**
 
 | الاسم | القيمة |
 |---|---|
-| `TELEGRAM_BOT_TOKEN` | التوكن من BotFather |
-| `TELEGRAM_CHAT_ID` | معرّف القناة (يبدأ بـ `-100`) |
+| `TELEGRAM_API_ID` | من my.telegram.org |
+| `TELEGRAM_API_HASH` | من my.telegram.org |
+| `TELEGRAM_SESSION` | السلسلة من الخطوة 3 |
+| `GEMINI_API_KEY` | من aistudio.google.com/apikey |
+| `DATABASE_URL` | رابط Neon (شكل: `postgresql://user:pass@host/db?sslmode=require`) |
 
-### 5) فعّل GitHub Actions
+### الخطوة 5 — إنشاء قاعدة Neon
+1. سجّل في neon.tech → **Create Project**.
+2. انسخ **Connection string** (اختر Pooled connection) وأضف `?sslmode=require` إن لم تكن موجودة.
+3. ضعه في سر `DATABASE_URL`. الجداول تُنشأ تلقائياً في أول تشغيل.
 
-1. اذهب لتبويب **Actions** في الريبو
-2. إذا ظهر تحذير "Workflows aren't being run" → اضغط **"I understand my workflows, go ahead and enable them"**
+### الخطوة 6 — التشغيل الأول
+- صفحة **Actions** → فعّل workflows إن طُلب → اختر **news-bot** → **Run workflow** (تشغيل يدوي للتجربة).
+- أول تشغيل يقفز فوق التاريخ القديم (`skip_to_latest`) — **لن تنشر أخباراً قديمة**.
+- من الآن فصاعداً يعمل تلقائياً كل 10 دقائق.
 
-### 6) اختبار يدوي
+## 5) مرجع الإعدادات (settings.yaml)
 
-في تبويب **Actions** → اختر **"Crypto News Bot"** → اضغط **"Run workflow"**
+| المفتاح | الافتراضي | الشرح |
+|---|---|---|
+| `source_channels` | — | قنوات المصدر، الأفضل `@username` |
+| `destination_channel` | — | قناتك |
+| `auto_join` | `true` | انضمام تلقائي للقنوات العامة عند أول تشغيل |
+| `post_template` | قالب جاهز | HTML؛ المتغيرات `{title}` `{body}` `{source}` `{ticker_line}` |
+| `processing.rewrite_enabled` | `true` | `false` = نشر منقّح بدون AI (لا يحتاج مفتاح Gemini) |
+| `processing.min_post_length` | `80` | تجاهل المنشورات الأقصر (إعلانات/تحيات) |
+| `processing.max_post_length` | `4000` | تجاهل المقالات الضخمة |
+| `processing.max_body_chars` | `900` | الحد الأقصى لطول الخبر بعد الصياغة |
+| `processing.strict_numbers` | `false` | `true` = رفض الخبر كلياً إذا سقط رقم بعد إعادة المحاولة |
+| `processing.media.enabled` | `true` | نشر الصور/الفيديو |
+| `processing.media.max_media_mb` | `40` | تجاهل الوسائط الأضخم |
+| `processing.media.include_media_only_posts` | `false` | معالجة منشورات الصور بلا نص |
+| `dedup.similarity_threshold` | `86` | 0-100؛ أنزله لالتقاط تشابه أوسع |
+| `dedup.window_hours` | `72` | نافذة مقارنة التشابه |
+| `limits.max_posts_per_minute` | `4` | حماية من الفلوود |
+| `limits.max_posts_per_run` | `10` | سقف النشر لكل تشغيلة (البقية تنتظر) |
+| `limits.post_delay_seconds` | `8` | فاصل بين المنشورات |
+| `filters.ignore_keywords` | قائمة جاهزة | تجاهل فوري إن وردت الكلمة في النص |
+| `sync.fetch_limit_per_channel` | `30` | سقف الجلب لكل قناة لكل تشغيلة |
+| `sync.on_first_run` | `skip_to_latest` | أو `process_backlog` لمعالجة آخر المنشورات عند أول تشغيل |
+| `ai.model` | `gemini-2.0-flash` | بديلان مجانيان: `gemini-2.0-flash-lite` و`gemini-1.5-flash` |
+| `retries.max_retries` | `3` | محاولات كل خبر عبر التشغيلات |
+| `retries.max_age_hours` | `24` | خبر أقدم من ذلك يُهمل (`stale`) |
+| `housekeeping.retention_days` | `30` | حذف السجلات الأقدم — يبقي Neon خفيفاً |
 
-## 📝 تنسيق المنشور
+## 6) وضع SQLite البديل (بدون Neon)
+
+الملف `.github/workflows/news-bot-sqlite.yml` يخزن الحالة في `data/state.db` ويرفعها إلى المستودع بعد كل تشغيلة. لتفعيله:
+1. عطّل `news-bot.yml` (Actions → news-bot → ⋯ → Disable workflow).
+2. فعّل صلاحية الكتابة: Settings → Actions → General → Workflow permissions → **Read and write**.
+3. أضف الأسرار الأربعة فقط (بدون `DATABASE_URL`).
+
+> مناسب للتجربة أو الحمل الخفيف. للإنتاج المستمر استخدم Neon — أضمن وأسرع ولا يكبر حجم المستودع.
+
+## 7) التشغيل المحلي (اختبار سريع)
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env        # ثم عبّئ القيم
+python -m bot.main          # تشغيلة واحدة كاملة ثم خروج
+```
+
+## 8) الأمان — اقرأه بجدية
+
+- **TELEGRAM_SESSION تعادل حساباً كاملاً**: من يحصل عليها يقرأ ويكتب باسم الحساب. لا تضعها أبداً في الكود أو settings.yaml — في GitHub Secrets فقط.
+- استخدم حساباً مخصصاً للبوت، وأضفه في قناتك بصلاحية **نشر فقط**.
+- المستودع العام آمن للأسرار لأنها في Secrets، لكن لا ترفع ملف `.env` أبداً (موجود في `.gitignore`).
+- `api_id/api_hash` وحدها لا تكفي للدخول دون الجلسة، لكن أبقِها سرية أيضاً.
+
+## 9) استكشاف الأخطاء
+
+| المشكلة | السبب والحل |
+|---|---|
+| `جلسة TELEGRAM_SESSION غير صالحة` | الجلسة أُبطلت (خروج من كل الأجهزة مثلاً) — ولّد جلسة جديدة بالسكربت وحدّث السر |
+| `الحساب لا يستطيع النشر في قناة الوجهة` | أضف الحساب أدمن في قناتك بصلاحية نشر الرسائل |
+| `تعذر الوصول إلى القناة X` | قناة خاصة أو اليوزرنيم خطأ — تأكد أنها عامة أو انضم بالحساب يدوياً مرة |
+| `فشل نداء الذكاء الاصطناعي` | غالباً استنفاد باقة Gemini المجانية أو مفتاح خطأ — جرّب `gemini-2.0-flash-lite` |
+| تأخير النشر عن المصدر | تأخيرات GitHub Cron الطبيعية (5-20 دقيقة أحياناً) — لا شيء يصلحها، لكن لا منشور يضيع |
+| خبر لم يُنشر ولا يظهر في المتجاهل | ابحث عنه في جدول `processed_messages` (عمود `state` و`ignore_reason`) يوضح السبب بدقة |
+| `FloodWait` في السجل | طبيعي — النظام ينتظر ويعيد تلقائياً؛ إن تكرر كثيراً قلّل `max_posts_per_minute` |
+
+## 10) حدود الخطة المجانية (بالأرقام)
+
+- **GitHub Actions**: المستودع العام = مجاني فعلياً بلا حدود عملية. الخاص = 2000 دقيقة/شهر (تشغيلة ~90 ثانية كل 10 دقائق تستهلك ~4400 دقيقة → **استخدم مستودعاً عاماً** أو زد الفاصل إلى 30 دقيقة على الخاص).
+- **Gemini المجاني**: باقة `gemini-2.0-flash` المجانية تكفي بسهولة لمراقبة 5-10 قنوات نشطة.
+- **Neon المجاني**: 0.5GB — مع `retention_days: 30` وعدة قنوات لا تستهلك سوى ميغابايتات قليلة.
+
+## 11) الدمج مع نسختك الحالية (بيئتك التشغيلية الناجحة)
+
+إذا كان لديك `bot.py` يعمل أصلاً على GitHub Actions، فالترقية لهذا النظام **لا تغير بيئتك إطلاقاً**:
+
+1. **نقطة التشغيل نفسها**: يوجد ملف `bot.py` في جذر المشروع — أي Workflow ينفّذ `python bot.py` سيستمر بالعمل كما هو، لكن المحرك تحته يصبح النظام الاحترافي الكامل.
+2. **أسماء الأسرار مرنة**: لا حاجة لتعديل أسماء Secrets لديك — النظام يقبل الأسماء البديلة تلقائياً:
+
+   | الاسم الأساسي | الأسماء البديلة المقبولة |
+   |---|---|
+   | `TELEGRAM_API_ID` | `API_ID`, `TG_API_ID`, `TELEGRAM_API` |
+   | `TELEGRAM_API_HASH` | `API_HASH`, `TG_API_HASH` |
+   | `TELEGRAM_SESSION` | `SESSION`, `STRING_SESSION`, `TELETHON_SESSION`, `TG_SESSION` |
+   | `GEMINI_API_KEY` | `GOOGLE_API_KEY`, `GOOGLE_AI_API_KEY`, `GEMINI_KEY` |
+   | `DATABASE_URL` | `POSTGRES_URL`, `POSTGRESQL_URL`, `NEON_DATABASE_URL`, `NEON_URL` |
+
+3. **خطوات الترقية**: انسخ محتويات هذا المشروع فوق مستودعك (مع الاحتفاظ بملف الـ Workflow الخاص بك كما هو) → عدّل `settings.yaml` (القنوات وقناة النشر) → شغّل يدوياً مرة للتجربة → انتهى.
+
+> ملاحظة: إذا كانت نسختك القديمة تخزن الحالة بطريقة خاصة (ملف JSON في الريبو مثلاً)، فأول تشغيل للنظام الجديد يبدأ بصفحة نظيفة: يقفز فوق الأخبار القديمة (`skip_to_latest`) وينشر الجديد فقط — لا تكرار ولا فقدان.
+
+## 12) هيكل المشروع
 
 ```
-عنوان الخبر المترجم
-
-• نقطة أولى من الملخص
-• نقطة ثانية من الملخص
-• نقطة ثالثة من الملخص
-
-@newscrypto1m
+telegram-news-bot/
+├── .github/workflows/
+│   ├── news-bot.yml              ← الوضع الأساسي (Neon Postgres)
+│   └── news-bot-sqlite.yml       ← البديل (SQLite يُرفع للمستودع)
+├── bot.py                        ← نقطة التشغيل الجذرية (python bot.py) — توافق مع بيئتك الحالية
+├── bot/
+│   ├── main.py                   ← نقطة التشغيل: تسلسل التشغيلة كاملة
+│   ├── config.py                 ← settings.yaml + الأسرار + التحقق
+│   ├── db.py                     ← القاعدة: الحالات، المنشور، العلامات المائية
+│   ├── monitor.py                ← جلب الجديد + الألبومات + Watermark
+│   ├── pipeline.py               ← خط المعالجة: تصفية → تكرار → AI → نشر
+│   ├── ai.py                     ← Gemini: البرومبت الصحفي + JSON + إعادة المحاولة
+│   ├── dedup.py                  ← التشابه (RapidFuzz) بطبقتيه
+│   ├── normalizer.py             ← تطبيع عربي + بصمات + استخراج الأرقام
+│   ├── publisher.py              ← النشر + الوسائط + Rate Limit + FloodWait
+│   ├── telegram_client.py        ← إنشاء العميل وحل القنوات
+│   ├── summary.py                ← ملخص التشغيلة في صفحة Actions
+│   └── logging_setup.py          ← سجلات موحدة UTC
+├── scripts/
+│   ├── login.py                  ← توليد TELEGRAM_SESSION مرة واحدة
+│   └── smoke_test.py             ← اختبار دخان محلي بدون شبكة
+├── settings.yaml                 ← كل الإعدادات القابلة للتعديل
+├── requirements.txt
+├── .env.example                  ← قالب الأسرار للتشغيل المحلي
+└── README.md
 ```
-
-مرفق بصورة الخبر الأصلية.
-
-## 🛡️ الحماية المُطبّقة على الأسماء
-
-هذه الكيانات تُحفظ بالإنجليزية ولا تُترجم:
-
-- **الشخصيات**: Michael Saylor, CZ, Vitalik Buterin, Elon Musk, Jerome Powell, Gary Gensler, Brian Armstrong, Brad Garlinghouse, Janet Yellen, Sam Bankman-Fried, Jack Dorsey, Cathie Wood
-- **الشركات**: MicroStrategy, BlackRock, Fidelity, Grayscale, Binance, Coinbase, Kraken, Bybit, OKX, Tesla, SpaceX, Galaxy Digital, Blockstream, Bitwise, VanEck, Invesco
-- **صناديق ETF**: IBIT, FBTC, GBTC, ETHA, EZET
-- **العملات**: Bitcoin, Ethereum, Solana, Ripple, Cardano, Dogecoin, Avalanche, Polkadot, Chainlink, Polygon, Litecoin, Tron, Uniswap, Aave, Stellar, Hedera, Cosmos, Toncoin, Binance Coin, Tether, USDT, USDC, Shiba Inu, Pepe, Worldcoin, Near Protocol, Aptos, Arbitrum, Optimism, Sui
-- **التوكنات**: BTC, ETH, BNB, SOL, XRP, ADA, DOGE, AVAX, DOT, LINK, MATIC, LTC, TRX, UNI, AAVE, NEAR, APT, ARB, OP, SUI, SEI, TON, ATOM, XLM, HBAR, USDT, USDC, DAI, SHIB, PEPE, WLD, TIA, INJ, RNDR, RENDER, FET, RUNE, GMX, DYDX, EIGEN, ETHFI, PENDLE, JTO, JUP, RAY, BONK, WIF, FLOKI, IBIT, FBTC, GBTC, ETHA, EZET
-- **مصطلحات**: DeFi, NFT, NFTs, Web3, DAO, ICO, ETF, ETFs, Spot ETF, Layer 1, Layer 2, Mainnet, Testnet, Federal Reserve, Fed, SEC, CFTC, FOMC, CPI, GDP, Bull Run, Bear Market
-
-## 🔧 التخصيص
-
-لتعديل الإعدادات، حرر `config.py`:
-
-- `MAX_POSTS_PER_RUN` — عدد المنشورات لكل دورة (افتراضي 3)
-- `MAX_NEWS_AGE_HOURS` — أقصى عمر للخبر بالساعات (افتراضي 6)
-- `SIMILARITY_THRESHOLD` — عتبة التشابه (افتراضي 0.65)
-- `MAX_BULLETS` — أقصى عدد نقاط في المنشور (افتراضي 4)
-- `RSS_SOURCES` — إضافة/حذف مصادر
-- `PROTECTED_NAMES` — إضافة كيانات تحمى من الترجمة
-
-## 📊 المراقبة
-
-- **Logs**: تبويب Actions → اختر آخر run → اضغط على step "Run bot"
-- **الملف**: `sent_news.json` يُحدّث بعد كل دورة ويعرض عدد الهاشات

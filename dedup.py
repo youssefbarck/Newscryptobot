@@ -1,132 +1,55 @@
+# -*- coding: utf-8 -*-
 """
-🧹 منع التكرار — حفظ الهاشات في ملف JSON داخل الريبو
+اكتشاف التكرار والتشابه بين الأخبار.
+
+طبقتان:
+1. تطابق تام: نفس بصمة SHA-256 → نسخة مطابقة حرفياً.
+2. تشابه دلالي تقريبي: RapidFuzz (token_sort_ratio) بين:
+   - النص الخام الجديد ونصوص المصدر للأخبار المنشورة (يلتقط النسخ المنسوخة)
+   - النص النهائي الجديد والنصوص النهائية المنشورة (يلتقط نفس الخبر بصياغتين مختلفتين)
 """
+from __future__ import annotations
 
-import re
-import json
-import os
-import hashlib
-import time
-from typing import Set
+import logging
+from typing import List, Optional, Sequence, Tuple
 
-from config import DEDUP_FILE, SIMILARITY_THRESHOLD, log
+from rapidfuzz import fuzz
 
-
-# ═══════════════════════════════════════════════════════════
-# تحميل الهاشات المحفوظة
-# ═══════════════════════════════════════════════════════════
-def load_hashes() -> Set[str]:
-    """تحميل الهاشات المحفوظة من ملف JSON"""
-    if not os.path.exists(DEDUP_FILE):
-        log.info(f"📊 No dedup file yet — first run. Path: {DEDUP_FILE}")
-        return set()
-    try:
-        with open(DEDUP_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            hashes = set(data.get("hashes", []))
-            log.info(f"✅ Loaded {len(hashes)} hashes from {DEDUP_FILE}")
-            return hashes
-    except Exception as e:
-        log.warning(f"❌ Dedup load error: {e}")
-        return set()
+log = logging.getLogger("dedup")
 
 
-# ═══════════════════════════════════════════════════════════
-# حفظ الهاشات
-# ═══════════════════════════════════════════════════════════
-def save_hashes(hashes: Set[str]):
-    """حفظ الهاشات في ملف JSON"""
-    try:
-        os.makedirs(os.path.dirname(DEDUP_FILE), exist_ok=True)
-        # الاحتفاظ بآخر 3000 هاش فقط
-        hash_list = list(hashes)[-3000:]
-        content = {
-            "hashes": hash_list,
-            "last_updated": time.time(),
-            "count": len(hash_list),
-        }
-        with open(DEDUP_FILE, "w", encoding="utf-8") as f:
-            json.dump(content, f, ensure_ascii=False, indent=2)
-        log.info(f"💾 Saved {len(hash_list)} hashes → {DEDUP_FILE}")
-    except Exception as e:
-        log.error(f"❌ Save error: {e}")
+def similarity_score(text_a: str, text_b: str) -> float:
+    """درجة التشابه 0-100 بين نصين مطبّعين."""
+    if not text_a or not text_b:
+        return 0.0
+    return float(fuzz.token_sort_ratio(text_a, text_b))
 
 
-# ═══════════════════════════════════════════════════════════
-# حساب هاش الخبر
-# ═══════════════════════════════════════════════════════════
-def compute_hash(title: str) -> str:
+def find_similar(
+    normalized_raw: str,
+    normalized_final: str,
+    published: Sequence[Tuple[int, str, str]],
+    threshold: float,
+) -> Optional[Tuple[int, float, str]]:
     """
-    هاش مبني على العنوان المُطبّع:
-    - أحرف صغيرة
-    - إزالة علامات الترقيم والمسافات الزائدة
-    - أخذ أول 100 حرف فقط (لتفادي اختلافات العنوان الطويل)
+    البحث عن خبر منشور مشابه.
+    published: [(published_id, normalized_raw, normalized_final)]
+    يعيد (id, الدرجة, نوع المقارنة) أو None.
     """
-    norm = re.sub(r'[^\w\s\u0600-\u06FF]', '', title.lower())
-    norm = re.sub(r'\s+', ' ', norm).strip()
-    norm = norm[:100]
-    return hashlib.md5(norm.encode()).hexdigest()[:12]
+    best: Optional[Tuple[int, float, str]] = None
 
+    for pub_id, pub_raw, pub_final in published:
+        # مقارنة 1: خام جديد × خام منشور
+        score = similarity_score(normalized_raw, pub_raw)
+        if best is None or score > best[1]:
+            best = (pub_id, score, "raw_vs_raw")
+        # مقارنة 2: نهائي جديد × نهائي منشور (الأسلوب موحّد بعد AI → تشابه أعلى لنفس الخبر)
+        if normalized_final:
+            score = similarity_score(normalized_final, pub_final)
+            if best is None or score > best[1]:
+                best = (pub_id, score, "final_vs_final")
 
-# ═══════════════════════════════════════════════════════════
-# كشف التشابه — Jaccard Similarity
-# ═══════════════════════════════════════════════════════════
-def _normalize_text(t: str) -> str:
-    """تطبيع النص لفحص التشابه"""
-    if not t:
-        return ""
-    t = re.sub(r'[^\w\s\u0600-\u06FF]', ' ', t.lower())
-    t = re.sub(r'\s+', ' ', t).strip()
-    # إزالة الكلمات الشائعة (stop words)
-    stop = {'the', 'a', 'an', 'in', 'on', 'at', 'to', 'of', 'for', 'and', 'or',
-            'في', 'من', 'إلى', 'على', 'عن', 'أن', 'إن', 'ال', 'و', 'أو'}
-    words = [w for w in t.split() if w not in stop and len(w) > 1]
-    return ' '.join(words)
-
-
-def is_similar(title: str, recent_titles: list, threshold: float = SIMILARITY_THRESHOLD) -> bool:
-    """
-    فحص تشابه العنوان مع العناوين الحديثة باستخدام Jaccard similarity.
-    threshold: نسبة التشابه المطلوبة لاعتبار العنوان مكرراً (0.65 = 65%)
-    """
-    if not title:
-        return False
-    norm = _normalize_text(title)
-    if not norm:
-        return False
-    words_new = set(norm.split())
-    if len(words_new) < 3:
-        return False
-    for prev in recent_titles:
-        words_prev = set(_normalize_text(prev).split())
-        if not words_prev:
-            continue
-        intersection = len(words_new & words_prev)
-        union = len(words_new | words_prev)
-        if union > 0:
-            sim = intersection / union
-            if sim >= threshold:
-                return True
-    return False
-
-
-# ═══════════════════════════════════════════════════════════
-# فحص شامل للتكرار
-# ═══════════════════════════════════════════════════════════
-def is_duplicate(title: str, sent_hashes: Set[str], recent_titles: list) -> bool:
-    """
-    فحص شامل: هاش مباشر + تشابه مع آخر العناوين
-    """
-    if not title:
-        return True
-
-    h = compute_hash(title)
-    if h in sent_hashes:
-        log.info(f"🧹 Exact hash match: {title[:60]}")
-        return True
-
-    if is_similar(title, recent_titles):
-        log.info(f"🧹 Similar to recent: {title[:60]}")
-        return True
-
-    return False
+    if best and best[1] >= threshold:
+        log.debug("تشابه مكتشف: خبر #%s بدرجة %.1f (%s)", best[0], best[1], best[2])
+        return best
+    return None

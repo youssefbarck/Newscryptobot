@@ -206,8 +206,8 @@ async def main():
         from translator import google_translate, _build_protected_entities
         log_test("translator.py", True, "[[N]] placeholder format")
 
-        from formatter import format_post, validate_post, extract_bullets
-        log_test("formatter.py", True)
+        from formatter import format_post, validate_post, extract_detail_lines
+        log_test("formatter.py", True, "extract_detail_lines available")
 
         from dedup import load_hashes, save_hashes, compute_hash
         log_test("dedup.py", True)

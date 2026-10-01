@@ -53,8 +53,21 @@ PROMO_PATTERNS_EN = [
 # ═══════════════════════════════════════════════════════════
 # أيقونات نوع الخبر
 # ═══════════════════════════════════════════════════════════
-def _detect_news_type(title: str, summary: str) -> str:
-    """تحديد نوع الخبر لإيقونة مناسبة"""
+def _detect_news_type(title: str, summary: str, sentiment: str = "") -> str:
+    """تحديد نوع الخبر لإيقونة مناسبة — يأخذ شعور CryptoPanic بالحسبان"""
+    # أولوية: شعور CryptoPanic
+    if sentiment == 'important':
+        return '🚨'
+    elif sentiment == 'hot':
+        return '🔥'
+    elif sentiment == 'rising':
+        return '📈'
+    elif sentiment == 'bullish':
+        return '🟢'
+    elif sentiment == 'bearish':
+        return '🔴'
+    
+    # تحليل من النص
     text = (title + ' ' + summary).lower()
     
     # اختراق / سرقة
@@ -204,33 +217,50 @@ def _is_promotional(text: str) -> bool:
 
 def extract_detail_lines(summary: str, max_lines: int = MAX_BULLETS) -> list:
     """
-    استخراج أقوى سطر أو سطرين من الملخص.
-    نبحث عن جمل تحتوي أرقام/نسب/أسماء — ليست حشواً.
+    استخراج أقوى أسطر التفاصيل من الملخص.
+    نبحث عن جمل تحتوي معلومات ملموسة: أرقام/نسب/أسماء/أحداث.
+    إذا لم نجد أرقاماً، نقبل جملأً تحتوي كلمات دالة.
     """
     if not summary or not summary.strip():
         return []
 
     sentences = re.split(r'(?<=[.!?؟])\s+', summary.strip())
     
-    lines = []
+    # كلمات دالة على معلومة مهمة حتى بدون أرقام
+    _INFO_WORDS = {'hack', 'hacked', 'breach', 'stolen', 'approved', 'banned',
+                   'rejected', 'filed', 'sued', 'arrested', 'launched',
+                   'listed', 'delisted', 'suspended', 'acquired', 'merged',
+                   'bankrupt', 'collapsed', 'surged', 'plunged', 'crashed',
+                   'announced', 'revealed', 'confirmed', 'denied',
+                   'اختراق', 'موافقة', 'رفض', 'سرقة', 'انهيار', 'ارتفاع',
+                   'هبوط', 'إفلاس', 'إطلاق', 'حظر'}
+    
+    numeric_lines = []
+    info_lines = []
+    
     for sent in sentences:
         sent = sent.strip().strip('.').strip()
         if not sent:
             continue
-        if len(sent) < 25:
+        if len(sent) < 20:
             continue
-        if len(sent) > 200:
+        if len(sent) > 250:
             continue
         if _is_promotional(sent):
             continue
-        # يجب أن يحتوي على معلومة ملموسة (رقم أو اسم محمي أو نسبة)
-        if not re.search(r'\d|[%$]', sent):
+        # فحص سؤال — ممنوع
+        if '?' in sent or '؟' in sent:
             continue
-        lines.append(sent)
-        if len(lines) >= max_lines:
-            break
-
-    return lines
+        # جمل تحتوي أرقام/نسب = أقوى معلومة
+        if re.search(r'\d|[%$]', sent):
+            numeric_lines.append(sent)
+        # جمل تحتوي كلمات دالة = معلومة جيدة
+        elif any(w in sent.lower() for w in _INFO_WORDS):
+            info_lines.append(sent)
+    
+    # نفضل الأرقام ثم الكلمات الدالة
+    result = numeric_lines + info_lines
+    return result[:max_lines]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -238,10 +268,12 @@ def extract_detail_lines(summary: str, max_lines: int = MAX_BULLETS) -> list:
 # ═══════════════════════════════════════════════════════════
 def format_post(item) -> Optional[str]:
     """
-    صيغة عاجل قصيرة ومباشرة:
-      🔴 عاجل | Bitcoin يتخطى 82,000$ للمرة الأولى
+    صيغة عاجل مباشرة ومفصلة:
+      🚨 عاجل — Bitcoin يتخطى 82,000$ للمرة الأولى
 
-      ارتفع BTC بنسبة 5% خلال ساعات...
+      ▸ ارتفع BTC بنسبة 5% خلال ساعات
+      ▸ حجم التداول بلغ 12 مليار دولار
+      ▸ المحللون يتوقعون استمرار الصعود
 
       @newscrypto1m
     """
@@ -249,16 +281,35 @@ def format_post(item) -> Optional[str]:
     if not title_ar or len(title_ar) < 20:
         return None
 
-    # تحديد أيقونة نوع الخبر
-    icon = _detect_news_type(item.title, item.summary)
+    # تحديد أيقونة نوع الخبر (مع شعور CryptoPanic)
+    sentiment = getattr(item, 'sentiment', '') or ''
+    icon = _detect_news_type(item.title, item.summary, sentiment)
 
-    # بناء العنوان مع الأيقونة
-    header = f"{icon} {title_ar}"
+    # بناء العنوان مع "عاجل" — الأيقونة + عاجل + العنوان
+    header = f"{icon} عاجل — {title_ar}"
 
-    # تفاصيل موجزة (سطر أو سطرين فقط)
+    # تفاصيل غنية (حتى 4 أسطر)
     details = extract_detail_lines(getattr(item, 'summary_ar', '') or '')
 
+    # إذا لم توجد تفاصيل مترجمة، نستخدم الملخص الإنجليزي المترجم جزئياً
+    if not details and item.summary:
+        # محاولة ترجمة سريعة للملخص كتفاصيل
+        raw_summary = getattr(item, 'summary_ar', '') or item.summary
+        if raw_summary and len(raw_summary) > 30:
+            # نأخذ أول جملتين كتفاصيل مؤقتة
+            quick_sentences = re.split(r'(?<=[.!?؟])\s+', raw_summary.strip())
+            for qs in quick_sentences[:2]:
+                qs = qs.strip().strip('.').strip()
+                if len(qs) > 20 and '?' not in qs and '؟' not in qs:
+                    details.append(qs)
+
     lines = [header]
+    
+    # إضافة العملات المرتبطة إن وجدت (من CryptoPanic)
+    currencies = getattr(item, 'currencies', []) or []
+    if currencies:
+        coins_str = ' | '.join(f"#{c}" for c in currencies[:4])
+        lines.append(f"💰 {coins_str}")
     
     if details:
         lines.append('')

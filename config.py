@@ -1,123 +1,75 @@
-"""
-⚙️ إعدادات البوت — تُقرأ من متغيرات البيئة (GitHub Secrets)
-"""
-
+# -*- coding: utf-8 -*-
+"""إعدادات بوت أخبار الكريبتو — تُقرأ من متغيرات البيئة أو ملف .env"""
 import os
-import logging
 
-# ═══════════════════════════════════════════════════════════
-# 📝 Logging
-# ═══════════════════════════════════════════════════════════
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-log = logging.getLogger("NewsBot")
 
-# ═══════════════════════════════════════════════════════════
-# 🔑 المفاتيح (تُضبط في GitHub Secrets)
-# ═══════════════════════════════════════════════════════════
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")  # معرّف القناة مثل -1001234567890
+def _load_dotenv(path: str = ".env") -> None:
+    """تحميل بسيط لملف .env إن وجد (بدون مكتبات خارجية)."""
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                os.environ.setdefault(key, value)
+    except OSError:
+        pass
 
-# ═══════════════════════════════════════════════════════════
-# 📢 وسم القناة — يُضاف في نهاية كل منشور
-# ═══════════════════════════════════════════════════════════
-CHANNEL_TAG = "@newscrypto1m"
 
-# ═══════════════════════════════════════════════════════════
-# 📰 مصادر RSS
-# ═══════════════════════════════════════════════════════════
-RSS_SOURCES = [
-    # ⭐ 1) CoinDesk — المصدر الأول
-    {
-        "name": "CoinDesk",
-        "url": "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml",
-        "type": "news",
-    },
-    # ⭐ 2) Watcher Guru — المصدر الثاني
-    {
-        "name": "WatcherGuru",
-        "url": "https://watcher.guru/news/feed",
-        "type": "news",
-    },
-    # ⭐ 3) Cointelegraph — المصدر الثالث
-    {
-        "name": "Cointelegraph",
-        "url": "https://cointelegraph.com/rss",
-        "type": "news",
-    },
-    # ⭐ 4) BeInCrypto — مصدر إضافي
-    {
-        "name": "BeInCrypto",
-        "url": "https://beincrypto.com/feed/",
-        "type": "news",
-    },
-    # ⭐ 5) Bitcoinist — أخبار Bitcoin
-    {
-        "name": "Bitcoinist",
-        "url": "https://bitcoinist.com/feed/",
-        "type": "news",
-    },
+_load_dotenv()
+
+# ---------------------------------------------------------------- حساب تيليجرام
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+
+# ------------------------------------------------------- مفاتيح اختيارية
+WHALE_ALERT_API_KEY = os.getenv("WHALE_ALERT_API_KEY", "").strip()
+
+# توقيع القناة يظهر أسفل كل خبر (اختياري) مثال: @MyCryptoNews
+CHANNEL_SIGNATURE = os.getenv("CHANNEL_SIGNATURE", "").strip()
+
+# ------------------------------------------------------------- إعدادات النشر
+MIN_SCORE = int(os.getenv("MIN_SCORE", "7"))          # فلتر الجودة: أخبار قوية فقط (1-10)
+MAX_NEWS_PER_RUN = int(os.getenv("MAX_NEWS_PER_RUN", "4"))  # أقصى عدد أخبار في الجولة
+SEND_DELAY_SECONDS = float(os.getenv("SEND_DELAY_SECONDS", "2.5"))
+
+# --------------------------------------------------------- إعدادات منع التكرار
+STATE_FILE = os.getenv("STATE_FILE", "data/sent_news.json")
+DEDUP_DAYS = int(os.getenv("DEDUP_DAYS", "14"))        # مدة حفظ بصمة الخبر (أيام)
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.8"))
+
+# ------------------------------------------------------- المنطقة الزمنية للعرض
+DISPLAY_TZ = os.getenv("DISPLAY_TZ", "Africa/Algiers")
+
+# ------------------------------------------------------------- مصادر RSS
+RSS_FEEDS = [
+    {"name": "Cointelegraph", "url": "https://cointelegraph.com/rss"},
+    {"name": "CoinDesk", "url": "https://www.coindesk.com/arc/outboundfeeds/rss/"},
+    {"name": "Decrypt", "url": "https://decrypt.co/feed"},
+    {"name": "Crypto.News", "url": "https://crypto.news/feed/"},
+    {"name": "CryptoPotato", "url": "https://cryptopotato.com/feed/"},
+    {"name": "U.Today", "url": "https://u.today/rss"},
+    {"name": "Watcher.Guru", "url": "https://watcher.guru/feed"},
+    {"name": "NewsBTC", "url": "https://www.newsbtc.com/feed/"},
+    {"name": "Bitcoinist", "url": "https://bitcoinist.com/feed/"},
 ]
 
-# ═══════════════════════════════════════════════════════════
-# 🎯 الكلمات المفتاحية (للحفاظ عليها كما هي بالإنجليزية)
-# ═══════════════════════════════════════════════════════════
-PROTECTED_NAMES = {
-    # شخصيات
-    "Michael Saylor", "Saylor",
-    "Changpeng Zhao", "CZ",
-    "Vitalik Buterin", "Vitalik",
-    "Elon Musk", "Musk",
-    "Jerome Powell", "Powell",
-    "Gary Gensler", "Gensler",
-    "Brian Armstrong", "Armstrong",
-    "Brad Garlinghouse", "Garlinghouse",
-    "Janet Yellen", "Yellen",
-    "Sam Bankman-Fried", "SBF",
-    "Jack Dorsey", "Dorsey",
-    "Cathie Wood", "Wood",
-    # شركات ومنصات
-    "MicroStrategy", "Strategy",
-    "BlackRock", "Fidelity", "Grayscale",
-    "Binance", "Coinbase", "Kraken", "Bybit", "OKX",
-    "Bitwise", "VanEck", "Invesco",
-    "Tesla", "SpaceX",
-    "Galaxy Digital", "Blockstream",
-    # صناديق ETF
-    "IBIT", "FBTC", "GBTC", "ETHA", "EZET",
-    # عملات رقمية (نُبقيها بالإنجليزية كما طلب المستخدم)
-    "Bitcoin", "Ethereum", "Solana", "Ripple", "Cardano",
-    "Dogecoin", "Avalanche", "Polkadot", "Chainlink",
-    "Polygon", "Litecoin", "Tron", "Uniswap", "Aave",
-    "Stellar", "Hedera", "Cosmos", "Toncoin",
-    "Binance Coin", "Tether", "USDT", "USDC",
-    "Shiba Inu", "Pepe", "Worldcoin", "Near Protocol",
-    "Aptos", "Arbitrum", "Optimism", "Sui",
-    # مصطلحات كريبتو
-    "DeFi", "NFT", "NFTs", "Web3", "DAO", "ICO",
-    "ETF", "ETFs", "Spot ETF",
-    "Layer 1", "Layer 2", "Mainnet", "Testnet",
-    "BlackRock", "Federal Reserve", "Fed", "SEC", "CFTC",
-    "FOMC", "CPI", "GDP",
-    "Bull Run", "Bear Market",
+# ------------------------------------------------- أسعار السوق من CoinGecko
+MARKET_COINS = [
+    {"id": "bitcoin", "name": "بيتكوين", "symbol": "BTC"},
+    {"id": "ethereum", "name": "إيثريوم", "symbol": "ETH"},
+    {"id": "binancecoin", "name": "بينانس", "symbol": "BNB"},
+    {"id": "solana", "name": "سولانا", "symbol": "SOL"},
+    {"id": "ripple", "name": "ريبل", "symbol": "XRP"},
+    {"id": "dogecoin", "name": "دوجكوين", "symbol": "DOGE"},
+]
+
+REQUEST_TIMEOUT = 20
+HTTP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; CryptoNewsBot/2.0; +https://github.com)"
 }
-
-# التوكنات (BTC, ETH, SOL...) — تُكتشف تلقائياً عبر regex
-TICKER_PATTERN = r'\b(?:BTC|ETH|BNB|SOL|XRP|ADA|DOGE|AVAX|DOT|LINK|MATIC|LTC|TRX|UNI|AAVE|NEAR|APT|ARB|OP|SUI|SEI|TON|ATOM|XLM|HBAR|USDT|USDC|DAI|SHIB|PEPE|WLD|TIA|INJ|RNDR|RENDER|FET|RUNE|GMX|DYDX|EIGEN|ETHFI|PENDLE|JTO|JUP|RAY|BONK|WIF|FLOKI|IBIT|FBTC|GBTC|ETHA|EZET)\b'
-
-# ═══════════════════════════════════════════════════════════
-# ⚙️ إعدادات التشغيل
-# ═══════════════════════════════════════════════════════════
-MAX_POSTS_PER_RUN = 1        # خبر واحد فقط كل دورة — جودة لا كمية
-MAX_NEWS_AGE_HOURS = 3       # لا نرسل خبراً أقدم من 3 ساعات (أخبار فورية)
-SIMILARITY_THRESHOLD = 0.65  # عتبة التشابه (65% — فوقها يُعتبر مكرراً)
-MAX_BULLETS = 4              # أقصى 4 أسطر تفصيلية — خبر غني بالمعلومات
-
-# ═══════════════════════════════════════════════════════════
-# 📁 ملف حفظ الهاشات (يُcommit في الريبو)
-# ═══════════════════════════════════════════════════════════
-import os.path
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEDUP_FILE = os.path.join(PROJECT_DIR, "sent_news.json")

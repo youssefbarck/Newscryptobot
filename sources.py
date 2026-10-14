@@ -1,460 +1,244 @@
-"""
-📡 جلب الأخبار من مصادر متعددة:
-   1) CryptoPanic API (مدفوع — أقوى مصدر)
-   2) CoinGecko News API (مجاني — بدون مفتاح)
-   3) RSS feeds (احتياطي دائم)
-"""
-
+# -*- coding: utf-8 -*-
+"""جلب الأخبار من مصادر RSS + Whale Alert (اختياري) + أسعار السوق من CoinGecko"""
+import calendar
+import logging
 import re
-import asyncio
 import time
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
-from xml.etree import ElementTree as ET
-from typing import List, Optional
-import aiohttp
+from datetime import datetime, timedelta, timezone
 
-from config import RSS_SOURCES, log
+import feedparser
+import requests
 
-# مفاتيح API — تُقرأ من البيئة
-import os
-CRYPTOPANIC_API_KEY = os.environ.get("CRYPTOPANIC_API_KEY", "")
-COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY", "")
+from .config import (
+    HTTP_HEADERS,
+    MARKET_COINS,
+    REQUEST_TIMEOUT,
+)
 
+log = logging.getLogger("crypto-bot")
 
-# ═══════════════════════════════════════════════════════════
-# نموذج الخبر
-# ═══════════════════════════════════════════════════════════
-class NewsItem:
-    def __init__(self, title, link, summary, image, source, timestamp,
-                 original_title="", sentiment="", currencies=None):
-        self.title = title.strip()
-        self.link = link.strip()
-        self.summary = summary.strip()
-        self.image = image.strip()
-        self.source = source
-        self.timestamp = timestamp
-        self.original_title = original_title or title
-        self.sentiment = sentiment or ""  # bullish/bearish/important/hot/rising
-        self.currencies = currencies or []  # ["BTC", "ETH"] من CryptoPanic
-
-    def __repr__(self):
-        return f"<News: {self.title[:60]}... sentiment={self.sentiment}>"
+# ------------------------------------------------------------------- أدوات
+_TAG_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.I | re.S)
+_HTML_RE = re.compile(r"<[^>]+>")
+_BRAND_RE = re.compile(
+    r"\s*[-–|]\s*(CoinDesk|Cointelegraph|Decrypt|CryptoSlate|U\.Today|"
+    r"Watcher\.Guru|NewsBTC|The\s+Block)\s*$", re.I)
 
 
-# ═══════════════════════════════════════════════════════════
-# أدوات XML
-# ═══════════════════════════════════════════════════════════
-def clean_html(text: str) -> str:
-    """إزالة وسوم HTML وفك الكيانات"""
+def strip_html(text: str) -> str:
+    """تنظيف النص من وسوم HTML وكياناتها."""
     if not text:
         return ""
-    text = re.sub(r'<[^>]+>', ' ', text)
-    text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
-    text = text.replace('&quot;', '"').replace('&#39;', "'").replace('&nbsp;', ' ')
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    text = _TAG_RE.sub(" ", text)
+    text = _HTML_RE.sub(" ", text)
+    text = (text
+            .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&quot;", '"').replace("&#39;", "'").replace("&nbsp;", " "))
+    return re.sub(r"\s+", " ", text).strip()
 
 
-def parse_date(date_str: str) -> float:
-    """تحويل تاريخ RSS إلى timestamp"""
-    if not date_str:
-        return 0.0
+def _clean_title(title: str) -> str:
+    title = strip_html(title)
+    return _BRAND_RE.sub("", title).strip()
+
+
+def _parse_published(entry) -> datetime | None:
+    pp = entry.get("published_parsed") or entry.get("updated_parsed")
+    if not pp:
+        return None
     try:
-        return parsedate_to_datetime(date_str).timestamp()
+        return datetime.fromtimestamp(calendar.timegm(pp), tz=timezone.utc)
+    except (OverflowError, ValueError, OSError):
+        return None
+
+
+def _first_image(entry) -> str | None:
+    """استخراج صورة الخبر من وسوم الوسائط إن وجدت."""
+    try:
+        for key in ("media_content", "media_thumbnail"):
+            for m in (entry.get(key) or []):
+                url = m.get("url")
+                if url:
+                    return url
+        for m in (entry.get("enclosures") or []):
+            url = m.get("href") or m.get("url") or ""
+            if url and re.search(r"\.(jpe?g|png|webp)(\?|$)", url, re.I):
+                return url
+        m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', entry.get("summary") or "")
+        if m:
+            return m.group(1)
     except Exception:
         pass
+    return None
+
+
+# ------------------------------------------------------------------- RSS
+def fetch_feeds(feeds: list[dict], limit_per_feed: int = 25) -> list[dict]:
+    """جلب أحدث الأخبار من كل مصادر RSS مع تجاهل المصادر المعطوبة."""
+    items: list[dict] = []
+    for feed in feeds:
+        name, url = feed["name"], feed["url"]
+        try:
+            parsed = feedparser.parse(url, request_headers=HTTP_HEADERS)
+            entries = parsed.get("entries") or []
+            if not entries:
+                log.warning("المصدر %s أعاد 0 خبر", name)
+                continue
+            count = 0
+            for e in entries[:limit_per_feed]:
+                title = _clean_title(e.get("title", ""))
+                if len(title) < 15:  # تجاهل العناوين الفاسدة/القصيرة جدًا
+                    continue
+                items.append({
+                    "source": name,
+                    "title": title,
+                    "summary": strip_html(e.get("summary", ""))[:400],
+                    "url": (e.get("link") or "").strip(),
+                    "published": _parse_published(e),
+                    "image": _first_image(e),
+                })
+                count += 1
+            log.info("✔ %s: %s خبر", name, count)
+        except Exception as exc:  # مصدر واحد معطوب لا يوقف البوت
+            log.warning("✖ فشل جلب %s: %s", name, exc)
+    return items
+
+
+# ------------------------------------------------------- Whale Alert (اختياري)
+def _owner_ar(owner: dict | None) -> str:
+    if not owner:
+        return "محفظة مجهولة"
+    otype = (owner.get("owner_type") or "").lower()
+    name = (owner.get("owner") or "").strip()
+    if otype == "burn" or name.lower() in ("burn", "burned"):
+        return "عنوان حرق"
+    if otype == "exchange":
+        return f"بورصة {name}" if name and name.lower() != "unknown" else "بورصة"
+    if otype == "contract":
+        return f"عقد ذكي ({name})" if name and name.lower() != "unknown" else "عقد ذكي"
+    if name and name.lower() not in ("unknown", "wallet", ""):
+        return name
+    return "محفظة مجهولة"
+
+
+def fetch_whale_alert(api_key: str, minutes: int = 60, min_usd: float = 5_000_000) -> list[dict]:
+    """جلب تحركات الحيتان الكبيرة خلال آخر `minutes` دقيقة (يتطلب مفتاحًا مجانيًا)."""
+    if not api_key:
+        return []
     try:
-        clean = date_str.strip().replace("Z", "+00:00")
-        dt = datetime.fromisoformat(clean)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.timestamp()
+        start = int(time.time()) - minutes * 60
+        r = requests.get(
+            "https://api.whale-alert.io/v1/transactions",
+            params={"api_key": api_key, "min_value": int(min_usd), "start": start},
+            headers=HTTP_HEADERS, timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        txs = (r.json() or {}).get("transactions") or []
+    except Exception as exc:
+        log.warning("Whale Alert فشل: %s", exc)
+        return []
+
+    items = []
+    for tx in txs:
+        try:
+            symbol = (tx.get("symbol") or "").upper()
+            amount = float(tx.get("amount") or 0)
+            amount_usd = float(tx.get("amount_usd") or 0)
+            if not symbol or amount_usd < min_usd:
+                continue
+            src, dst = tx.get("from") or {}, tx.get("to") or {}
+            from_txt, to_txt = _owner_ar(src), _owner_ar(dst)
+            title_en = (f"Whale Alert: {amount:,.0f} {symbol} "
+                        f"(~${amount_usd:,.0f}) moved from {from_txt} to {to_txt}")
+            items.append({
+                "source": "Whale Alert",
+                "title": title_en,
+                "summary": "",
+                "url": tx.get("hash") and f"https://whale-alert.io/transaction/{symbol.lower()}/{tx['hash']}" or "",
+                "published": datetime.fromtimestamp(
+                    int(tx.get("timestamp") or time.time()), tz=timezone.utc),
+                "image": None,
+                "whale_data": {
+                    "symbol": symbol,
+                    "amount": amount,
+                    "amount_usd": amount_usd,
+                    "from_txt": from_txt,
+                    "to_txt": to_txt,
+                    "to_type": (dst.get("owner_type") or "").lower(),
+                    "from_type": (src.get("owner_type") or "").lower(),
+                },
+            })
+        except Exception:
+            continue
+    log.info("✔ Whale Alert: %s حركة", len(items))
+    return items
+
+
+# ------------------------------------------------------------------ السوق
+def _market_from_coingecko() -> list[dict] | None:
+    try:
+        ids = ",".join(c["id"] for c in MARKET_COINS)
+        r = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={"ids": ids, "vs_currencies": "usd", "include_24hr_change": "true"},
+            headers=HTTP_HEADERS, timeout=REQUEST_TIMEOUT)
+        if r.status_code == 429:  # الحد اليومي — جرّب مرة بعد ثوان
+            time.sleep(3)
+            r = requests.get(
+                "https://api.coingecko.com/api/v3/simple/price",
+                params={"ids": ids, "vs_currencies": "usd", "include_24hr_change": "true"},
+                headers=HTTP_HEADERS, timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        data = r.json() or {}
     except Exception:
-        return 0.0
+        return None
+    stats = []
+    for coin in MARKET_COINS:
+        row = data.get(coin["id"]) or {}
+        if row.get("usd") is None:
+            continue
+        stats.append({"name": coin["name"], "symbol": coin["symbol"],
+                      "price": float(row["usd"]),
+                      "change": float(row.get("usd_24h_change") or 0.0)})
+    return stats or None
 
 
-# أسماء مصادر معروفة — تُزال من نهاية العنوان
-KNOWN_SOURCE_NAMES = [
-    "Cryptonews.net", "Cryptonews", "CryptoRank", "CryptoSlate",
-    "CoinDesk", "Cointelegraph", "Decrypt", "The Block", "Blockworks",
-    "Bitcoin.com", "Bitcoinist", "NewsBTC", "CryptoNews",
-    "BeInCrypto", "CryptoPotato", "CoinGape", "CoinQuora",
-    "The Daily Hodl", "Live Bitcoin News", "CryptoGlobe",
-    "FXStreet", "Benzinga", "Yahoo Finance", "MarketWatch",
-    "Bloomberg", "Reuters", "CNBC", "Forbes", "The Street",
-    "Investing.com", "CoinJournal", "CryptoBriefing",
-    "WatcherGuru", "Watcher.Guru", "CryptoPanic",
-    ".com", ".net", ".io", ".org", ".co",
-]
-
-
-def strip_source_from_title(title: str, source_name: str) -> str:
-    """إزالة اسم الموقع من نهاية العنوان"""
-    if not title:
-        return title
-
-    title_lower = title.lower()
-    source_lower = (source_name or "").lower()
-    for sep in [" - ", " | ", " — ", " – ", " — ", " - "]:
-        if sep in title_lower:
-            parts = title_lower.rsplit(sep, 1)
-            if len(parts) == 2:
-                last_part = parts[1].strip()
-                if (source_lower and source_lower in last_part) or len(last_part) < 30:
-                    idx = title_lower.rfind(sep)
-                    if idx > 10:
-                        return title[:idx].strip()
-
-    for src in KNOWN_SOURCE_NAMES:
-        if title.endswith(src):
-            new_title = title[:-len(src)].rstrip(" -|–—").strip()
-            if len(new_title) > 10:
-                return new_title
-        if title_lower.endswith(src.lower()):
-            new_title = title[:-len(src)].rstrip(" -|–—").strip()
-            if len(new_title) > 10:
-                return new_title
-
-    title = re.sub(r'\s*[—–\-]\s*(?:Source|via|Image)[:\s].*$', '', title, flags=re.IGNORECASE)
-    return title.strip()
-
-
-def extract_image(item_elem) -> str:
-    """استخراج رابط الصورة من عنصر RSS"""
-    media = item_elem.find('{http://search.yahoo.com/mrss/}content')
-    if media is not None and media.get('url'):
-        return media.get('url', '')
-    thumb = item_elem.find('{http://search.yahoo.com/mrss/}thumbnail')
-    if thumb is not None and thumb.get('url'):
-        return thumb.get('url', '')
-    enclosure = item_elem.find('enclosure')
-    if enclosure is not None:
-        if enclosure.get('type', '').startswith('image'):
-            return enclosure.get('url', '')
-    desc = item_elem.findtext('description', '') or ''
-    match = re.search(r"""<img[^>]+src=['"]([^'"]+)['"]""", desc)
-    if match:
-        return match.group(1)
-    return ""
-
-
-def extract_summary(text: str, max_len: int = 400) -> str:
-    """تنظيف واقتطاع الملخص"""
-    clean = clean_html(text)
-    if len(clean) <= max_len:
-        return clean
-    truncated = clean[:max_len]
-    last_sentence = max(truncated.rfind('. '), truncated.rfind('! '), truncated.rfind('? '))
-    if last_sentence > max_len * 0.5:
-        return truncated[:last_sentence + 1].strip()
-    return truncated[:max_len-3].strip() + "..."
-
-
-# ═══════════════════════════════════════════════════════════
-# 🔥 CryptoPanic API — أقوى مصدر (مدفوع)
-# ═══════════════════════════════════════════════════════════
-async def fetch_cryptopanic(session: aiohttp.ClientSession) -> List[NewsItem]:
-    """
-    جلب الأخبار من CryptoPanic API v2.
-    يطلب عدة فلترات: important, rising, hot, bullish, bearish
-    ويدمج النتائج مع وسم الشعور.
-    """
-    if not CRYPTOPANIC_API_KEY:
-        log.info("📰 CryptoPanic: لا يوجد مفتاح — تخطي")
-        return []
-
-    all_items = []
-    seen_ids = set()
-
-    # نطلب الأخبار المهمة والصاعدة أولاً
-    filters_to_try = ["important", "rising", "hot", "bullish", "bearish"]
-
-    for filt in filters_to_try:
-        try:
-            url = "https://cryptopanic.com/api/developer/v2/posts/"
-            params = {
-                "auth_token": CRYPTOPANIC_API_KEY,
-                "filter": filt,
-                "kind": "news",
-                "public": "true",
-                "currencies": "BTC,ETH,SOL,XRP,ADA,DOGE,AVAX",
-            }
-            headers = {"User-Agent": "Mozilla/5.0 (compatible; WhaleNewsBot/2.0)"}
-            timeout = aiohttp.ClientTimeout(total=10)
-
-            async with session.get(url, params=params, headers=headers, timeout=timeout) as resp:
-                if resp.status != 200:
-                    log.warning(f"📰 CryptoPanic [{filt}]: HTTP {resp.status}")
-                    continue
-
-                data = await resp.json(content_type=None)
-                results = data.get("results", [])
-
-                for post in results:
-                    post_id = post.get("id")
-                    if post_id in seen_ids:
-                        continue
-                    seen_ids.add(post_id)
-
-                    title = post.get("title", "").strip()
-                    if not title:
-                        continue
-
-                    # استخراج البيانات الغنية
-                    description = post.get("description", "") or ""
-                    image = post.get("image", "") or ""
-                    original_url = post.get("original_url", "") or ""
-                    published_at = post.get("published_at", "") or ""
-                    source_info = post.get("source", {})
-                    source_name = source_info.get("title", "CryptoPanic")
-
-                    # وسم الشعور
-                    votes = post.get("votes", {})
-                    sentiment = filt  # important/rising/hot/bullish/bearish
-                    if votes.get("important", 0) > 0:
-                        sentiment = "important"
-
-                    # العملات المرتبطة
-                    instruments = post.get("instruments", [])
-                    currencies = [inst.get("code", "") for inst in instruments if inst.get("code")]
-
-                    timestamp = parse_date(published_at)
-                    title = strip_source_from_title(title, source_name)
-
-                    all_items.append(NewsItem(
-                        title=title,
-                        link=original_url,
-                        summary=description[:400],
-                        image=image,
-                        source=f"CP:{source_name}",
-                        timestamp=timestamp,
-                        original_title=title,
-                        sentiment=sentiment,
-                        currencies=currencies,
-                    ))
-
-            await asyncio.sleep(0.5)  # احترام حدود الطلبات
-
-        except asyncio.TimeoutError:
-            log.warning(f"📰 CryptoPanic [{filt}]: timeout")
-        except Exception as e:
-            log.warning(f"📰 CryptoPanic [{filt}]: {e}")
-
-    log.info(f"📰 CryptoPanic: {len(all_items)} items")
-    return all_items
-
-
-# ═══════════════════════════════════════════════════════════
-# 🆓 CoinGecko News API — مجاني (بدون مفتاح أو معه)
-# ═══════════════════════════════════════════════════════════
-async def fetch_coingecko_news(session: aiohttp.ClientSession) -> List[NewsItem]:
-    """
-    جلب الأخبار من CoinGecko News API.
-    يتطلب مفتاح API (حتى المجاني محدود الآن).
-    بدون مفتاح: تخطي صامت.
-    """
-    if not COINGECKO_API_KEY:
-        log.info("📰 CoinGecko: لا يوجد مفتاح — تخطي (أضف COINGECKO_API_KEY في Secrets)")
-        return []
-
-    items = []
+def _market_from_paprika() -> list[dict] | None:
+    """بديل مجاني بلا مفتاح — CoinPaprika."""
     try:
-        url = "https://api.coingecko.com/api/v3/news"
-        params = {
-            "type": "news",
-            "per_page": 20,
-            "page": 1,
-        }
-        headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; WhaleNewsBot/2.0)",
-            "Accept": "application/json",
-            "x-cg-demo-api-key": COINGECKO_API_KEY,
-        }
-
-        timeout = aiohttp.ClientTimeout(total=15)
-        async with session.get(url, params=params, headers=headers, timeout=timeout) as resp:
-            if resp.status == 429:
-                log.warning(f"📰 CoinGecko: 429 rate limit")
-                return items
-            if resp.status != 200:
-                log.warning(f"📰 CoinGecko: HTTP {resp.status}")
-                return items
-
-            data = await resp.json(content_type=None)
-
-            # CoinGecko قد يرجع dict مع "data" أو list مباشرة
-            news_list = data if isinstance(data, list) else data.get("data", [])
-
-            for article in news_list:
-                try:
-                    title = article.get("title", "").strip()
-                    if not title:
-                        continue
-
-                    description = article.get("description", "") or ""
-                    image = article.get("image_url", "") or article.get("thumb_2x", "") or ""
-                    link = article.get("url", "") or ""
-                    published_at = article.get("updated_at", "") or article.get("published_at", "") or ""
-                    source_name = article.get("author", "") or article.get("source", "") or "CoinGecko"
-
-                    # عملات مرتبطة إن وجدت
-                    currencies = []
-                    coins = article.get("coins", []) or article.get("related_coins", [])
-                    for coin in coins:
-                        code = coin.get("symbol", "").upper() if isinstance(coin, dict) else str(coin).upper()
-                        if code:
-                            currencies.append(code)
-
-                    timestamp = parse_date(published_at)
-                    title = strip_source_from_title(title, source_name)
-
-                    items.append(NewsItem(
-                        title=title,
-                        link=link,
-                        summary=description[:400],
-                        image=image,
-                        source=f"CG:{source_name}",
-                        timestamp=timestamp,
-                        original_title=title,
-                        sentiment="",  # CoinGecko لا يوفر شعور
-                        currencies=currencies,
-                    ))
-                except Exception:
-                    continue
-
-        log.info(f"📰 CoinGecko: {len(items)} items")
-    except asyncio.TimeoutError:
-        log.warning(f"📰 CoinGecko: timeout")
-    except Exception as e:
-        log.warning(f"📰 CoinGecko: {e}")
-    return items
+        r = requests.get("https://api.coinpaprika.com/v1/tickers",
+                         params={"quotes": "USD"}, headers=HTTP_HEADERS,
+                         timeout=REQUEST_TIMEOUT)
+        r.raise_for_status()
+        data = r.json() or []
+    except Exception:
+        return None
+    wanted = {c["symbol"]: c["name"] for c in MARKET_COINS}
+    best: dict[str, tuple] = {}  # أعلى عملة (أصغر rank) لكل رمز — بعض الرموز مكررة
+    for row in data:
+        sym = (row.get("symbol") or "").upper()
+        if sym not in wanted:
+            continue
+        rank = row.get("rank") or 99999
+        if sym in best and best[sym][0] <= rank:
+            continue
+        usd = (row.get("quotes") or {}).get("USD") or {}
+        price = usd.get("price")
+        if price is None:
+            continue
+        best[sym] = (rank, {"name": wanted[sym], "symbol": sym,
+                            "price": float(price),
+                            "change": float(usd.get("percent_change_24h")
+                                            or usd.get("change_24h") or 0.0)})
+    stats = [entry for _, entry in best.values()]
+    # ترتيب حسب شهرة العملة (نفس ترتيب MARKET_COINS)
+    order = {c["symbol"]: i for i, c in enumerate(MARKET_COINS)}
+    stats.sort(key=lambda s: order.get(s["symbol"], 99))
+    return stats or None
 
 
-# ═══════════════════════════════════════════════════════════
-# 📡 RSS feeds — احتياطي دائم
-# ═══════════════════════════════════════════════════════════
-async def fetch_rss_source(session: aiohttp.ClientSession, source: dict) -> List[NewsItem]:
-    """جلب الأخبار من مصدر RSS واحد"""
-    items = []
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; WhaleNewsBot/2.0)"}
-        timeout = aiohttp.ClientTimeout(total=15)
-        async with session.get(source["url"], timeout=timeout, headers=headers) as response:
-            if response.status != 200:
-                log.warning(f"📰 {source['name']}: HTTP {response.status}")
-                return items
-            content = await response.text()
-            try:
-                root = ET.fromstring(content.encode())
-            except ET.ParseError as e:
-                log.warning(f"📰 {source['name']}: XML parse error: {e}")
-                return items
-
-            # RSS 2.0
-            for item_elem in root.findall('.//item')[:15]:
-                try:
-                    title = item_elem.findtext('title', '') or ""
-                    link = item_elem.findtext('link', '') or ""
-                    desc = item_elem.findtext('description', '') or ''
-                    pub_date = item_elem.findtext('pubDate', '') or ''
-
-                    if not title:
-                        continue
-                    title = strip_source_from_title(clean_html(title), source["name"])
-                    summary = extract_summary(desc)
-                    image = extract_image(item_elem)
-                    timestamp = parse_date(pub_date)
-
-                    items.append(NewsItem(
-                        title=title, link=link, summary=summary,
-                        image=image, source=source["name"], timestamp=timestamp,
-                        original_title=title,
-                    ))
-                except Exception:
-                    continue
-
-            # Atom fallback
-            if not items:
-                ns = {'atom': 'http://www.w3.org/2005/Atom'}
-                for entry in root.findall('.//atom:entry', ns)[:15]:
-                    try:
-                        title = entry.findtext('atom:title', '', ns) or ""
-                        link_elem = entry.find('atom:link', ns)
-                        link = link_elem.get('href', '') if link_elem is not None else ""
-                        summary = entry.findtext('atom:summary', '', ns) or ''
-                        pub_date = entry.findtext('atom:updated', '', ns) or ''
-
-                        if not title:
-                            continue
-                        title = strip_source_from_title(clean_html(title), source["name"])
-                        summary = extract_summary(summary)
-                        image = extract_image(entry)
-                        timestamp = parse_date(pub_date)
-
-                        items.append(NewsItem(
-                            title=title, link=link, summary=summary,
-                            image=image, source=source["name"], timestamp=timestamp,
-                            original_title=title,
-                        ))
-                    except Exception:
-                        continue
-
-        log.info(f"📰 {source['name']}: {len(items)} items")
-    except asyncio.TimeoutError:
-        log.warning(f"📰 {source['name']}: timeout")
-    except Exception as e:
-        log.warning(f"📰 {source['name']}: {e}")
-    return items
-
-
-# ═══════════════════════════════════════════════════════════
-# 🚀 جلب كل المصادر — CryptoPanic → CoinGecko → RSS
-# ═══════════════════════════════════════════════════════════
-async def fetch_all_news() -> List[NewsItem]:
-    """
-    جلب الأخبار من كل المصادر بالأولوية:
-    1) CryptoPanic API (أقوى — بيانات شعور + عملات)
-    2) CoinGecko News API (مجاني — 100+ مصدر)
-    3) RSS feeds (احتياطي — دائماً متاح)
-    """
-    timeout = aiohttp.ClientTimeout(total=30, connect=10)
-    connector = aiohttp.TCPConnector(limit=10, limit_per_host=3, ttl_dns_cache=300)
-
-    all_items = []
-
-    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
-        # ═══════ 1) CryptoPanic API ═══════
-        if CRYPTOPANIC_API_KEY:
-            try:
-                cp_items = await fetch_cryptopanic(session)
-                all_items.extend(cp_items)
-                log.info(f"🔥 CryptoPanic contributed {len(cp_items)} items")
-            except Exception as e:
-                log.warning(f"📰 CryptoPanic failed: {e}")
-
-        # ═══════ 2) CoinGecko News ═══════
-        try:
-            cg_items = await fetch_coingecko_news(session)
-            all_items.extend(cg_items)
-            log.info(f"🆓 CoinGecko contributed {len(cg_items)} items")
-        except Exception as e:
-            log.warning(f"📰 CoinGecko failed: {e}")
-
-        # ═══════ 3) RSS fallback ═══════
-        rss_tasks = [fetch_rss_source(session, src) for src in RSS_SOURCES]
-        rss_results = await asyncio.gather(*rss_tasks, return_exceptions=True)
-        for result in rss_results:
-            if isinstance(result, list):
-                all_items.extend(result)
-
-    # ترتيب حسب الوقت (الأحدث أولاً)
-    all_items.sort(key=lambda x: -x.timestamp)
-
-    sources_summary = {}
-    for item in all_items:
-        src = item.source.split(":")[0] if ":" in item.source else item.source
-        sources_summary[src] = sources_summary.get(src, 0) + 1
-
-    log.info(f"📊 Total: {len(all_items)} items | Sources: {sources_summary}")
-    return all_items
+def fetch_market_stats() -> list[dict] | None:
+    """أسعار أعلى العملات مع تغير 24 ساعة — CoinGecko ثم CoinPaprika كخطة بديلة."""
+    stats = _market_from_coingecko() or _market_from_paprika()
+    if not stats:
+        log.warning("CoinGecko فشل: %s", "وCoinPaprika فشل أيضًا — لا أسعار هذه الجولة")
+    return stats or None

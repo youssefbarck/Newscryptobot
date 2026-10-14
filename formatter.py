@@ -1,369 +1,171 @@
-"""
-📝 تنسيق المنشور — صيغة عاجل قصيرة ومباشرة
-"""
+# -*- coding: utf-8 -*-
+"""بناء الرسائل العربية الجذابة بصيغة HTML الجاهزة لتيليجرام"""
+import html
+import random
+from datetime import datetime
 
-import re
-from typing import Optional
-
-from config import CHANNEL_TAG, MAX_BULLETS, log
-
-
-# ═══════════════════════════════════════════════════════════
-# أنماط محظورة في العناوين
-# ═══════════════════════════════════════════════════════════
-# 1) عناوين تنتهي بسؤال — ممنوعة باتاً
-QUESTION_ENDINGS = re.compile(r'[?؟]\s*$')
-
-# 2) عبارات ترويجية / تلميحية (تحتاج رابط للفهم)
-TEASER_PATTERNS = [
-    r'^here\b', r'^what\s+happened', r'^here\'?s\s+what',
-    r'^things\s+to\s+know', r'^what\s+you\s+need',
-    r'^everything\s+you', r'^all\s+you\s+need',
-    r'^why\s+you\s+should', r'^should\s+you\b',
-    r'^is\s+it\s+time\b', r'^will\s+\w+\s+(go|rise|fall|surge|crash)',
-    r'^what\'s\s+next', r'^what\s+to\s+expect',
-    r'\?$|؟\s*$',  # أي سؤال
-]
-
-# 3) عبارات تدل على تحليل/رأي وليس خبر
-ANALYSIS_PATTERNS = [
-    r'\bstudy\b', r'\bresearch\b', r'\bsurvey\b', r'\breport\s+says\b',
-    r'\baccording\s+to\s+a\s+study\b', r'\bfinds\s+that\b',
-    r'\bopinion\b', r'\banalysis\b', r'\bcommentary\b',
-    r'^state\s+of\b', r'\bweekly\s+roundup\b', r'\bdaily\s+digest\b',
-    r'\bprice\s+prediction\b', r'\bprice\s+forecast\b',
-    r'\btop\s+\d+\s+(altcoins|coins|meme|gainers)',
-    r'\b\d+\s+(crypto|bitcoin|altcoin)\s+to\s+watch\b',
-]
-
-# عبارات ترويجية عربية (بعد الترجمة)
-PROMO_PATTERNS_AR = [
-    r'اقرأ المزيد', r'تابع القراءة', r'اضغط هنا',
-    r'للمزيد', r'لمشاهدة', r'للاطلاع',
-    r'المصدر[:\s]', r'تابعنا',
-]
-
-PROMO_PATTERNS_EN = [
-    r'read more', r'click here', r'learn more',
-    r'subscribe', r'follow us', r'source[:\s]',
-    r'disclaimer', r'related articles',
-]
+from .analysis import human_usd
+from .categories import CATEGORIES, COIN_AR, WHALE_DIRECTION_WHY
+from .config import CHANNEL_SIGNATURE
 
 
-# ═══════════════════════════════════════════════════════════
-# أيقونات نوع الخبر
-# ═══════════════════════════════════════════════════════════
-def _detect_news_type(title: str, summary: str, sentiment: str = "") -> str:
-    """تحديد نوع الخبر لإيقونة مناسبة — يأخذ شعور CryptoPanic بالحسبان"""
-    # أولوية: شعور CryptoPanic
-    if sentiment == 'important':
-        return '🚨'
-    elif sentiment == 'hot':
-        return '🔥'
-    elif sentiment == 'rising':
-        return '📈'
-    elif sentiment == 'bullish':
-        return '🟢'
-    elif sentiment == 'bearish':
-        return '🔴'
-    
-    # تحليل من النص
-    text = (title + ' ' + summary).lower()
-    
-    # اختراق / سرقة
-    if any(w in text for w in ['hack', 'hacked', 'exploit', 'breach', 'stolen', 'drained', 'theft']):
-        return '🚨'
-    # تنظيم / حظر
-    if any(w in text for w in ['sec ', 'approved', 'banned', 'regulation', 'lawsuit', 'sued',
-                                'subpoena', 'compliance', 'fine', 'penalty', 'indictment',
-                                'legal', 'court', 'judge', 'arrested']):
-        return '⚖️'
-    # ETF / استثمار مؤسسي
-    if any(w in text for w in ['etf', 'inflow', 'outflow', 'institutional', 'blackrock',
-                                'fidelity', 'grayscale', 'spot bitcoin', 'spot eth']):
-        return '📊'
-    # ارتفاع حاد
-    if any(w in text for w in ['surge', 'soar', 'skyrocket', 'rally', 'pump',
-                                'all-time high', 'record high', 'ath', 'breaks']):
-        return '📈'
-    # هبوط حاد
-    if any(w in text for w in ['plunge', 'crash', 'dump', 'slump', 'correction',
-                                'record low', 'drop', 'tumble', 'freefall']):
-        return '📉'
-    # إفلاس / انهيار
-    if any(w in text for w in ['bankrupt', 'bankruptcy', 'collapse', 'shut down', 'cease']):
-        return '💀'
-    # halving / ترقيات كبيرة
-    if any(w in text for w in ['halving', 'fork', 'mainnet', 'upgrade', 'airdrop']):
-        return '⚡'
-    # FED / اقتصاد كلوي
-    if any(w in text for w in ['federal reserve', 'rate cut', 'rate hike', 'fomc',
-                                'interest rate', 'powell', 'inflation', 'recession']):
-        return '🏦'
-    # شراء/بيع كبار
-    if any(w in text for w in ['buys', 'bought', 'sells', 'sold', 'purchases',
-                                'acquires', 'invests', 'investment']):
-        return '💰'
-    # افتراضي
-    return '🔴'
+def esc(s: str) -> str:
+    return html.escape(s or "", quote=False)
 
 
-# ═══════════════════════════════════════════════════════════
-# فلتر العناوين — يرفض الخبر إذا كان غير صالح
-# ═══════════════════════════════════════════════════════════
-def is_banned_title(title: str) -> bool:
-    """فحص صارم: هل العنوان ممنوع؟ (سؤال / تلميح / تحليل)"""
-    if not title:
-        return True
-    
-    t = title.strip()
-    t_lower = t.lower()
-    
-    # 1) سؤال في النهاية — ممنوع باتاً
-    if QUESTION_ENDINGS.search(t):
-        return True
-    
-    # 2) سؤال في أي مكان
-    if '?' in t or '؟' in t:
-        return True
-    
-    # 3) تلميح / إعلان
-    for pat in TEASER_PATTERNS:
-        if re.search(pat, t_lower):
-            return True
-    
-    # 4) تحليل / رأي / ملخص أسبوعي
-    for pat in ANALYSIS_PATTERNS:
-        if re.search(pat, t_lower):
-            return True
-    
-    # 5) قصير جداً (أقل من 20 حرف = غالباً غير مفيد)
-    if len(t) < 20:
-        return True
-    
-    return False
+# ------------------------------------------------------------ أدوات الوقت
+def _day_part(hour: int) -> str:
+    if 5 <= hour < 12:
+        return "صباحًا"
+    if 12 <= hour < 15:
+        return "ظهرًا"
+    if 15 <= hour < 18:
+        return "عصرًا"
+    return "مساءً"
 
 
-def is_banned_title_ar(title_ar: str) -> bool:
-    """فحص العنوان المترجم (بعد الترجمة)"""
-    if not title_ar:
-        return True
-    
-    t = title_ar.strip()
-    
-    # سؤال — ممنوع باتاً
-    if '?' in t or '؟' in t:
-        return True
-    
-    # ترويجي
-    for pat in PROMO_PATTERNS_AR:
-        if re.search(pat, t, re.IGNORECASE):
-            return True
-    
-    # قصير جداً
-    if len(t) < 20:
-        return True
-    
-    return False
+def fmt_local_time(dt_local: datetime) -> str:
+    return f"{dt_local.hour:02d}:{dt_local.minute:02d} {_day_part(dt_local.hour)}"
 
 
-# ═══════════════════════════════════════════════════════════
-# تنظيف العنوان المترجم
-# ═══════════════════════════════════════════════════════════
-def clean_title(title: str) -> str:
-    """تنظيف العنوان المترجم من العيوب"""
-    if not title:
-        return ""
-
-    # إزالة placeholders متسربة
-    title = re.sub(r'\[\[\s*\d+\s*\]\]', '', title)
-    title = re.sub(r'§\d+§?', '', title)
-
-    # إزالة أسماء مصادر من النهاية
-    source_patterns = [
-        r'\s*[—–\-|]\s*(?:Cryptonews(?:\.net)?|CryptoRank|CoinDesk|Cointelegraph|Decrypt|The Block|Blockworks|Bitcoin\.com|NewsBTC|BeInCrypto|CryptoPotato|Reuters|Bloomberg|CNBC|Forbes|WatcherGuru)\s*$',
-    ]
-    for pat in source_patterns:
-        title = re.sub(pat, '', title, flags=re.IGNORECASE)
-
-    # إزالة عبارات ترويجية
-    for pat in PROMO_PATTERNS_AR + PROMO_PATTERNS_EN:
-        title = re.sub(pat, '', title, flags=re.IGNORECASE)
-
-    # إزالة مسافات زائدة
-    title = re.sub(r'\s{2,}', ' ', title).strip()
-    title = re.sub(r'^[•·▪►»«\-\s]+', '', title)
-    title = re.sub(r'\s*[\-|–—]\s*$', '', title)
-    title = re.sub(r'\s+([.،,!؟?])', r'\1', title)
-    
-    # إزالة "كما هو موضح" و "وفقا لـ" في البداية
-    title = re.sub(r'^(وفقا\s+لل?|كما\s+يوضح|يُظهر\s+أن|تشير\s+البيانات)\s*', '', title, flags=re.IGNORECASE)
-    
-    return title.strip()
-
-
-# ═══════════════════════════════════════════════════════════
-# استخراج سطر التفاصيل (بديل النقاط)
-# ═══════════════════════════════════════════════════════════
-def _is_promotional(text: str) -> bool:
-    if not text:
-        return True
-    t = text.lower().strip()
-    for pat in PROMO_PATTERNS_AR + PROMO_PATTERNS_EN:
-        if re.search(pat, t):
-            return True
-    return False
-
-
-def extract_detail_lines(summary: str, max_lines: int = MAX_BULLETS) -> list:
-    """
-    استخراج أقوى أسطر التفاصيل من الملخص.
-    نبحث عن جمل تحتوي معلومات ملموسة: أرقام/نسب/أسماء/أحداث.
-    إذا لم نجد أرقاماً، نقبل جملأً تحتوي كلمات دالة.
-    """
-    if not summary or not summary.strip():
-        return []
-
-    sentences = re.split(r'(?<=[.!?؟])\s+', summary.strip())
-    
-    # كلمات دالة على معلومة مهمة حتى بدون أرقام
-    _INFO_WORDS = {'hack', 'hacked', 'breach', 'stolen', 'approved', 'banned',
-                   'rejected', 'filed', 'sued', 'arrested', 'launched',
-                   'listed', 'delisted', 'suspended', 'acquired', 'merged',
-                   'bankrupt', 'collapsed', 'surged', 'plunged', 'crashed',
-                   'announced', 'revealed', 'confirmed', 'denied',
-                   'اختراق', 'موافقة', 'رفض', 'سرقة', 'انهيار', 'ارتفاع',
-                   'هبوط', 'إفلاس', 'إطلاق', 'حظر'}
-    
-    numeric_lines = []
-    info_lines = []
-    
-    for sent in sentences:
-        sent = sent.strip().strip('.').strip()
-        if not sent:
-            continue
-        if len(sent) < 20:
-            continue
-        if len(sent) > 250:
-            continue
-        if _is_promotional(sent):
-            continue
-        # فحص سؤال — ممنوع
-        if '?' in sent or '؟' in sent:
-            continue
-        # جمل تحتوي أرقام/نسب = أقوى معلومة
-        if re.search(r'\d|[%$]', sent):
-            numeric_lines.append(sent)
-        # جمل تحتوي كلمات دالة = معلومة جيدة
-        elif any(w in sent.lower() for w in _INFO_WORDS):
-            info_lines.append(sent)
-    
-    # نفضل الأرقام ثم الكلمات الدالة
-    result = numeric_lines + info_lines
-    return result[:max_lines]
-
-
-# ═══════════════════════════════════════════════════════════
-# بناء نص المنشور الجديد
-# ═══════════════════════════════════════════════════════════
-def format_post(item) -> Optional[str]:
-    """
-    صيغة عاجل مباشرة ومفصلة:
-      🚨 عاجل — Bitcoin يتخطى 82,000$ للمرة الأولى
-
-      ▸ ارتفع BTC بنسبة 5% خلال ساعات
-      ▸ حجم التداول بلغ 12 مليار دولار
-      ▸ المحللون يتوقعون استمرار الصعود
-
-      @newscrypto1m
-    """
-    title_ar = clean_title(getattr(item, 'title_ar', '') or item.title)
-    if not title_ar or len(title_ar) < 20:
+def rel_time_ar(pub_utc) -> str | None:
+    """منذ ساعة • منذ 45 دقيقة • منذ 3 أيام"""
+    if pub_utc is None:
         return None
+    delta = datetime.now(pub_utc.tzinfo) - pub_utc
+    mins = int(delta.total_seconds() // 60)
+    if mins < 1:
+        return "الآن"
+    if mins < 60:
+        return f"منذ {mins} دقيقة"
+    hours = int(mins // 60)
+    if hours == 1:
+        return "منذ ساعة"
+    if hours == 2:
+        return "منذ ساعتين"
+    if hours < 24:
+        return f"منذ {hours} ساعات" if hours <= 10 else f"منذ {hours} ساعة"
+    days = int(hours // 24)
+    if days == 1:
+        return "منذ يوم"
+    if days == 2:
+        return "منذ يومين"
+    return f"منذ {days} أيام" if days <= 10 else f"منذ {days} يومًا"
 
-    # تحديد أيقونة نوع الخبر (مع شعور CryptoPanic)
-    sentiment = getattr(item, 'sentiment', '') or ''
-    icon = _detect_news_type(item.title, item.summary, sentiment)
 
-    # بناء العنوان مع "عاجل" — الأيقونة + عاجل + العنوان
-    header = f"{icon} عاجل — {title_ar}"
+# ------------------------------------------------------------ عناصر الجولة
+BATCH_INTROS = [
+    "🔥 <b>جولة أخبار الكريبتو</b> 🌍",
+    "⚡ <b>ما فاتك في السوق الآن:</b>",
+    "📡 <b>رصدولي… أخبار جديدة وصلت</b>",
+    "🧨 <b>أقوى ما في المشهد:</b>",
+]
 
-    # تفاصيل غنية (حتى 4 أسطر)
-    details = extract_detail_lines(getattr(item, 'summary_ar', '') or '')
 
-    # إذا لم توجد تفاصيل مترجمة، نستخدم الملخص الإنجليزي المترجم جزئياً
-    if not details and item.summary:
-        # محاولة ترجمة سريعة للملخص كتفاصيل
-        raw_summary = getattr(item, 'summary_ar', '') or item.summary
-        if raw_summary and len(raw_summary) > 30:
-            # نأخذ أول جملتين كتفاصيل مؤقتة
-            quick_sentences = re.split(r'(?<=[.!?؟])\s+', raw_summary.strip())
-            for qs in quick_sentences[:2]:
-                qs = qs.strip().strip('.').strip()
-                if len(qs) > 20 and '?' not in qs and '؟' not in qs:
-                    details.append(qs)
-
-    lines = [header]
-    
-    # إضافة العملات المرتبطة إن وجدت (من CryptoPanic)
-    currencies = getattr(item, 'currencies', []) or []
-    if currencies:
-        coins_str = ' | '.join(f"#{c}" for c in currencies[:4])
-        lines.append(f"💰 {coins_str}")
-    
-    if details:
-        lines.append('')
-        for d in details:
-            lines.append(f"▸ {d}")
-    
-    lines.append('')
-    lines.append(CHANNEL_TAG)
-
+def batch_header(count: int, now_local: datetime, market: list[dict] | None) -> str:
+    lines = [random.choice(BATCH_INTROS)]
+    count_txt = "أقوى خبر وصل الآن:" if count == 1 else f"أقوى {count} أخبار وصلت للتو:"
+    lines.append(f"🕐 {fmt_local_time(now_local)} — {count_txt}")
+    if market:
+        lines.append("")
+        lines.append("📊 <b>السوق الآن:</b>")
+        for s in market:
+            icon = "🟢" if s["change"] >= 0 else "🔴"
+            sign = "+" if s["change"] >= 0 else ""
+            if s["price"] >= 1000:
+                price = f"{s['price']:,.0f}"
+            elif s["price"] >= 1:
+                price = f"{s['price']:,.2f}"
+            else:
+                price = f"{s['price']:.4f}".rstrip("0")
+            lines.append(f'{icon} <b>{s["name"]}</b>: ${price} ({sign}{s["change"]:.1f}%)')
     return "\n".join(lines)
 
 
-# ═══════════════════════════════════════════════════════════
-# التحقق من جودة المنشور
-# ═══════════════════════════════════════════════════════════
-def _has_leaked_placeholder(text: str) -> bool:
-    if not text:
-        return False
-    if re.search(r'\[\[\s*\d+\s*\]\]', text):
-        return True
-    if '§' in text:
-        return True
-    if re.search(r'\bXX\d+XX\b', text):
-        return True
-    return False
+def test_message() -> str:
+    return (
+        "✅ <b>التهيئة تمت بنجاح!</b>\n\n"
+        "🤖 بوت أخبار الكريبتو يعمل الآن…\n"
+        "🐋 حركات الحيتان • 🚨 الاختراقات • 📈 التحركات الحادة\n"
+        "⚖️ القوانين • 🚀 التقنية والشراكات\n\n"
+        "⏰ ستصلك جولة جديدة كل ساعتين — الأخبار القوية فقط، بلا حشو وبلا ملل 😉"
+    )
 
 
-def validate_post(text: str) -> bool:
-    """فحص صارم أن المنشور صالح للإرسال"""
-    if not text or len(text) < 30:
-        return False
-    if CHANNEL_TAG not in text:
-        return False
+# ------------------------------------------------------------ خبر عادي
+def news_message(item: dict, ar_title: str) -> str:
+    cat = CATEGORIES[item["category"]]
+    hook = random.choice(cat["hooks"])
+    why = random.choice(cat["why"])
+    facts = item.get("facts") or []
 
-    # فحص placeholder متسرب
-    if _has_leaked_placeholder(text):
-        log.warning(f"⚠️ Leaked placeholder in post")
-        return False
+    lines = [
+        f'{cat["emoji"]} <b>{cat["label"]}</b> — {hook}',
+        "",
+        f"<b>{esc(ar_title)}</b>",
+        "",
+        f"⚡ <b>باختصار:</b> {why}",
+    ]
+    if facts:
+        lines.append("")
+        lines.append("📌 <b>بالأرقام:</b>")
+        lines.extend(facts)
 
-    # فحص سؤال — ممنوع باتاً
-    if '?' in text or '؟' in text:
-        log.warning(f"⚠️ Question mark in post — BANNED")
-        return False
+    # سطر التذييل: الوقت + المصدر + توقيع القناة
+    footer = []
+    rel = rel_time_ar(item.get("published"))
+    if rel:
+        footer.append(f"⏱️ {rel}")
+    if item.get("source"):
+        footer.append(f'📡 {esc(item["source"])}')
+    if footer:
+        lines.append("")
+        lines.append(" • ".join(footer))
+    if CHANNEL_SIGNATURE:
+        lines.append(esc(CHANNEL_SIGNATURE))
 
-    # فحص نسبة الحروف العربية (> 25%)
-    arabic_chars = sum(1 for c in text if '\u0600' <= c <= '\u06FF')
-    total_letters = sum(1 for c in text if c.isalpha())
-    if total_letters > 0 and arabic_chars / total_letters < 0.25:
-        log.warning(f"⚠️ Arabic ratio too low: {arabic_chars}/{total_letters}")
-        return False
+    msg = "\n".join(lines)
+    # إن وُجدت صورة، التسمية محدودة بـ 1024 حرفًا — قصّر «باختصار» عند الحاجة
+    if item.get("image") and len(msg) > 1000:
+        why_short = why[: max(60, len(why) - (len(msg) - 1000) - 3)].rsplit(" ", 1)[0] + "…"
+        msg = msg.replace(why, why_short)
+    return msg
 
-    # فحص اسم مصدر متسرب
-    if re.search(r'(Cryptonews\.net|CryptoRank|CoinDesk|Cointelegraph)\b', text):
-        log.warning(f"⚠️ Source name leaked in post")
-        return False
 
-    return True
+# ------------------------------------------------------------ خبر حيتان جاهز
+def whale_message(item: dict) -> str:
+    wd = item["whale_data"]
+    cat = CATEGORIES["whale"]
+    coin_ar = COIN_AR.get(wd["symbol"], wd["symbol"])
+
+    if "بورصة" in wd["to_txt"]:
+        direction = "to_exchange"
+    elif "بورصة" in wd["from_txt"]:
+        direction = "from_exchange"
+    else:
+        direction = "unknown"
+
+    title = (
+        f"حوت ينقل {wd['amount']:,.0f} {coin_ar} "
+        f"(≈ {human_usd(wd['amount_usd'])}) من {wd['from_txt']} إلى {wd['to_txt']}"
+    )
+    hook = random.choice(cat["hooks"])
+    why = WHALE_DIRECTION_WHY[direction]
+
+    lines = [
+        f'{cat["emoji"]} <b>{cat["label"]}</b> — {hook}',
+        "",
+        f"<b>{esc(title)}</b>",
+        "",
+        f"⚡ <b>باختصار:</b> {why}",
+        "",
+        "📌 <b>بالأرقام:</b>",
+    ]
+    lines.extend(item.get("facts") or [])
+
+    footer = [f"⏱️ {rel_time_ar(item.get('published')) or 'الآن'}", "📡 Whale Alert"]
+    lines.append("")
+    lines.append(" • ".join(footer))
+    if CHANNEL_SIGNATURE:
+        lines.append(esc(CHANNEL_SIGNATURE))
+    return "\n".join(lines)

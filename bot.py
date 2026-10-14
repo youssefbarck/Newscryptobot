@@ -263,3 +263,23 @@ async def run_doctor(dry_run: bool = False) -> int:
         return 3
     log.info("🩺 الفحص اكتمل بنجاح — كل شيء جاهز ✅")
     return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# حارس ضد التشغيل الصامت: لو نفّذ workflow قديم «python bot.py» مباشرة
+# فسيظهر تحذير واضح ويفشل التشغيل بدل علامة خضراء كاذبة بلا أي إرسال.
+if __name__ == "__main__":
+    print(
+        "\n"
+        "⚠️  توقف — bot.py وحدة داخلية وليست نقطة تشغيل، لذلك لا يرسل شيئًا إذا شُغّل مباشرة.\n"
+        "\n"
+        "   ✅ نقطة الدخول الصحيحة محليًا:      python main.py\n"
+        "   ✅ أوامر مفيدة:                     python main.py --doctor | --dry-run | --test\n"
+        "   ✅ وعلى GitHub Actions:             شغّل workflow «📰 Crypto News Bot» (news.yml)\n"
+        "\n"
+        "   🔧 إن كان هذا التشغيل من workflow قديم (مثل cron.yml) يشغل «python bot.py»:\n"
+        "      احذف ملفات الـ workflows القديمة من .github/workflows/ وأبقِ الأربعة الجديدة فقط.\n"
+        "\n",
+        flush=True,
+    )
+    raise SystemExit(2)

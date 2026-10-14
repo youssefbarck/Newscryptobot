@@ -11,6 +11,54 @@ from .config import REQUEST_TIMEOUT
 log = logging.getLogger("crypto-bot")
 
 
+def verify_credentials(token: str, chat_id: str) -> tuple[bool, str]:
+    """فحص تشخيصي مسبق: صلاحية التوكن ثم إمكانية الوصول للمحادثة.
+
+    يُرجع (نجاح، رسالة خطأ عربية واضحة إن فشل).
+    """
+    if not token:
+        return False, "❌ TELEGRAM_BOT_TOKEN فارغ — أضِفه في Secrets"
+    if not chat_id:
+        return False, "❌ TELEGRAM_CHAT_ID فارغ — أضِفه في Secrets"
+
+    # 1) التوكن صالح؟
+    try:
+        r = requests.get(f"https://api.telegram.org/bot{token}/getMe",
+                         timeout=REQUEST_TIMEOUT)
+        if r.status_code in (401, 403):
+            return False, ("❌ التوكن غير صالح (401) — افتح @BotFather "
+                           "وانسخ التوكن كاملًا من جديد")
+        if not r.ok:
+            return False, f"❌ فحص التوكن فشل ({r.status_code}) — تحقق من قيمته"
+        bot_name = (r.json() or {}).get("result", {}).get("username") or "?"
+        log.info("✔ التوكن سليم — البوت: @%s", bot_name)
+    except requests.RequestException as exc:
+        return False, f"❌ لا يمكن الوصول إلى تيليجرام: {exc}"
+
+    # 2) المحادثة موجودة والبوت عضو فيها؟
+    try:
+        r = requests.get(f"https://api.telegram.org/bot{token}/getChat",
+                         params={"chat_id": chat_id}, timeout=REQUEST_TIMEOUT)
+        if not r.ok:
+            desc = ""
+            try:
+                desc = (r.json() or {}).get("description", "")
+            except Exception:
+                pass
+            return False, (
+                f"❌ تعذر الوصول إلى المحادثة «{chat_id}» — {desc}\n"
+                "   الحلول الأكثر شيوعًا:\n"
+                "   1️⃣ القنوات الخاصة معرّفها يبدأ بـ -100 (وليس رقمًا موجبًا)\n"
+                "   2️⃣ أضِف البوت مشرفًا (Admin) في القناة\n"
+                "   3️⃣ القنوات العامة اكتبها مثل @mychannel")
+        title = (r.json() or {}).get("result", {}).get("title") or chat_id
+        log.info("✔ المحادثة متاحة: %s", title)
+    except requests.RequestException as exc:
+        return False, f"❌ خطأ اتصال أثناء فحص المحادثة: {exc}"
+
+    return True, ""
+
+
 def _post(token: str, method: str, payload: dict):
     url = f"https://api.telegram.org/bot{token}/{method}"
     r = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)

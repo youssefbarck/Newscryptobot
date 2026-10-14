@@ -5,6 +5,7 @@
     python -m bot.main             ← جولة كاملة (إرسال فعلي)
     python -m bot.main --dry-run   ← طباعة الرسائل دون إرسال
     python -m bot.main --test      ← رسالة تجربة للتحقق من الإعداد
+    python -m bot.main --doctor    ← فحص تشخيصي: التوكن والمحادثة والاتصال
 """
 import argparse
 import logging
@@ -27,7 +28,7 @@ from .config import (
 from .formatter import batch_header, news_message, test_message, whale_message
 from .sources import fetch_feeds, fetch_market_stats, fetch_whale_alert
 from .state import already_seen, load_state, mark, save_state
-from .telegram_sender import send_news
+from .telegram_sender import send_news, verify_credentials
 from .translate import to_arabic
 
 from .config import RSS_FEEDS  # noqa: E402  (تُستورد بعد الإعدادات عمدًا)
@@ -106,6 +107,13 @@ def run(dry_run: bool = False, limit: int | None = None, min_score: int | None =
             time.sleep(0.4)  # أدب مع خدمة الترجمة 🙏
 
     # -------------------------------------------------- 5) الإرسال
+    # فحص تشخيصي مسبق — يكشف المشكلة بدقة قبل إرسال أي شيء
+    ok, err = verify_credentials(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+    if not ok:
+        log.error(err)
+        log.error("💡 شغّل الوضع التشخيصي: python -m bot.main --doctor")
+        return 3
+
     header = batch_header(len(selected), now_local, market)
     if dry_run:
         print("\n" + "=" * 52)
@@ -142,8 +150,11 @@ def run(dry_run: bool = False, limit: int | None = None, min_score: int | None =
         time.sleep(SEND_DELAY_SECONDS)
 
     save_state(STATE_FILE, state)
+    if sent == 0:
+        log.error("❌ فشل إرسال كل الرسائل رغم أن الفحص التشخيصي نجح — راجع رسائل الأخطاء أعلاه")
+        return 1
     log.info("🏁 انتهت الجولة: %s/%s خبرًا نُشرت بنجاح", sent, len(selected))
-    return 0 if sent else 1
+    return 0
 
 
 def send_test(dry_run: bool = False) -> int:
@@ -159,16 +170,43 @@ def send_test(dry_run: bool = False) -> int:
     return 0 if ok else 1
 
 
+def run_doctor(dry_run: bool = False) -> int:
+    """فحص تشخيصي شامل يُطبع في سجل GitHub Actions أو محليًا."""
+    log.info("🩺 الفحص التشخيصي للبوت…")
+
+    # 1) متغيرات تيليجرام
+    ok, err = verify_credentials(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+    if not ok:
+        log.error(err)
+        return 3
+
+    if dry_run:
+        log.info("🩺 (وضع تجربة) الفحص انتهى بنجاح — كل شيء جاهز للإرسال ✅")
+        return 0
+
+    # 2) رسالة تجريبية صغيرة للتأكد من صلاحية النشر فعليًا
+    ok = send_news(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                   "🩺 <b>فحص تشخيصي:</b> البوت قادر على النشر في هذه المحادثة ✅")
+    if not ok:
+        log.error("❌ الفحص نجح لكن النشر الفعلي رُفض — تأكد من صلاحية «نشر الرسائل» للبوت كمشرف")
+        return 3
+    log.info("🩺 الفحص اكتمل بنجاح — كل شيء جاهز ✅")
+    return 0
+
+
 def main(argv=None) -> int:
     _setup_logging()
     parser = argparse.ArgumentParser(description="بوت أخبار الكريبتو 🐋")
     parser.add_argument("--dry-run", action="store_true", help="طباعة الرسائل دون إرسال")
     parser.add_argument("--test", action="store_true", help="إرسال رسالة تجربة فقط")
+    parser.add_argument("--doctor", action="store_true", help="فحص تشخيصي للتوكن والمحادثة")
     parser.add_argument("--limit", type=int, default=None, help="أقصى عدد أخبار في هذه الجولة")
     parser.add_argument("--min-score", type=int, default=None, help="حد فلتر الجودة (1-10)")
     args = parser.parse_args(argv)
 
     try:
+        if args.doctor:
+            return run_doctor(dry_run=args.dry_run)
         if args.test:
             return send_test(dry_run=args.dry_run)
         return run(dry_run=args.dry_run, limit=args.limit, min_score=args.min_score)

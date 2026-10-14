@@ -85,6 +85,7 @@ async def run_cycle(dry_run: bool = False, limit: int | None = None,
     log.info("🚀 بدأت الجولة")
 
     state = load_hashes()
+    log.info("🧠 ذاكرة منع التكرار: %s بصمة محمّلة", len(state["seen"]))
 
     # ---------------------------------------------------------- 1) الجلب
     try:

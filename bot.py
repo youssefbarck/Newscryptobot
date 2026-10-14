@@ -190,7 +190,7 @@ async def run_cycle(dry_run: bool = False, limit: int | None = None,
         if not ok:
             log.error(err)
             return 2
-        ok, err = verify_credentials(session)
+        ok, err = await verify_credentials(session)
         if not ok:
             log.error(err)
             log.error("💡 شغّل الوضع التشخيصي: python main.py --doctor")
@@ -233,7 +233,7 @@ async def send_test(dry_run: bool = False) -> int:
         log.error(err)
         return 2
     async with aiohttp.ClientSession() as session:
-        ok, err = verify_credentials(session)
+        ok, err = await verify_credentials(session)
         if not ok:
             log.error(err)
             return 3
@@ -250,7 +250,7 @@ async def run_doctor(dry_run: bool = False) -> int:
         log.error(err)
         return 2
     async with aiohttp.ClientSession() as session:
-        ok, err = verify_credentials(session)
+        ok, err = await verify_credentials(session)
         if not ok:
             log.error(err)
             return 3

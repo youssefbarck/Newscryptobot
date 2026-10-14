@@ -1,0 +1,81 @@
+name: "📰 Crypto News Bot"
+
+on:
+  schedule:
+    # كل ساعتين — دقيقة 7 خارج ذروة بداية الساعة
+    - cron: "7 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "وضع التشغيل (full: إرسال فعلي | test: رسالة تجربة | dry: طباعة دون إرسال | doctor: فحص تشخيصي)"
+        type: choice
+        default: "full"
+        options:
+          - full
+          - test
+          - dry
+          - doctor
+
+permissions:
+  contents: write
+
+concurrency:
+  group: crypto-news
+  cancel-in-progress: false
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: "تحميل المستودع"
+        uses: actions/checkout@v5
+
+      - name: "إعداد بايثون 3.11"
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: "تثبيت المتطلبات"
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: "تشغيل البوت"
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CRYPTOPANIC_API_KEY: ${{ secrets.CRYPTOPANIC_API_KEY }}
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          WHALE_ALERT_API_KEY: ${{ secrets.WHALE_ALERT_API_KEY }}
+          CHANNEL_TAG: ${{ vars.CHANNEL_TAG }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          MODE="${{ github.event.inputs.mode || 'full' }}"
+          case "$MODE" in
+            test)   python main.py --test ;;
+            dry)    python main.py --dry-run ;;
+            doctor) python main.py --doctor ;;
+            *)      python main.py ;;
+          esac
+
+      - name: "حفظ سجل منع التكرار + علامة آخر حياة"
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p .github/state
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "last_run_at=$DATE" >> .github/state/last_alive.json
+          echo "run_id=${{ github.run_id }}" >> .github/state/last_alive.json
+          echo "workflow=${{ github.workflow }}" >> .github/state/last_alive.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/sent_news.json .github/state/last_alive.json
+          if git diff --cached --quiet; then
+            echo "لا تغييرات في سجل التكرار"
+          else
+            git commit -m "chore(bot): cycle $(date -u +%Y-%m-%dT%H:%M) [skip ci]"
+            git pull --rebase origin ${{ github.ref_name }} || true
+            git push origin HEAD:${{ github.ref_name }} || echo "⚠️ تعذر رفع السجل — لن يمنع التشغيل القادم"
+          fi

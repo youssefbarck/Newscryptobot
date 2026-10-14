@@ -74,11 +74,17 @@ jobs:
           echo "last_run_at=$DATE" > .github/state/last_alive.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "📦 بصمات الذاكرة الآن: $(python3 -c "import json;print(len(json.load(open('data/sent_news.json')).get('seen',{})))" 2>/dev/null || echo 0)"
           git add data/sent_news.json
           if git diff --cached --quiet; then
             echo "لا أخبار جديدة — لا حاجة لحفظ"
           else
             git commit -m "chore(bot): sent $(date -u +%Y-%m-%dT%H:%M) [skip ci]"
             git pull --rebase origin ${{ github.ref_name }} || true
-            git push origin HEAD:${{ github.ref_name }} || echo "⚠️ تعذر رفع السجل — لن يمنع التشغيل القادم"
+            if git push origin HEAD:${{ github.ref_name }}; then
+              echo "✅ سجل منع التكرار رُفع للمستودع — الجولات القادمة لن تعيد نفس الأخبار"
+            else
+              echo "🚨 فشل رفع سجل منع التكرار! الجولات القادمة ستعيد نفس الأخبار — راجع صلاحيات الدفع"
+              exit 1
+            fi
           fi

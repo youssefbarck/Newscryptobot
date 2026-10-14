@@ -5,6 +5,7 @@
 مدموجًا مع نظام النقاط من 10 والفحص النهائي للمنشور.
 """
 import re
+from functools import lru_cache
 from datetime import datetime, timezone
 
 from categories import CATEGORIES, COIN_AR, COIN_TICKERS_RE, MAJOR_COIN_NAMES_RE
@@ -246,13 +247,27 @@ _STOPWORDS = {"the", "a", "an", "of", "in", "to", "for", "on", "after", "as", "i
               "في", "من", "إلى", "على", "عن", "أن", "إن", "و", "أو"}
 
 
-def title_tokens(norm: str) -> set[str]:
-    return {w for w in norm.split() if len(w) > 1 and w not in _STOPWORDS}
+# أرقام خالصة (65 / 65,000 / 65.5 / 65k / 1.5b / 12%…):
+# مواقع الأخبار تحدّث السعر داخل العنوان نفسه («يخترق 65,000$» ← «يخترق 65,500$»)
+# والقصة واحدة — لذلك تُهمل الأرقام عمدًا عند مقارنة العناوين.
+_DIGIT_TOKEN_RE = re.compile(r"^\d+(?:[.,:]\d+)*(?:k|m|b|t|bn|mn|tr)?%?$")
+
+
+@lru_cache(maxsize=20000)
+def title_tokens(norm: str) -> frozenset:
+    """كلمات مهمة فقط (مع ذاكرة مؤقتة — فحص الأرشيف يقارن مئات العناوين)."""
+    return frozenset(w for w in norm.split()
+                     if len(w) > 1 and w not in _STOPWORDS
+                     and not _DIGIT_TOKEN_RE.match(w))
 
 
 def similar(a: str, b: str) -> bool:
-    """تشابه بين عنوانين (Jaccard على الكلمات المهمة)."""
+    """تشابه بين عنوانين: Jaccard على الكلمات المهمة
+    + فحص احتواء (عنوان نسخة مختصرة أو موسّعة من الآخر = نفس القصة)."""
     ta, tb = title_tokens(a), title_tokens(b)
     if not ta or not tb:
         return False
-    return len(ta & tb) / len(ta | tb) >= SIMILARITY_THRESHOLD
+    if len(ta & tb) / len(ta | tb) >= SIMILARITY_THRESHOLD:
+        return True
+    # الاحتواء: يشمل النسخ القصيرة من نفس الخبر بين المصادر
+    return len(ta & tb) / min(len(ta), len(tb)) >= 0.8

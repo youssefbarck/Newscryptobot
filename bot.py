@@ -105,7 +105,9 @@ async def run_cycle(dry_run: bool = False, limit: int | None = None,
     log.info("📅 فلتر العمر: %s طازة من أصل %s", len(fresh), len(news))
 
     # ------------------------------------- 3) التحضير + الفلاتر الصارمة
+    # ⚠️ فحص الأرشيف هنا إلزامي: هو ما يمنع إعادة إرسال أخبار الجولات السابقة.
     candidates = []
+    dup_count = 0
     for item in fresh:
         if not _prepare(item):
             continue
@@ -114,7 +116,12 @@ async def run_cycle(dry_run: bool = False, limit: int | None = None,
         if not item.whale_data and is_banned_title(item.title):
             log.info("🚫 عنوان ممنوع: %s", item.title[:60])
             continue
+        if is_duplicate(item, state, []):
+            dup_count += 1
+            continue
         candidates.append(item)
+    if dup_count:
+        log.info("🧹 استبعد %s خبرًا مكررًا (أُرسل في جولات سابقة)", dup_count)
     log.info("🔥 المرشحون بعد الفلاتر: %s", len(candidates))
 
     selected = _select_candidates(candidates, limit)
@@ -181,9 +188,8 @@ async def run_cycle(dry_run: bool = False, limit: int | None = None,
                 print(f"[{note}]")
                 print(text.replace("<b>", "").replace("</b>", ""))
             print("=" * 52)
-            for item, _t in posts:
-                mark(item, state)
-            save_hashes(state)
+            # وضع التجربة معاينة خالصة — لا يحفظ بصمات، حتى لا يعده
+            # الإرسال الفعلي لاحقًا هذه الأخبار «مكررة» ويتجاهلها.
             return 0
 
         # ------------------------------------------------------ 8) الإرسال

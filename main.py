@@ -12,6 +12,7 @@ import logging
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .analysis import prepare, similar
@@ -26,7 +27,7 @@ from .config import (
     WHALE_ALERT_API_KEY,
 )
 from .formatter import batch_header, news_message, test_message, whale_message
-from .sources import fetch_feeds, fetch_market_stats, fetch_whale_alert
+from .sources import fetch_feeds, fetch_market_stats, fetch_og_image, fetch_whale_alert
 from .state import already_seen, load_state, mark, save_state
 from .telegram_sender import send_news, verify_credentials
 from .translate import to_arabic
@@ -34,6 +35,17 @@ from .translate import to_arabic
 from .config import RSS_FEEDS  # noqa: E402  (تُستورد بعد الإعدادات عمدًا)
 
 log = logging.getLogger("crypto-bot")
+
+# صور بديلة جاهزة وأنيقة لكل تصنيف — تُستخدم إذا لم تتوفر صورة أصلية للخبر
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+
+
+def _resolve_image(item: dict) -> str:
+    """صورة الخبر الأصلية إن وجدت، وإلا صورة التصنيف البديلة."""
+    img = item.get("image")
+    if img and img.startswith("http"):
+        return img
+    return str(ASSETS_DIR / f'{item["category"]}.jpg')
 
 
 def _setup_logging() -> None:
@@ -106,29 +118,41 @@ def run(dry_run: bool = False, limit: int | None = None, min_score: int | None =
             item["ar_title"] = to_arabic(item["title"]) or item["title"]
             time.sleep(0.4)  # أدب مع خدمة الترجمة 🙏
 
-    # -------------------------------------------------- 5) الإرسال
-    # فحص تشخيصي مسبق — يكشف المشكلة بدقة قبل إرسال أي شيء
-    ok, err = verify_credentials(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-    if not ok:
-        log.error(err)
-        log.error("💡 شغّل الوضع التشخيصي: python -m bot.main --doctor")
-        return 3
+    # -------------------------------------------------- 5) الصور
+    # لكل خبر مختار بلا صورة في RSS: نفتح صفحته ونستخرج صورته الأصلية
+    # (بحد أقصى 4 طلبات في الجولة) — وإلا تُستخدم صورة التصنيف البديلة
+    for item in selected:
+        if not item.get("image") and item.get("url"):
+            item["image"] = fetch_og_image(item["url"])
+            time.sleep(0.3)
 
+    # -------------------------------------------------- 6) الإرسال
     header = batch_header(len(selected), now_local, market)
     if dry_run:
+        # وضع التجربة يطبع النتيجة كاملة — لا يحتاج توكن تيليجرام
         print("\n" + "=" * 52)
         print("[وضع تجربة — هذه الرسائل لن تُرسل]")
         print("=" * 52)
         print(header.replace("<b>", "").replace("</b>", ""))
         for item in selected:
-            msg = whale_message(item) if item.get("whale_data") else news_message(item, item["ar_title"])
+            img_note = ("🖼 صورة أصلية من مصدر الخبر" if item.get("image")
+                        else "🖼 صورة بديلة أنيقة للتصنيف")
             print("-" * 52)
+            print(f"[{img_note}]")
+            msg = whale_message(item) if item.get("whale_data") else news_message(item, item["ar_title"])
             print(msg.replace("<b>", "").replace("</b>", ""))
         print("=" * 52)
         for item in selected:
             mark(item, state)
         save_state(STATE_FILE, state)
         return 0
+
+    # فحص تشخيصي مسبق — يكشف المشكلة بدقة قبل إرسال أي شيء
+    ok, err = verify_credentials(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+    if not ok:
+        log.error(err)
+        log.error("💡 شغّل الوضع التشخيصي: python -m bot.main --doctor")
+        return 3
 
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         log.error("❌ بيانات تيليجرام ناقصة! عيّن TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID")
@@ -142,7 +166,7 @@ def run(dry_run: bool = False, limit: int | None = None, min_score: int | None =
     for item in selected:
         msg = whale_message(item) if item.get("whale_data") else news_message(item, item["ar_title"])
         if send_news(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, msg,
-                     image_url=item.get("image"), source_url=item.get("url") or None):
+                     image=_resolve_image(item)):
             sent += 1
             mark(item, state)
         else:

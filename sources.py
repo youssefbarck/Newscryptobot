@@ -72,6 +72,48 @@ def _first_image(entry) -> str | None:
     return None
 
 
+# ------------------------------------------------- صورة الخبر من صفحته
+_OG_RE = re.compile(
+    r'<meta[^>]+(?:property|name)=["\'](?:og:image(?::secure_url)?|twitter:image(?::src)?)'
+    r'["\'][^>]*content=["\']([^"\']+)["\']', re.I)
+_OG_RE2 = re.compile(
+    r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*'
+    r'(?:property|name)=["\'](?:og:image(?::secure_url)?|twitter:image(?::src)?)["\']',
+    re.I)
+
+
+def fetch_og_image(article_url: str) -> str | None:
+    """فتح صفحة الخبر واستخراج صورتها الأصلية (og:image / twitter:image).
+
+    يُستدعى فقط للأخبار المختارة للنشر والتي بلا صورة في RSS —
+    على الأكثر 4 طلبات في الجولة.
+    """
+    if not article_url or not article_url.startswith("http"):
+        return None
+    browser = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/124.0 Safari/537.36"),
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    try:
+        r = requests.get(article_url, headers=browser,
+                         timeout=REQUEST_TIMEOUT, allow_redirects=True)
+        if not r.ok:
+            return None
+        html_text = r.text[:400_000]  # الكافي: وسوم meta في أعلى الصفحة
+        m = _OG_RE.search(html_text) or _OG_RE2.search(html_text)
+        if not m:
+            return None
+        url = m.group(1).replace("&amp;", "&").strip()
+        if not url.startswith("http"):
+            return None
+        log.info("🖼 og:image استُخرج من صفحة الخبر")
+        return url
+    except requests.RequestException:
+        return None
+
+
 # ------------------------------------------------------------------- RSS
 def fetch_feeds(feeds: list[dict], limit_per_feed: int = 25) -> list[dict]:
     """جلب أحدث الأخبار من كل مصادر RSS مع تجاهل المصادر المعطوبة."""

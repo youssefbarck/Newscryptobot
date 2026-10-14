@@ -1,0 +1,43 @@
+name: Keep-Alive
+
+# منع GitHub من إيقاف scheduled workflows بعد 60 يوم بدون نشاط — commit يومي بسيط
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: true
+
+      - name: Write keepalive marker
+        run: |
+          mkdir -p .github/state
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "last_keepalive=$DATE" > .github/state/daily_keepalive.txt
+          echo "run_id=${{ github.run_id }}" >> .github/state/daily_keepalive.txt
+          echo "actor=${{ github.actor }}" >> .github/state/daily_keepalive.txt
+          cat .github/state/daily_keepalive.txt
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/state/daily_keepalive.txt
+          if git diff --staged --quiet; then
+            echo " " >> .github/state/daily_keepalive.txt
+            git add .github/state/daily_keepalive.txt
+          fi
+          git commit -m "chore: daily keepalive [skip ci]" || echo "nothing to commit"
+          git push || echo "⚠️ push failed — will retry tomorrow"
+          echo "Keepalive pushed at $(date -u)"

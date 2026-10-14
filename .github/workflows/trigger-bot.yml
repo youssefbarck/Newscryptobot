@@ -1,0 +1,27 @@
+name: Trigger Bot
+
+# مستقبِل إشارة خارجية (cron-job.org أو خدمة keep-alive الخاصة بك)
+# عند الاستدعاء يطلق "Crypto News Bot" فورًا — ومنع التكرار يحمي من الإرسال المزدوج
+
+on:
+  repository_dispatch:
+    types: [trigger_bot]
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Trigger news bot workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Triggering Crypto News Bot..."
+          gh workflow run news.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "${{ github.ref_name }}" || \
+          echo "Failed to trigger — ensure news.yml exists on the same branch"
+
+      - name: Done
+        run: echo "Bot triggered at $(date -u)"

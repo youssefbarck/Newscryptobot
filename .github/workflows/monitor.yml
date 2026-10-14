@@ -1,0 +1,107 @@
+name: Monitor
+
+# فحص يومي: لو توقف البوت أكثر من 3 ساعات أو فشل آخر تشغيل، يفتح issue تنبيه تلقائي
+
+on:
+  schedule:
+    - cron: "42 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  issues: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Check last bot run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          REPO="$GITHUB_REPOSITORY"
+          echo "Checking last run of news.yml on $REPO..."
+
+          LAST_RUN=$(gh run list \
+            --repo "$REPO" \
+            --workflow=news.yml \
+            --limit=1 \
+            --json conclusion,createdAt,databaseId,displayTitle \
+            --jq '.[0]')
+
+          if [ "$LAST_RUN" = "null" ] || [ -z "$LAST_RUN" ]; then
+            echo "No previous runs of news.yml found!"
+            echo "STALE=true" >> "$GITHUB_ENV"
+            echo "REASON=no_runs" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          CONCLUSION=$(echo "$LAST_RUN" | jq -r '.conclusion')
+          CREATED=$(echo "$LAST_RUN" | jq -r '.createdAt')
+
+          echo "Last run conclusion: $CONCLUSION"
+          echo "Last run created: $CREATED"
+
+          NOW=$(date -u +%s)
+          LAST_TS=$(date -u -d "$CREATED" +%s 2>/dev/null || echo 0)
+          DIFF=$(( (NOW - LAST_TS) / 60 ))
+          echo "Minutes since last run: $DIFF"
+
+          if [ "$DIFF" -gt 180 ]; then
+            echo "Bot has been idle for $DIFF minutes!"
+            echo "STALE=true" >> "$GITHUB_ENV"
+            echo "REASON=stale_${DIFF}min" >> "$GITHUB_ENV"
+          elif [ "$CONCLUSION" = "failure" ]; then
+            echo "Last run failed!"
+            echo "STALE=true" >> "$GITHUB_ENV"
+            echo "REASON=last_run_failed" >> "$GITHUB_ENV"
+          else
+            echo "Bot is working normally"
+            echo "STALE=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Create alert issue
+        if: env.STALE == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REASON: ${{ env.REASON }}
+        run: |
+          TITLE="Crypto Bot Monitor Alert: $REASON"
+          BODY=$(cat <<EOF
+          ## Bot Monitor Alert
+
+          **Reason**: \`$REASON\`
+
+          **Suggested actions**:
+          1. Go to the Actions tab and ensure the bot workflow is enabled.
+          2. Run the workflow manually via "Run workflow" → mode: doctor.
+
+          This issue was created automatically by monitor.yml.
+          EOF
+          )
+
+          EXISTING=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --search "$TITLE in:title" \
+            --json number \
+            --jq 'length')
+
+          if [ "$EXISTING" = "0" ]; then
+            gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --body "$BODY" || \
+            gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --body "$BODY"
+            echo "Created alert issue"
+          else
+            echo "An open issue with the same title already exists — skipping"
+          fi

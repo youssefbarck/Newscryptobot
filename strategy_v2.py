@@ -37,44 +37,17 @@ _CACHE_TTL = 60
 
 
 def _fetch_klines(symbol: str, interval: str, limit: int = 100) -> List[Dict]:
-    """يجلب الشموع من Binance (مع fallback)."""
+    """🆕 v6.4.125: يستخدم engine.fetch_klines (مصدر مركزي + cache مشترك).
+    هذا يقلل طلبات Binance من 3× (V1+V2+V3 كل واحدة لوحدها) لِـ 1× (مصدر موحد).
+    """
     try:
-        cache_key = f"{symbol}_{interval}"
-        now = time.time()
-        if cache_key in _CACHE:
-            ts, candles = _CACHE[cache_key]
-            if now - ts < _CACHE_TTL:
-                return candles
-
-        for base in [_BINANCE_BASE, _BINANCE_FALLBACK]:
-            try:
-                url = f"{base}/api/v3/klines"
-                r = requests.get(url, params={
-                    "symbol": f"{symbol.upper()}USDT",
-                    "interval": interval,
-                    "limit": limit
-                }, headers=_HEADERS, timeout=10)
-                if r.status_code == 200:
-                    candles = [{
-                        "open_time": int(k[0]),
-                        "open": float(k[1]),
-                        "high": float(k[2]),
-                        "low": float(k[3]),
-                        "close": float(k[4]),
-                        "volume": float(k[5]),
-                        "close_time": int(k[6])
-                    } for k in r.json()]
-                    _CACHE[cache_key] = (now, candles)
-                    return candles
-                if r.status_code in (403, 418, 429, 451):
-                    continue
-                return []
-            except Exception as e:
-                log.warning(f"V2 fetch_klines {symbol} {interval} err: {e}")
-                continue
-        return []
+        # استخدم engine.fetch_klines (لديه cache + KuCoin/Coinbase fallback)
+        from engine import fetch_klines as _engine_fetch
+        candles = _engine_fetch(symbol, interval, limit)
+        # engine.fetch_klines يرجع list من dicts بنفس الصيغة
+        return candles if candles else []
     except Exception as e:
-        log.warning(f"V2 fetch_klines outer err: {e}")
+        log.warning(f"V2 fetch_klines (engine) {symbol} {interval} err: {e}")
         return []
 
 

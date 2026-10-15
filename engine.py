@@ -316,22 +316,157 @@ def fetch_klines_coinbase(symbol: str, interval: str = "1d", limit: int = 90) ->
         return []
 
 
+# 🆕 v6.4.124: KuCoin top movers fallback (لِـ fetch_top_movers و fetch_top_movers_with_data)
+_KUCOIN_TICKER_URL = "https://api.kucoin.com/api/v1/market/allTickers"
+
+
+def _fetch_top_movers_kucoin(limit: int = 15, min_vol: float = 5e6, gainers: bool = True) -> List[str]:
+    """🆕 v6.4.124: KuCoin fallback لِـ fetch_top_movers (silent)."""
+    try:
+        r = requests.get(_KUCOIN_TICKER_URL, timeout=20, headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+            "Accept": "application/json"
+        })
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        if data.get("code") != "200000":
+            return []
+        stable = {"USDC","BUSD","DAI","TUSD","USDP","FDUSD","USDT","EUR","GBP","TRY","BIDR","AEUR","USDS","SUSD","PAXG","USTC"}
+        coins = []
+        for t in data.get("data", {}).get("ticker", []):
+            sym = t.get("symbol", "")
+            if not sym.endswith("-USDT"):
+                continue
+            base = sym.replace("-USDT", "")
+            if base in stable:
+                continue
+            try:
+                change_rate = float(t.get("changeRate", 0))
+                change_pct = change_rate * 100  # KuCoin returns decimal (0.05 = 5%)
+                vol = float(t.get("volValue", 0))  # quote volume in USDT
+                price = float(t.get("last", 0))
+                if price > 0 and vol >= min_vol:
+                    if gainers and change_pct >= 5.0:
+                        coins.append((base, change_pct))
+                    elif not gainers and change_pct <= -5.0:
+                        coins.append((base, change_pct))
+            except (ValueError, TypeError):
+                continue
+        coins.sort(key=lambda x: x[1], reverse=gainers)
+        return [c[0] for c in coins[:limit]]
+    except Exception as e:
+        log.warning(f"KuCoin top_movers: {e}")
+        return []
+
+
+def _fetch_top_movers_with_data_kucoin(limit: int = 15, min_vol: float = 5e6, gainers: bool = True) -> List[Tuple[str, float, float]]:
+    """🆕 v6.4.124: KuCoin fallback لِـ fetch_top_movers_with_data (silent)."""
+    try:
+        r = requests.get(_KUCOIN_TICKER_URL, timeout=20, headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+            "Accept": "application/json"
+        })
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        if data.get("code") != "200000":
+            return []
+        stable = {"USDC","BUSD","DAI","TUSD","USDP","FDUSD","USDT","EUR","GBP","TRY","BIDR","AEUR","USDS","SUSD","PAXG","USTC"}
+        coins = []
+        for t in data.get("data", {}).get("ticker", []):
+            sym = t.get("symbol", "")
+            if not sym.endswith("-USDT"):
+                continue
+            base = sym.replace("-USDT", "")
+            if base in stable:
+                continue
+            try:
+                change_rate = float(t.get("changeRate", 0))
+                change_pct = change_rate * 100
+                vol = float(t.get("volValue", 0))
+                price = float(t.get("last", 0))
+                if price > 0 and vol >= min_vol:
+                    if gainers and change_pct >= 5.0:
+                        coins.append((base, change_pct, price))
+                    elif not gainers and change_pct <= -5.0:
+                        coins.append((base, change_pct, price))
+            except (ValueError, TypeError):
+                continue
+        coins.sort(key=lambda x: x[1], reverse=gainers)
+        return coins[:limit]
+    except Exception as e:
+        log.warning(f"KuCoin top_movers_with_data: {e}")
+        return []
+
+
+def _fetch_all_spot_symbols_kucoin(min_quote_volume: float = 1e6, min_price: float = 0.0001) -> List[str]:
+    """🆕 v6.4.124: KuCoin fallback لِـ fetch_all_spot_symbols (silent).
+    يستخدم allTickers endpoint لِـ جلب كل USDT pairs مع فلترة السيولة.
+    """
+    try:
+        r = requests.get(_KUCOIN_TICKER_URL, timeout=30, headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+            "Accept": "application/json"
+        })
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        if data.get("code") != "200000":
+            return []
+        stable = {"USDC","BUSD","DAI","TUSD","USDP","FDUSD","USDT","EUR","GBP","TRY",
+                  "BIDR","AEUR","USDS","SUSD","PAXG","USTC","SOXLB","SOXL","SOXS",
+                  "UP","DOWN","BULL","BEAR","USDSB","USTCB"}
+        symbols = []
+        for t in data.get("data", {}).get("ticker", []):
+            sym = t.get("symbol", "")
+            if not sym.endswith("-USDT"):
+                continue
+            base = sym.replace("-USDT", "")
+            if base in stable:
+                continue
+            try:
+                vol = float(t.get("volValue", 0))
+                price = float(t.get("last", 0))
+                if price >= min_price and vol >= min_quote_volume:
+                    symbols.append(base)
+            except (ValueError, TypeError):
+                continue
+        # Apply legacy mapping (POL → MATIC for compatibility)
+        # Actually keep POL as-is since Binance also uses POL now
+        return sorted(set(symbols))
+    except Exception as e:
+        log.warning(f"KuCoin spot_symbols: {e}")
+        return []
+
+
 def is_binance_available() -> bool:
     return time.time() >= _banned_until
 
 def fetch_top_movers(limit: int = 15, min_vol: float = 5e6, gainers: bool = True) -> List[str]:
     global _banned_until
+    # 🆕 v6.4.124: silent — لو Binance محظور، ما نكتب log
     if not is_binance_available():
+        # جرّب KuCoin (ticker/24hr all)
+        kc_movers = _fetch_top_movers_kucoin(limit, min_vol, gainers)
+        if kc_movers:
+            return kc_movers
         return []
     try:
         r, used_url = _binance_get(_TICKER_URL, _TICKER_URL_FALLBACK, timeout=20)
         if r is None:
-            log.error("❌ [BINANCE ALL FAIL] fetch_top_movers")
+            # 🆕 v6.4.124: silent — _binance_get كتب log واحد فقط عند بدء الحظر
+            kc_movers = _fetch_top_movers_kucoin(limit, min_vol, gainers)
+            if kc_movers:
+                return kc_movers
             return []
         if r.status_code != 200:
-            log.error(f"❌ [BINANCE BLOCK?] fetch_top_movers HTTP {r.status_code}")
             if r.status_code in (403, 418, 429, 451):
-                _banned_until = time.time() + 600
+                _banned_until = time.time() + 1800  # 🆕 v6.4.124: 30min
+                log.warning(f"⛔ Binance IP-block (HTTP {r.status_code}) on ticker — pausing 30min, using KuCoin silently")
+            kc_movers = _fetch_top_movers_kucoin(limit, min_vol, gainers)
+            if kc_movers:
+                return kc_movers
             return []
         stable = {"USDC","BUSD","DAI","TUSD","USDP","FDUSD","USDT","EUR","GBP","TRY","BIDR","AEUR","USDS","SUSD","PAXG","USTC","SOXLB","SOXL","SOXS","UP","DOWN","BULL","BEAR"}
         coins = []
@@ -363,14 +498,17 @@ def fetch_top_movers(limit: int = 15, min_vol: float = 5e6, gainers: bool = True
 def fetch_top_movers_with_data(limit: int = 15, min_vol: float = 5e6, gainers: bool = True) -> List[Tuple[str, float, float]]:
     """🆕 v6.4.49: مثل fetch_top_movers لكن يرجع (symbol, change_pct, price).
     مفيدة لعرض نسبة الصعود + السعر في واجهة المستخدم.
+    🆕 v6.4.124: silent fallback to KuCoin when Binance blocked.
     """
     global _banned_until
     if not is_binance_available():
-        return []
+        # 🆕 v6.4.124: استخدم KuCoin
+        return _fetch_top_movers_with_data_kucoin(limit, min_vol, gainers)
     try:
         r, used_url = _binance_get(_TICKER_URL, _TICKER_URL_FALLBACK, timeout=20)
         if r is None or r.status_code != 200:
-            return []
+            # 🆕 v6.4.124: silent fallback
+            return _fetch_top_movers_with_data_kucoin(limit, min_vol, gainers)
         stable = {"USDC","BUSD","DAI","TUSD","USDP","FDUSD","USDT","EUR","GBP","TRY","BIDR","AEUR","USDS","SUSD","PAXG","USTC","SOXLB","SOXL","SOXS","UP","DOWN","BULL","BEAR"}
         coins = []
         for c in r.json():
@@ -410,24 +548,44 @@ def fetch_all_spot_symbols(min_quote_volume: float = 1e6, min_price: float = 0.0
        - يستثني العملات ذات السعر شبه الصفري
        - يحتفظ بـ cache لمدة ساعة (لا يستدعى كل دورة)
     🆕 v6.4.38: fallback تلقائي إلى data-api.binance.vision عند الحظر
+    🆕 v6.4.124: silent fallback to KuCoin allTickers عند الحظر + 30min block
     """
     global _spot_symbols_cache, _spot_symbols_ts, _banned_until
     now = time.time()
     if _spot_symbols_cache and now - _spot_symbols_ts < _SPOT_CACHE_TTL:
         return _spot_symbols_cache
+    # 🆕 v6.4.124: silent — لو Binance محظور، نروح لِـ KuCoin مباشرة
     if not is_binance_available():
+        kc_symbols = _fetch_all_spot_symbols_kucoin(min_quote_volume, min_price)
+        if kc_symbols:
+            _spot_symbols_cache = kc_symbols
+            _spot_symbols_ts = now
+            log.info(f"🌍 [SPOT UNIVERSE] {len(_spot_symbols_cache)} liquid USDT pairs loaded (KuCoin)")
+            return _spot_symbols_cache
         return _spot_symbols_cache or []
     try:
         # 1) exchangeInfo: قائمة كل الرموز المتاحة للتداول Spot
         r, used_url = _binance_get(_EXCHANGE_INFO_URL, _EXCHANGE_INFO_URL_FALLBACK,
                                     params={"permissions": "SPOT"}, timeout=30)
         if r is None:
-            log.error("❌ [BINANCE ALL FAIL] exchangeInfo")
+            # 🆕 v6.4.124: silent fallback to KuCoin
+            kc_symbols = _fetch_all_spot_symbols_kucoin(min_quote_volume, min_price)
+            if kc_symbols:
+                _spot_symbols_cache = kc_symbols
+                _spot_symbols_ts = now
+                log.info(f"🌍 [SPOT UNIVERSE] {len(_spot_symbols_cache)} liquid USDT pairs loaded (KuCoin)")
+                return _spot_symbols_cache
             return _spot_symbols_cache or []
         if r.status_code != 200:
-            log.error(f"❌ [BINANCE BLOCK?] exchangeInfo HTTP {r.status_code}")
             if r.status_code in (403, 418, 429, 451):
-                _banned_until = time.time() + 600
+                _banned_until = time.time() + 1800  # 🆕 v6.4.124: 30min
+                log.warning(f"⛔ Binance IP-block on exchangeInfo — pausing 30min, using KuCoin silently")
+            kc_symbols = _fetch_all_spot_symbols_kucoin(min_quote_volume, min_price)
+            if kc_symbols:
+                _spot_symbols_cache = kc_symbols
+                _spot_symbols_ts = now
+                log.info(f"🌍 [SPOT UNIVERSE] {len(_spot_symbols_cache)} liquid USDT pairs loaded (KuCoin)")
+                return _spot_symbols_cache
             return _spot_symbols_cache or []
         symbols_info = r.json().get("symbols", [])
         stable = {"USDC","BUSD","DAI","TUSD","USDP","FDUSD","USDT","EUR","GBP","TRY",
@@ -454,7 +612,7 @@ def fetch_all_spot_symbols(min_quote_volume: float = 1e6, min_price: float = 0.0
         r2, used_url2 = _binance_get(_TICKER_URL, _TICKER_URL_FALLBACK, timeout=30)
         if r2 is None or r2.status_code != 200:
             status2 = r2.status_code if r2 is not None else "N/A"
-            log.error(f"❌ [BINANCE BLOCK?] 24hr ticker HTTP {status2}")
+            # 🆕 v6.4.124: silent — ما نكتب log لكل طلب
             # استخدم القائمة بدون فلترة سيولة
             _spot_symbols_cache = spot_candidates
             _spot_symbols_ts = now
@@ -772,11 +930,10 @@ def get_market_tickers() -> List[Dict]:
     try:
         r, used_url = _binance_get(_TICKER_URL, _TICKER_URL_FALLBACK, timeout=20)
         if r is None or r.status_code != 200:
-            status = r.status_code if r is not None else "N/A"
-            log.error(f"❌ [BINANCE BLOCK?] get_market_tickers HTTP {status} → trying CoinGecko")
+            # 🆕 v6.4.124: silent — لا log لكل طلب
             if r is not None and r.status_code in (403, 418, 429, 451):
-                _banned_until = time.time() + 600
-                log.warning(f"⛔ Binance IP-block (HTTP {r.status_code}) — pausing 10min, using CoinGecko")
+                _banned_until = time.time() + 1800  # 30min
+                log.warning(f"⛔ Binance IP-block on ticker (get_market_tickers) — pausing 30min, using CoinGecko silently")
             # 🆕 v6.4.41: Fallback إلى CoinGecko
             cg = get_market_tickers_coingecko()
             if cg:

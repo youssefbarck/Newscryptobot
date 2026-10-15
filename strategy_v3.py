@@ -52,8 +52,9 @@ _CACHE_TTL = 60
 
 
 def _fetch_klines(symbol: str, interval: str, limit: int = 200) -> List[Dict]:
-    """يجلب الشموع من Binance (مع fallback إلى KuCoin و Coinbase).
-    🆕 v6.4.123: ثلاثة مصادر بدل اثنين — Binance → KuCoin → Coinbase.
+    """🆕 v6.4.125: يستخدم engine.fetch_klines (مصدر مركزي + cache مشترك).
+    هذا يقلل طلبات Binance من 3× (V1+V2+V3 كل واحدة لوحدها) لِـ 1× (مصدر موحد).
+    Cache محلي 60s لِـ V3 (لو نفس الرمز+الفريم طُلب مرتين في نفس الدقيقة).
     """
     try:
         cache_key = f"{symbol}_{interval}"
@@ -63,53 +64,12 @@ def _fetch_klines(symbol: str, interval: str, limit: int = 200) -> List[Dict]:
             if now - ts < _CACHE_TTL:
                 return candles
 
-        # 1) Binance (primary + fallback)
-        for base in [_BINANCE_BASE, _BINANCE_FALLBACK]:
-            try:
-                url = f"{base}/api/v3/klines"
-                r = requests.get(url, params={
-                    "symbol": f"{symbol.upper()}USDT",
-                    "interval": interval,
-                    "limit": limit
-                }, headers=_HEADERS, timeout=10)
-                if r.status_code == 200:
-                    candles = [{
-                        "open_time": int(k[0]),
-                        "open": float(k[1]),
-                        "high": float(k[2]),
-                        "low": float(k[3]),
-                        "close": float(k[4]),
-                        "volume": float(k[5]),
-                        "close_time": int(k[6])
-                    } for k in r.json()]
-                    _CACHE[cache_key] = (now, candles)
-                    return candles
-                if r.status_code in (403, 418, 429, 451):
-                    continue
-                return []
-            except Exception as e:
-                log.warning(f"V3 fetch_klines Binance {symbol} {interval} err: {e}")
-                continue
-
-        # 2) 🆕 v6.4.123: KuCoin fallback (لا يحظر IPs الخدمات السحابية)
-        try:
-            kc_candles = _fetch_klines_kucoin_v3(symbol, interval, limit)
-            if kc_candles:
-                _CACHE[cache_key] = (now, kc_candles)
-                return kc_candles
-        except Exception as e:
-            log.warning(f"V3 fetch_klines KuCoin {symbol} {interval} err: {e}")
-
-        # 3) 🆕 v6.4.123: Coinbase fallback (مصدر ثالث — لا يحظر IPs)
-        try:
-            cb_candles = _fetch_klines_coinbase_v3(symbol, interval, limit)
-            if cb_candles:
-                _CACHE[cache_key] = (now, cb_candles)
-                return cb_candles
-        except Exception as e:
-            log.warning(f"V3 fetch_klines Coinbase {symbol} {interval} err: {e}")
-
-        return []
+        # استخدم engine.fetch_klines (لديه cache + KuCoin/Coinbase fallback + Binance block 30min)
+        from engine import fetch_klines as _engine_fetch
+        candles = _engine_fetch(symbol, interval, limit)
+        if candles:
+            _CACHE[cache_key] = (now, candles)
+        return candles if candles else []
     except Exception as e:
         log.warning(f"V3 fetch_klines outer err: {e}")
         return []

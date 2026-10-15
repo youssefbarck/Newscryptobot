@@ -22,7 +22,7 @@ import btc_monitor  # 🆕 v6.4.113: مراقب BTC/ETH — صور شارت لل
 import halal_check  # 🆕 v6.4.30: نظام الأحكام الشرعية + Upstash
 
 # ═══ Config ═══
-BOT_VERSION = "v6.4.124"  # 🆕 v6.4.124: silent Binance logs + حظر 30min + رابط تحميل ثابت
+BOT_VERSION = "v6.4.125"  # 🆕 v6.4.125: دمج V1/V2/V3 في engine.fetch_klines (تقليل 66% طلبات Binance)
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 # 🆕 v6.2: قناة الأهداف المحققة (TP/SL) — موجودة مسبقاً

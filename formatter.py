@@ -96,12 +96,22 @@ def doctor_message() -> str:
     return ("🩺 <b>فحص تشخيصي:</b> البوت قادر على النشر في هذه المحادثة ✅")
 
 
+def _pick(options: list[str]) -> str:
+    """اختيار عشوائي لجملة تلقائية — مستبعدًا أي جملة فيها علامة استفهام.
+
+    فحص سلامة المنشور يمنع «؟» نهائيًا، ولو سُحبت جملة مثل
+    «تصحيح أم موجة جديدة؟ 🤔» لقتل الخبر الصحيح كليًا عند الفحص.
+    """
+    safe = [o for o in options if "?" not in o and "؟" not in o]
+    return random.choice(safe or options)
+
+
 # ------------------------------------------------------------ خبر عادي
 def format_post(item) -> str | None:
     """منشور الخبر الكامل — بلا أي روابط، جاهز كـ caption مع الصورة."""
     cat = CATEGORIES[item.category]
-    hook = random.choice(cat["hooks"])
-    why = random.choice(cat["why"])
+    hook = _pick(cat["hooks"])
+    why = _pick(cat["why"])
     facts = item.facts or []
     ar_title = esc(item.title_ar)
 
@@ -149,7 +159,7 @@ def whale_post(item) -> str:
 
     title = (f"حوت ينقل {wd['amount']:,.0f} {coin_ar} "
              f"(≈ {human_usd(wd['amount_usd'])}) من {wd['from_txt']} إلى {wd['to_txt']}")
-    hook = random.choice(cat["hooks"])
+    hook = _pick(cat["hooks"])
     why = WHALE_DIRECTION_WHY[direction]
 
     lines = [

@@ -62,23 +62,54 @@ def rel_time_ar(ts: float) -> str | None:
 
 
 # ------------------------------------------------------------ عناوين الجولة
-def batch_header(count: int, now_local: datetime, market: list[dict] | None) -> str:
+def _price_str(price: float) -> str:
+    """تنسيق السعر: 81,400 / 727.28 / 0.0817 / 0.0000112."""
+    if price >= 1000:
+        return f"{price:,.0f}"
+    if price >= 1:
+        return f"{price:,.2f}"
+    if price >= 0.01:
+        return f"{price:.4f}".rstrip("0")
+    return f"{price:.8f}".rstrip("0")  # أسعار صغيرة جدًا (بيبي ومثيلاته)
+
+
+def _mover_lines(movers: dict | None) -> list[str]:
+    """سطرا «الأكثر صعودًا/نزولًا اليوم» — لترويسة الفترة المسائية."""
+    if not movers:
+        return []
+    lines = []
+    for m in movers.get("gainers") or []:
+        change = m["change"]
+        lines.append(f"🚀 <b>الأكثر صعودًا اليوم:</b> {esc(str(m['name']))} — "
+                     f"${_price_str(m['price'])} (+{change:.1f}%)")
+    for m in movers.get("losers") or []:
+        lines.append(f"🔻 <b>الأكثر نزولًا اليوم:</b> {esc(str(m['name']))} — "
+                     f"${_price_str(m['price'])} ({m['change']:.1f}%)")
+    return lines
+
+
+def batch_header(count: int, now_local: datetime, market: list[dict] | None,
+                 movers: dict | None = None) -> str:
     lines = [random.choice(BATCH_INTROS)]
     count_txt = "أقوى خبر وصل الآن:" if count == 1 else f"أقوى {count} أخبار وصلت للتو:"
     lines.append(f"🕐 {fmt_local_time(now_local)} — {count_txt}")
-    if market:
+
+    # الفترة المسائية: بيتكوين وإيثريوم فقط + الأكثر صعودًا ونزولًا اليوم،
+    # وبقية الفترات: القائمة الثابتة المعتادة (وينطبق أيضًا لو فشل جلب المتحركين)
+    evening = _day_part(now_local.hour) == "مساءً"
+    mover_lines = _mover_lines(movers) if (evening and movers) else []
+
+    if market or mover_lines:
         lines.append("")
         lines.append("📊 <b>السوق الآن:</b>")
-        for s in market:
+        shown = market
+        if mover_lines and market:
+            shown = [s for s in market if s.get("symbol") in ("BTC", "ETH")] or market[:2]
+        for s in (shown or []):
             icon = "🟢" if s["change"] >= 0 else "🔴"
             sign = "+" if s["change"] >= 0 else ""
-            if s["price"] >= 1000:
-                price = f"{s['price']:,.0f}"
-            elif s["price"] >= 1:
-                price = f"{s['price']:,.2f}"
-            else:
-                price = f"{s['price']:.4f}".rstrip("0")
-            lines.append(f'{icon} <b>{s["name"]}</b>: ${price} ({sign}{s["change"]:.1f}%)')
+            lines.append(f'{icon} <b>{s["name"]}</b>: ${_price_str(s["price"])} ({sign}{s["change"]:.1f}%)')
+        lines.extend(mover_lines)
     return "\n".join(lines)
 
 

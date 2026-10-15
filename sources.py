@@ -441,3 +441,101 @@ async def fetch_market_stats() -> list[dict] | None:
     if not stats:
         log.warning("📊 فشل جلب أسعار السوق — ترويسة الجولة بدون أسعار")
     return stats or None
+
+
+# ------------------------- الأكثر صعودًا ونزولًا اليوم (ترويسة الفترة المسائية)
+# عملات مستقرة ومغلفة/مرابحة تُستبعد: حركتها شبه صفرية أو تكرر حركة الأصل الأم
+_MOVER_EXCLUDE = {
+    "USDT", "USDC", "DAI", "FDUSD", "USDE", "TUSD", "USDD", "PYUSD", "USDS",
+    "BUSD", "FRAX", "LUSD", "SUSD", "USDP", "GUSD", "EURC", "EURS", "USDX",
+    "USDTB", "GHO", "RLUSD", "USD1", "MIM", "CRVUSD", "PAXG", "XAUT",
+    "WBTC", "WSTETH", "STETH", "CBETH", "RETH", "WBETH", "WEETH", "METH",
+    "EZETH", "OSETH", "SWETH", "WETH", "CBBTC", "LBTC", "TBTC",
+}
+
+
+def _mover_row(symbol: str, name: str, price, change) -> dict | None:
+    sym = (symbol or "").upper()
+    if not sym or sym in _MOVER_EXCLUDE or sym in ("BTC", "ETH"):
+        return None  # بيتهما معروضان دائمًا في الترويسة فلا يتنافسا هنا
+    if not isinstance(change, (int, float)) or not isinstance(price, (int, float)):
+        return None
+    if price <= 0:
+        return None
+    return {"name": COIN_AR.get(sym) or (name or sym).strip(),
+            "symbol": sym, "price": float(price), "change": float(change)}
+
+
+def _top_movers(rows: list, per_side: int = 2) -> dict | None:
+    """أقوى صعودين وأقوى نزولين — أو None إن لم تكتمل القائمتان."""
+    parsed = [r for r in rows if r]
+    gainers = sorted((r for r in parsed if r["change"] > 0),
+                     key=lambda r: r["change"], reverse=True)[:per_side]
+    losers = sorted((r for r in parsed if r["change"] < 0),
+                    key=lambda r: r["change"])[:per_side]
+    if gainers and losers:
+        return {"gainers": gainers, "losers": losers}
+    return None
+
+
+async def _movers_from_paprika(per_side: int = 2) -> dict | None:
+    """بديل مجاني بلا مفتاح: CoinPaprika — يُقصر على أعلى 300 عملة بالترتيب."""
+    try:
+        timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get("https://api.coinpaprika.com/v1/tickers",
+                                   headers={"User-Agent": BROWSER_UA}) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json(content_type=None) or []
+    except Exception as exc:
+        log.warning("🚀🔻 بديل المتحركين CoinPaprika فشل: %s", exc)
+        return None
+    rows = []
+    for row in data:
+        if (row.get("rank") or 99999) > 300:
+            continue
+        usd = (row.get("quotes") or {}).get("USD") or {}
+        r = _mover_row(row.get("symbol"), row.get("name"),
+                       usd.get("price"), usd.get("percent_change_24h"))
+        if r:
+            rows.append(r)
+    return _top_movers(rows, per_side)
+
+
+async def fetch_top_movers(per_side: int = 2) -> dict | None:
+    """🚀🔻 الأكثر صعودًا ونزولًا خلال 24 ساعة — لترويسة الفترة المسائية.
+
+    CoinGecko (أعلى 250 عملة بالقيمة السوقية) ويُحسب الصعود/النزول محليًا،
+    وبديل CoinPaprika عند الفشل. تُرجع None إن تعذر الجلب، فتعود
+    الترويسة تلقائيًا لعرض القائمة الثابتة المعتادة.
+    """
+    headers = {"User-Agent": BROWSER_UA, "Accept": "application/json"}
+    if COINGECKO_API_KEY:
+        headers["x-cg-demo-api-key"] = COINGECKO_API_KEY
+    try:
+        timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(
+                    "https://api.coingecko.com/api/v3/coins/markets",
+                    params={"vs_currency": "usd", "order": "market_cap_desc",
+                            "per_page": 250, "page": 1,
+                            "price_change_percentage": "24h"},
+                    headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None) or []
+                    rows = []
+                    for row in data:
+                        r = _mover_row(row.get("symbol"), row.get("name"),
+                                       row.get("current_price"),
+                                       row.get("price_change_percentage_24h"))
+                        if r:
+                            rows.append(r)
+                    movers = _top_movers(rows, per_side)
+                    if movers:
+                        return movers
+                else:
+                    log.warning("🚀🔻 CoinGecko المتحركون: HTTP %s", resp.status)
+    except Exception as exc:
+        log.warning("🚀🔻 فشل جلب المتحركين من CoinGecko: %s", exc)
+    return await _movers_from_paprika(per_side)

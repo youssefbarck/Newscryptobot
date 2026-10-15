@@ -1,0 +1,70 @@
+services:
+  - type: web
+    name: crypto-bot
+    env: python
+    startCommand: python bot.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      # 🆕 v6.2.3: قناة الأهداف المحققة (TP/SL)
+      - key: TELEGRAM_CHANNEL_ID
+        value: "-1004374129744"
+      # 🆕 v6.2.3: قناة الصفقات الجديدة (entry signals)
+      - key: TELEGRAM_SIGNALS_CHANNEL_ID
+        value: "-1004468572841"
+      # 🆕 v6.2: مسح كل عملات Binance Spot (1=مفعّل / 0=فقط المفضلة + top movers)
+      - key: SCAN_ALL_SPOT
+        value: "1"
+      # 🆕 v6.2.7: حد الإشارات القصوى لكل دورة — مرفوع لـ 50 في v6.4.3
+      - key: MAX_SIGNALS_PER_CYCLE
+        value: "50"
+      # 🆕 v6.2.7: فترة المسح بالثواني (300=5دقائق، 600=10دقائق)
+      - key: SCAN_INTERVAL
+        value: "300"
+      # 🆕 v6.2.7: عتبة Score (40 افتراضي، 30 لإشارات أكثر)
+      - key: SCORE_THRESHOLD
+        value: "40"
+      # 🆕 v6.2.7: حد R/R الأدنى (0.8 = مقبول مع تحذير، 1.0 = الربح ≥ الخطر، 1.5 = ممتاز)
+      - key: MIN_RR_RATIO
+        value: "0.8"
+      # 🆕 v6.2.7: heartbeat مفعّل
+      - key: HEARTBEAT_ENABLED
+        value: "1"
+      # 🆕 v6.4.2: heartbeat كل 30 دقيقة (1800 ثانية) بدل ساعة
+      - key: HEARTBEAT_INTERVAL
+        value: "3600"
+      # 🆕 v6.4.2: تنبيه بعد كل دورة مسح (حتى لو لا إشارات)
+      - key: SCAN_SILENT_ALERTS
+        value: "1"
+      # 🆕 v6.4.3: معايير مرنة جداً (1/4 بدل 3/4، 20 بدل 50)
+      - key: MTF_MIN_BULLISH
+        value: "1"
+      - key: MTF_MIN_CONFLUENCE
+        value: "20"
+      # 🆕 v6.4.3: 60 مرشح بدل 25
+      - key: PRE_FILTER_TOP_N
+        value: "60"
+      # 🆕 v6.4: عرض مختصر للإشارة
+      - key: HQ_DISPLAY_MODE
+        value: "simple"
+      - key: HQ_DEFAULT_CAPITAL
+        value: "500"
+      - key: HQ_RISK_PER_TRADE
+        value: "0.02"
+      - key: HQ_SIGNAL_EXPIRY_HOURS
+        value: "12"
+      - key: HQ_DEDUP_HOURS
+        value: "6"
+      # 🆕 v6.4.7: نظام الخروج المبكر الذكي
+      - key: EARLY_EXIT_ENABLED
+        value: "1"
+      - key: EARLY_EXIT_MIN_PROFIT
+        value: "1.0"
+      - key: EARLY_EXIT_MIN_WEAKNESS
+        value: "40"
+      - key: EARLY_EXIT_ALERT_COOLDOWN
+        value: "14400"
+      - key: TIMEZONE
+        value: Africa/Algiers

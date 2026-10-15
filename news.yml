@@ -1,0 +1,114 @@
+name: "📰 Crypto News Bot"
+
+on:
+  schedule:
+    # كل 15 دقيقة — الخبر القوي يُرسل فور ظهوره تقريبًا بدل انتظار ساعتين.
+    # الدقائق مبعرفة عن :00/:15/:30/:45 لتفادي ازدحام طابور GitHub المجدول.
+    # منع التكرار (بصمات + تشابه) يضمن عدم وصول نفس الخبر مرتين مهما كثرت الجولات.
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "وضع التشغيل (full: إرسال فعلي | test: رسالة تجربة | dry: طباعة دون إرسال | doctor: فحص تشخيصي)"
+        type: choice
+        default: "full"
+        options:
+          - full
+          - test
+          - dry
+          - doctor
+
+permissions:
+  contents: write
+
+concurrency:
+  group: crypto-news
+  cancel-in-progress: false
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: "تحميل المستودع"
+        uses: actions/checkout@v5
+
+      - name: "إعداد بايثون 3.11"
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: "تثبيت المتطلبات"
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: "تشغيل البوت"
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CRYPTOPANIC_API_KEY: ${{ secrets.CRYPTOPANIC_API_KEY }}
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          WHALE_ALERT_API_KEY: ${{ secrets.WHALE_ALERT_API_KEY }}
+          CHANNEL_TAG: ${{ vars.CHANNEL_TAG }}
+          MAX_POSTS_PER_RUN: "3"
+          MAX_NEWS_AGE_HOURS: "6"
+          PYTHONUNBUFFERED: "1"
+        run: |
+          MODE="${{ github.event.inputs.mode || 'full' }}"
+          case "$MODE" in
+            test)   python main.py --test ;;
+            dry)    python main.py --dry-run ;;
+            doctor) python main.py --doctor ;;
+            *)      python main.py ;;
+          esac
+
+      # يرفع سجل الأخبار المرسلة بعد كل جولة — فشله مرئي (أحمر) عمدًا:
+      # ضياع هذا السجل هو ما كان يسبب تكرار الأخبار بصمت في السابق!
+      - name: "حفظ سجل منع التكرار"
+        if: always()
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          mkdir -p data .github/state
+          [ -f data/sent_news.json ] || printf '{"seen": {}}' > data/sent_news.json
+          echo "last_run_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" > .github/state/last_alive.json
+          cp -f data/sent_news.json /tmp/sent_news.json
+          cp -f .github/state/last_alive.json /tmp/last_alive.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          SAVED=0
+          for ATTEMPT in 1 2 3; do
+            if ! git fetch origin "$BRANCH" 2>/dev/null; then
+              echo "⚠️ تعذر fetch — محاولة $ATTEMPT"; sleep 6; continue
+            fi
+            git reset --hard "origin/$BRANCH"
+            # إعادة وضع الملفات بعد المزامنة — بلا rebase ولا تعارضات أبدًا
+            mkdir -p data .github/state
+            cp -f /tmp/sent_news.json data/sent_news.json
+            cp -f /tmp/last_alive.json .github/state/last_alive.json
+            git add data/sent_news.json .github/state/last_alive.json
+            if git diff --cached --quiet; then
+              echo "لا تغيير في السجل — لا حاجة لحفظ"
+              SAVED=1
+              break
+            fi
+            git commit -m "chore(bot): sent $(date -u +%Y-%m-%dT%H:%M) [skip ci]"
+            if git push origin HEAD:"$BRANCH"; then
+              SAVED=1
+              echo "✅ سجل منع التكرار رُفع للمستودع — الجولات القادمة لن تعيد نفس الأخبار"
+              break
+            fi
+            echo "⚠️ الرفع رُفض (المستودع تحرك لحظة الرفع) — أعيد المزامنة وأحاول مجددًا"
+            sleep 6
+          done
+          COUNT=$(python3 -c "import json;print(len(json.load(open('/tmp/sent_news.json')).get('seen',{})))" 2>/dev/null || echo 0)
+          if [ "$SAVED" = "1" ]; then
+            echo "🧠 بصمات الذاكرة المحفوظة: $COUNT"
+            echo "**🧠 منع التكرار:** $COUNT بصمة محفوظة في المستودع ✅" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "🚨 فشل رفع سجل منع التكرار بعد 3 محاولات — الجولة القادمة ستعيد أخبارًا سابقة!"
+            echo "🚨 **منع التكرار:** فشل رفع السجل — افتح Settings ← Actions ← General ← Workflow permissions واختر Read and write" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi

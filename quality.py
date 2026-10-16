@@ -78,12 +78,51 @@ def is_banned_title_ar(title_ar: str) -> bool:
     return False
 
 
+# ---------------------------------------- تطبيع المبالغ وبقايا الترجمة في العناوين
+# ‏$184 Million / $1.5B / $78M التي يتركها المترجم داخل العنوان العربي تُحوَّل عربيةً
+_USD_TITLE_RE = re.compile(
+    r"\$\s?([\d,]+(?:\.\d+)?)\s*(trillion|billion|million|thousand|bn|b|m|k|t)?(?![A-Za-z])",
+    re.I)
+# كلمات إنجليزية عامة ينساها المترجم داخل نص عربي — تُحذف ولا تضر بالأسماء والرموز
+_EN_RESIDUE_RE = re.compile(
+    r"\s*\b(arrives?|arrival|amid|amidst|despite|records?|recorded|posts?|posted|"
+    r"loses?|lost|loss|safe|safely|worth|inflows?|outflows?|buying|bought|buys?|"
+    r"selling|sells?|more|as|the)\b", re.I)
+# تراكيب عربية مكسورة شائعة ناتجة عن الترجمة الحرفية — تُصحَّح بتراكيب سليمة
+_AR_COLLOCATION_FIXES = [
+    (re.compile(r"التدفق الوارد"), "تدفق وارد قوي"),
+    (re.compile(r"تدفق الوارد"), "مع تدفق وارد قوي"),
+    (re.compile(r"،\s*(\S+)\s+بأمان\s*$"), r"، مع بقاء \1 بأمان"),
+]
+
+
+def _usd_to_ar(m: "re.Match") -> str:
+    """$184 million → «184 مليون دولار» — داخل العنوان العربي."""
+    n = float(m.group(1).replace(",", ""))
+    suffix = (m.group(2) or "").lower()
+    v = n * _MULT.get(suffix, 1)
+    for scale, unit in ((1e12, "تريليون دولار"), (1e9, "مليار دولار"),
+                        (1e6, "مليون دولار"), (1e3, "ألف دولار")):
+        if v >= scale:
+            x = v / scale
+            xs = f"{x:.1f}".rstrip("0").rstrip(".")
+            return f"{xs} {unit}"
+    return f"{v:g} دولار"
+
+
 def clean_title_ar(title: str) -> str:
-    """تنظيف العنوان المترجم من العيوب وبقايا placeholders."""
+    """تنظيف العنوان المترجم: تطبيع المبالغ + إزالة بقايا الترجمة + العيوب العامة."""
     if not title:
         return ""
     title = re.sub(r"\[\[\s*\d+\s*\]\]", "", title)
     title = re.sub(r"§\d+§?", "", title)
+    # ① تطبيع المبالغ المتبقية إنجليزيةً: $184 Million / $1.5B / $78M ← عربية
+    title = _USD_TITLE_RE.sub(_usd_to_ar, title)
+    # ② إزالة بقايا كلمات إنجليزية عامة تركها المترجم داخل عنوان عربي
+    title = _EN_RESIDUE_RE.sub(" ", title)
+    # ③ تصحيح التراكيب الحرفية المكسورة الشائعة
+    for rx, rep in _AR_COLLOCATION_FIXES:
+        title = rx.sub(rep, title)
     for pat in PROMO_PATTERNS_AR + PROMO_PATTERNS_EN:
         title = re.sub(pat, "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s{2,}", " ", title).strip()
@@ -132,15 +171,36 @@ def _max_usd(title: str) -> float:
     return best
 
 
+# تسمية المبلغ حسب سياقه في العنوان — خسارة ليست «قيمة تقديرية»!
+_VALUE_LABELS = [
+    (re.compile(r"\b(lose[sd]?|lost|loss\w*|shed[sd]?|wip\w+|plunge[sd]?|slump\w*|down\s+\$)",
+                re.I), "الخسارة"),
+    (re.compile(r"\b(inflows?|deposits?|inbound)\b", re.I), "التدفق الوارد"),
+    (re.compile(r"\b(outflows?|withdraw\w*|outbound)\b", re.I), "التدفق الصادر"),
+    (re.compile(r"\b(raise[sd]?|raising|funding|fundrais\w*|invest[sd]?|investment|backed)\b",
+                re.I), "التمويل"),
+    (re.compile(r"\b(buys?|buying|bought|purchas\w+|acquire[sd]?|acquisition)\b", re.I), "الشراء"),
+    (re.compile(r"\b(burn[sd]?|burning)\b", re.I), "الحرق"),
+    (re.compile(r"\b(fine[sd]?|fined|penalt\w+|settle[sd]?)\b", re.I), "الغرامة"),
+]
+_VALUE_CONTEXT_WINDOW = 60  # حروف قبل/بعد المبلغ لتحديد نوعه
+
+
 def extract_facts(title: str) -> list[str]:
-    """استخراج الأرقام من العنوان: القيمة بالدولار + الكميات."""
+    """استخراج الأرقام من العنوان: القيمة بالدولار (بتسمية سياقية) + الكميات."""
     facts: list[str] = []
     for m in _USD_RE.finditer(title):
         raw = m.group(1).replace(",", "")
         mult = _MULT.get((m.group(2) or "").lower(), 1)
         value = float(raw) * mult
         if value >= 1_000_000:
-            facts.append(f"💰 القيمة التقديرية: {human_usd(value)}")
+            ctx = title[max(0, m.start() - _VALUE_CONTEXT_WINDOW): m.end() + _VALUE_CONTEXT_WINDOW]
+            label = "القيمة التقديرية"
+            for rx, name in _VALUE_LABELS:
+                if rx.search(ctx):
+                    label = name
+                    break
+            facts.append(f"💰 {label}: {human_usd(value)}")
     for m in _COIN_AMOUNT_RE.finditer(title):
         sym = m.group(2).upper()
         amount = m.group(1)

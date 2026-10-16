@@ -90,7 +90,7 @@ def _mover_lines(movers: dict | None) -> list[str]:
 
 def batch_header(count: int, now_local: datetime, market: list[dict] | None,
                  movers: dict | None = None) -> str:
-    lines = [random.choice(BATCH_INTROS)]
+    lines = [_pick(BATCH_INTROS, "batch_intro")]
     count_txt = "أقوى خبر وصل الآن:" if count == 1 else f"أقوى {count} أخبار وصلت للتو:"
     lines.append(f"🕐 {fmt_local_time(now_local)} — {count_txt}")
 
@@ -127,22 +127,36 @@ def doctor_message() -> str:
     return ("🩺 <b>فحص تشخيصي:</b> البوت قادر على النشر في هذه المحادثة ✅")
 
 
-def _pick(options: list[str]) -> str:
-    """اختيار عشوائي لجملة تلقائية — مستبعدًا أي جملة فيها علامة استفهام.
+# ذاكرة آخر جملة سُحبت لكل مفتاح — تمنع تكرار نفس القالب في منشورين متتاليين
+_LAST_PICK: dict[str, str] = {}
+
+
+def _pick(options: list[str], key: str = "") -> str:
+    """اختيار عشوائي لجملة تلقائية — بلا علامات استفهام وبلا تكرار متتالٍ.
 
     فحص سلامة المنشور يمنع «؟» نهائيًا، ولو سُحبت جملة مثل
     «تصحيح أم موجة جديدة؟ 🤔» لقتل الخبر الصحيح كليًا عند الفحص.
+    وذاكرة key تضمن ألا تتكرر نفس الجملة حرفيًا بين منشورين متتاليين
+    (كان القارئ يرى نفس «باختصار» مرتين متتاليتين لأن كل فئة كان بقالبَين فقط).
     """
     safe = [o for o in options if "?" not in o and "؟" not in o]
-    return random.choice(safe or options)
+    pool = safe or list(options)
+    if key and len(pool) > 1:
+        trimmed = [o for o in pool if o != _LAST_PICK.get(key)]
+        if trimmed:
+            pool = trimmed
+    choice = random.choice(pool)
+    if key:
+        _LAST_PICK[key] = choice
+    return choice
 
 
 # ------------------------------------------------------------ خبر عادي
 def format_post(item) -> str | None:
     """منشور الخبر الكامل — بلا أي روابط، جاهز كـ caption مع الصورة."""
     cat = CATEGORIES[item.category]
-    hook = _pick(cat["hooks"])
-    why = _pick(cat["why"])
+    hook = _pick(cat["hooks"], f"{item.category}:hook")
+    why = _pick(cat["why"], f"{item.category}:why")
     facts = item.facts or []
     ar_title = esc(item.title_ar)
 
@@ -190,7 +204,7 @@ def whale_post(item) -> str:
 
     title = (f"حوت ينقل {wd['amount']:,.0f} {coin_ar} "
              f"(≈ {human_usd(wd['amount_usd'])}) من {wd['from_txt']} إلى {wd['to_txt']}")
-    hook = _pick(cat["hooks"])
+    hook = _pick(cat["hooks"], "whale:hook")
     why = WHALE_DIRECTION_WHY[direction]
 
     lines = [
